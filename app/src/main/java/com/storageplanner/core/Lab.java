@@ -78,7 +78,8 @@ public final class Lab {
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
         long ms = (System.nanoTime() - t0) / 1000000;
         if (raw == null) { o.line("  ! the face detector is not available on this phone"); return sh; }
-        o.line(f("  detector (YuNet, on a copy at most %d px) returned %d face(s) in %d ms", Faces.DETECT_EDGE, raw.length / Faces.F, ms));
+        o.line(f("  detector (YuNet, on a copy at most %d px; candidates scoring %.2f-%.2f looked at again on a full-resolution crop) returned %d face(s) in %d ms",
+                Faces.DETECT_EDGE, Faces.LOOK_AGAIN, PhotoQuality.MIN_FACE_CONFIDENCE, raw.length / Faces.F, ms));
         double big = biggest(raw);
         List<float[]> kept = new ArrayList<float[]>();
         for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) {

@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TC="${TOOLCHAIN:?set TOOLCHAIN to the folder with android-34.jar android-29.jar r8.jar aapt2 java17}"
 AJ="$TC/android-34.jar"; AJ29="$TC/android-29.jar"; R8="$TC/r8.jar"; AAPT2="$TC/aapt2"; J17="$TC/java17/bin/java"
 OUT="$HERE/build/offline"; KEYS="${KEYSTORE_DIR:-$HERE/../keystore}"
-VERSION_CODE="${VERSION_CODE:-9}"; VERSION_NAME="${VERSION_NAME:-1.8}"
+VERSION_CODE="${VERSION_CODE:-10}"; VERSION_NAME="${VERSION_NAME:-1.8.1}"
 rm -rf "$OUT"; mkdir -p "$OUT/classes" "$OUT/dex" "$OUT/res"
 
 echo "[1/6] javac"
