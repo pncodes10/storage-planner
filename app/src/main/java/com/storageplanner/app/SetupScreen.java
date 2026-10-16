@@ -97,8 +97,13 @@ public final class SetupScreen extends Screen {
         } });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2); lp.rightMargin = dp(12);
         row.addView(analyzeBtn, lp); row.addView(cancelBtn);
+        Button lab = Ui.button(a, "Algorithm Lab (debug)", false);
+        lab.setContentDescription("Algorithm Lab: try the picture algorithms on pictures you pick, with a log for debugging");
+        lab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(20);
         L.addView(row, rl);
+        LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
+        L.addView(lab, labl);
         Ui.add(L, Ui.text(a, "Runs in the background. You can switch apps; you'll get a notification when your plan is ready.", 14, Ui.text2, false), 8);
 
         progressBar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);

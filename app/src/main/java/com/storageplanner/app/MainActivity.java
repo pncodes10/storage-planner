@@ -176,6 +176,7 @@ public final class MainActivity extends Activity {
             com.storageplanner.core.FileItem f = Session.fileByRel.get(d.substring(7));
             return f != null ? new ViewerScreen(this, f) : null;
         }
+        if (d.equals("lab")) return new LabScreen(this);
         if (d.startsWith("pics:")) return Session.pictures.containsKey(d.substring(5)) ? PicturesScreen.category(this, d.substring(5)) : null;
         if (d.startsWith("search:")) return PicturesScreen.search(this, d.substring(7));
         if (d.startsWith("compare:")) {
@@ -311,6 +312,35 @@ public final class MainActivity extends Activity {
                 public void run() { AnalysisRunner.run(app, targetGb, measure, AnalysisRunner.progress(null)); }
             }, "analysis").start();
         }
+    }
+
+    // ------------------------------------------------------------------ Algorithm Lab: picture picker
+    private static final int REQ_PICK = 4711;
+    private LabScreen picking;
+
+    void pickImages(LabScreen s) {
+        picking = s;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try { startActivityForResult(i, REQ_PICK); }
+        catch (Throwable t) {
+            try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("image/*")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), REQ_PICK); }
+            catch (Throwable t2) { toast("No file picker on this phone."); }
+        }
+    }
+
+    @Override protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req != REQ_PICK || res != RESULT_OK || data == null) return;
+        java.util.List<android.net.Uri> uris = new ArrayList<android.net.Uri>();
+        if (data.getClipData() != null)
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) uris.add(data.getClipData().getItemAt(i).getUri());
+        else if (data.getData() != null) uris.add(data.getData());
+        LabScreen s = picking;
+        if (s == null && !stack.isEmpty() && top() instanceof LabScreen) s = (LabScreen) top();   // the app was restarted meanwhile
+        picking = null;
+        if (s != null) s.picked(uris);
     }
 
     // ------------------------------------------------------------------ report

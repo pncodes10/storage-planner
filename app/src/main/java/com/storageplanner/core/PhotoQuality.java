@@ -146,21 +146,32 @@ public final class PhotoQuality {
      * focus or light difference between near-identical shots.
      */
     public static double[] scores(List<Q> g) {
+        double[][] t = terms(g);
+        double[] s = new double[g.size()];
+        for (int i = 0; i < s.length; i++) for (double x : t[i]) s[i] += x;
+        return s;
+    }
+
+    /** Names of the parts of a score, in the order terms() returns them. */
+    public static final String[] TERMS = {"eyes open (3 per face)", "people missing or blinking (-3 each)", "face sharpness", "overall sharpness", "lighting"};
+
+    /** The parts that add up to each shot's score (see TERMS); used by scores() and shown by the Algorithm Lab. */
+    public static double[][] terms(List<Q> g) {
         int maxFaces = 0; double maxFS = 0, maxS = 0;
         for (Q q : g) { maxFaces = Math.max(maxFaces, q.faces); maxFS = Math.max(maxFS, q.faceSharp); maxS = Math.max(maxS, q.sharp); }
-        double[] s = new double[g.size()];
-        for (int i = 0; i < s.length; i++) {
+        double[][] t = new double[g.size()][5];
+        for (int i = 0; i < g.size(); i++) {
             Q q = g.get(i);
-            double v = 0, rs = maxS > 0 && q.sharp > 0 ? q.sharp / maxS : 0;
+            double rs = maxS > 0 && q.sharp > 0 ? q.sharp / maxS : 0;
             if (maxFaces > 0) {
-                for (int k = 0; k < q.faces; k++) v += 3.0 * openness(q.face[k * FACE_FIELDS + 3]);
-                v -= 3.0 * maxFaces;                                // people missing from this shot count as blinking
-                v += 1.0 * (q.faceSharp > 0 && maxFS > 0 ? q.faceSharp / maxFS : 0) + 0.5 * rs;
-            } else v += 1.5 * rs;
-            v += 1.0 * exposure(q);
-            s[i] = v;
+                for (int k = 0; k < q.faces; k++) t[i][0] += 3.0 * openness(q.face[k * FACE_FIELDS + 3]);
+                t[i][1] = -3.0 * maxFaces;                          // people missing from this shot count as blinking
+                t[i][2] = 1.0 * (q.faceSharp > 0 && maxFS > 0 ? q.faceSharp / maxFS : 0);
+                t[i][3] = 0.5 * rs;
+            } else t[i][3] = 1.5 * rs;
+            t[i][4] = 1.0 * exposure(q);
         }
-        return s;
+        return t;
     }
 
     /** Index of the best shot. */

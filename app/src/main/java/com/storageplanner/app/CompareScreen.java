@@ -120,6 +120,11 @@ public final class CompareScreen extends Screen {
         warn = Ui.text(a, "", 13, Ui.night ? 0xFFF2B8B5 : 0xFFB3261E, true);
         root.addView(warn, new LinearLayout.LayoutParams(-1, -2));
 
+        Button debug = Ui.button(a, "Debug this choice in the Algorithm Lab", false);
+        debug.setContentDescription("Open all " + g.members.size() + " copies in the Algorithm Lab to see every number behind the suggestion");
+        debug.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(LabScreen.with(a, g.members)); } });
+        LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(-1, -2); dl.topMargin = dp(6);
+        root.addView(debug, dl);
         apply = Ui.button(a, "", true);
         apply.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {

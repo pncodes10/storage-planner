@@ -1,5 +1,5 @@
 PASS v2 signature verifies (apksigtool): WARNING: THIS IS A PROTOTYPE; DO NOT USE IN PRODUCTION!
-PASS package / SDK: com.storageplanner min 26 target 34 v1.6
+PASS package / SDK: com.storageplanner min 26 target 34 v1.7
 PASS permissions exactly as declared: FOREGROUND_SERVICE, FOREGROUND_SERVICE_DATA_SYNC, MANAGE_EXTERNAL_STORAGE, PACKAGE_USAGE_STATS, POST_NOTIFICATIONS, QUERY_ALL_PACKAGES, READ_EXTERNAL_STORAGE, WAKE_LOCK, WRITE_EXTERNAL_STORAGE
 PASS no INTERNET permission
 PASS single exported launcher activity: ['com.storageplanner.app.MainActivity']
@@ -7,14 +7,14 @@ PASS exactly one non-exported dataSync service, no receivers: services ['com.sto
 PASS exactly one private file provider (not exported, per-URI read grants, no permission-less paths): providers ['com.storageplanner.app.FileAccessProvider'] authority=com.storageplanner.files exported=false grantUriPermissions=true
 PASS zip entries: AndroidManifest.xml, classes.dex, res/drawable/ic_launcher.png, resources.arsc + 8 text-reader files
 PASS text-reader files are the pinned, unmodified releases (tesseract.js 7.0.0, core 7.0.0, tessdata_fast eng)
-PASS resources.arsc stored + 4-byte aligned: offset 5273244
-PASS dex contains exactly the compiled classes: 387 classes; extra: []
+PASS resources.arsc stored + 4-byte aligned: offset 5292852
+PASS dex contains exactly the compiled classes: 427 classes; extra: []
 PASS WebView only loads the bundled text-reader page: Landroid/webkit/WebView;->loadUrl(Ljava/lang/String;)V
 PASS WebView used only by OcrEngine: Lcom/storageplanner/app/OcrEngine$2;, Lcom/storageplanner/app/OcrEngine$3;, Lcom/storageplanner/app/OcrEngine$4;, Lcom/storageplanner/app/OcrEngine;
 PASS no code that network
 PASS no code that deletes / renames files
 PASS no code that runs processes
 PASS no code that loads code / reflection
-PASS file writes (expected: report export only): Ljava/io/FileOutputStream;-><init>(Ljava/io/File;)V; Ljava/io/RandomAccessFile;-><init>(Ljava/lang/String; Ljava/lang/String;)V
-PASS external API calls: 1929 distinct
+PASS file writes (expected: report export only): Ljava/io/FileOutputStream;-><init>(Ljava/io/File; Z)V; Ljava/io/FileOutputStream;-><init>(Ljava/io/File;)V; Ljava/io/RandomAccessFile;-><init>(Ljava/lang/String; Ljava/lang/String;)V
+PASS external API calls: 1960 distinct
 AUDIT OK

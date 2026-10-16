@@ -9,12 +9,14 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 TC="${TOOLCHAIN:?set TOOLCHAIN to the folder with android-34.jar android-29.jar r8.jar aapt2 java17}"
 AJ="$TC/android-34.jar"; AJ29="$TC/android-29.jar"; R8="$TC/r8.jar"; AAPT2="$TC/aapt2"; J17="$TC/java17/bin/java"
 OUT="$HERE/build/offline"; KEYS="${KEYSTORE_DIR:-$HERE/../keystore}"
-VERSION_CODE="${VERSION_CODE:-7}"; VERSION_NAME="${VERSION_NAME:-1.6}"
+VERSION_CODE="${VERSION_CODE:-8}"; VERSION_NAME="${VERSION_NAME:-1.7}"
 rm -rf "$OUT"; mkdir -p "$OUT/classes" "$OUT/dex" "$OUT/res"
 
 echo "[1/6] javac"
-javac -source 8 -target 8 -bootclasspath "$AJ" -encoding UTF-8 -Xlint:-options -nowarn \
-      -d "$OUT/classes" $(find "$HERE/app/src/main/java" -name "*.java") 2>&1 | grep -v "JAVA_TOOL_OPTIONS" || true
+if ! javac -source 8 -target 8 -bootclasspath "$AJ" -encoding UTF-8 -Xlint:-options -nowarn \
+      -d "$OUT/classes" $(find "$HERE/app/src/main/java" -name "*.java") > "$OUT/javac.log" 2>&1; then
+  grep -v "JAVA_TOOL_OPTIONS" "$OUT/javac.log"; echo "javac failed: no APK built"; exit 1
+fi
 test -f "$OUT/classes/com/storageplanner/app/MainActivity.class"
 
 echo "[2/6] strip MethodParameters (JDK 21 javac vs D8 1.5)"

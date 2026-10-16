@@ -4,7 +4,7 @@ An Android app that scans your phone and builds a plan to reach a storage target
 
 ## Install
 
-1. Copy `StoragePlanner-1.6.apk` to the phone and open it. Allow "Install unknown apps" for your file manager or browser if asked. Play Protect may warn about an unknown developer; choose **Install anyway**. It installs over 1.0–1.5 as an update (same signing key); your Keep decisions are kept.
+1. Copy `StoragePlanner-1.7.apk` to the phone and open it. Allow "Install unknown apps" for your file manager or browser if asked. Play Protect may warn about an unknown developer; choose **Install anyway**. It installs over 1.0–1.6 as an update (same signing key); your Keep decisions are kept.
 2. Open **Storage Planner**. Then:
    - **Grant all files access.** This is needed to read photos, videos, downloads and WhatsApp media.
    - **Grant usage access** (optional). This adds app sizes, caches, and apps you haven't opened in months. If the toggle is greyed out, go to Settings → Apps → Storage Planner → ⋮ → **Allow restricted settings**, then try again.
@@ -232,6 +232,42 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 - **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
 - **The app's own reader page** (`tools/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
 
+## Algorithm Lab: debug tool (new in 1.7)
+
+**Algorithm Lab (debug)** is on the start screen and at the bottom of the plan. On the compare screen,
+**Debug this choice in the Algorithm Lab** opens the Lab with every copy of that group already loaded.
+
+1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
+   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
+2. **Run on the selected picture:**
+
+| Button | What it shows |
+|---|---|
+| Run everything | All of the below, plus the group checks when two or more pictures are picked |
+| Face detection | Exactly what the best-shot check sees (1280 px, the phone's detector): every face with position, eye distance and confidence, and whether it was counted. Faces are outlined on the picture |
+| Faces: other sizes and tilts | The same detector at 640, 1280 and 2048 px, and with the picture turned ±10° and ±20°. Shows whether face size or a tilted head made it miss a face |
+| Eyes open or closed | For each face: the eyes-open probability, each eye at the 7 positions tried, how much it counts in the score, and the eye patches the model looked at |
+| Sharpness / blur | The focus number used to compare shots, the blur score used for "possibly blurry", and each face's focus |
+| Lighting | Brightness, blown-out and black share, and each penalty that makes up the lighting score |
+| Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
+| QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
+| Read text | Every word the reader found, with its confidence, and what the text rules decided |
+
+3. **Run on all picked pictures:**
+
+| Button | What it shows |
+|---|---|
+| Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
+| Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
+| Exact duplicate check | SHA-256 of each file |
+
+4. **Log.**
+   - Every line, with the phone model, Android and WebView versions and the app version, is written to a log in the app's private storage.
+   - **Save log** copies it to `Download/StoragePlanner/lab-log-<time>.txt`, **Share log** sends that copy, and **Clear log** starts a new one.
+   - Picked pictures are copied into the app's cache (20 slots, reused); the originals are not touched.
+
+The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the scan's numbers. `LabTest` runs every tool on real pictures on the desktop.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -283,20 +319,21 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **ImageFeatures:** perceptual hash and sharpness.
   - **PhotoQuality / EyeState:** which near-identical shot is better (faces, eyes, focus, light).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
+  - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
   - **UnitBuilder:** options.
   - **Planner:** tiered planner.
   - **Report:** output.
   - **ResultStore:** versioned binary format for saved results (with checksum).
-- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
+- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; LabScreen and LabLog are the Algorithm Lab; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
   - **AndroidPlatform:** reads files and system stats.
   - **Calibrator:** on-device measurement.
   - **Ssim:** matches scikit-image to 1e-14.
   - **MainActivity:** the UI, back stack and its restore after process death.
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), picture-category (CategoryTest, TextRulesTest) and reader-bridge (OcrBridgeTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`: pinned hashes of the text-reader files (checked by the audit).

@@ -9,7 +9,8 @@ package com.storageplanner.core;
 public final class EyeState {
     private EyeState() {}
 
-    static final int PW = 24, PH = 16, CELL = 4, BINS = 8, NF = 304, NH = 16;
+    public static final int PW = 24, PH = 16;
+    static final int CELL = 4, BINS = 8, NF = 304, NH = 16;
     static final double SPAN_W = 0.75, SPAN_H = 0.5;
 
     private static final float[] W = load();

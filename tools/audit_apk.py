@@ -124,7 +124,8 @@ BAD = {
 loads = sorted(set(r for r in ext if "WebView;->loadUrl" in r))
 check("WebView only loads the bundled text-reader page", loads == ["Landroid/webkit/WebView;->loadUrl(Ljava/lang/String;)V"], "; ".join(loads))
 web_users = sorted(set(c.get_name() for c in d.get_classes() for m in c.get_methods() if m.get_code()
-                       for ins in m.get_code().get_bc().get_instructions() if ins.get_name().startswith("invoke") and "Landroid/webkit/WebView;" in ins.get_output()))
+                       for ins in m.get_code().get_bc().get_instructions() if ins.get_name().startswith("invoke") and "Landroid/webkit/WebView;" in ins.get_output()
+                       and "getCurrentWebViewPackage" not in ins.get_output()))   # reading the WebView version for the Lab log is allowed
 check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/app/OcrEngine") for n in web_users), ", ".join(web_users))
 for k, pat in BAD.items():
     hits = [r for r in ext if re.search(pat, r)]

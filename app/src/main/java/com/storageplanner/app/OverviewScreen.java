@@ -84,6 +84,11 @@ public final class OverviewScreen extends Screen {
                 + "\n• Videos: high-bitrate H.264 assumed to shrink 45% as HEVC (conservative).", 14, Ui.text2, false), 6);
 
         LinearLayout row = Ui.row(a);
+        Button labBtn = Ui.button(a, "Algorithm Lab (debug)", false);
+        labBtn.setContentDescription("Algorithm Lab: try the picture algorithms on pictures you pick, with a log for debugging");
+        labBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
+        LinearLayout.LayoutParams lab0 = new LinearLayout.LayoutParams(-1, -2); lab0.topMargin = dp(16);
+        content.addView(labBtn, lab0);
         Button save = Ui.button(a, "Save report", true);
         save.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.saveReport(); } });
         Button share = Ui.button(a, "Share", false);
