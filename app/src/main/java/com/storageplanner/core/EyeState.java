@@ -39,6 +39,24 @@ public final class EyeState {
         return sum / n;
     }
 
+    /**
+     * Same, from the two eye positions a landmark detector gives (x1,y1 = the eye on the image's left).
+     * Each eye is looked at where it really is, so a tilted head still gets both eyes in the patch.
+     */
+    public static double openProbability(int[] luma, int w, int h, double x1, double y1, double x2, double y2) {
+        double d = Math.hypot(x2 - x1, y2 - y1);
+        if (d < 1) return 0;
+        double sum = 0; int n = 0;
+        for (double[] o : SHIFTS) {
+            double dx = o[0] * d, dy = o[1] * d, sc = o[2];
+            double mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+            double ax = mx + (x1 - mx) * sc + dx, ay = my + (y1 - my) * sc + dy, bx = mx + (x2 - mx) * sc + dx, by = my + (y2 - my) * sc + dy;
+            sum += eye(luma, w, h, ax, ay, d * sc, false) + eye(luma, w, h, bx, by, d * sc, true);
+            n += 2;
+        }
+        return sum / n;
+    }
+
     /** {dx, dy (eye distances), scale} */
     static final double[][] SHIFTS = {{0, 0, 1}, {0, -0.06, 1}, {0, 0.06, 1}, {-0.06, 0, 1}, {0.06, 0, 1}, {0, 0, 0.92}, {0, 0, 1.08}};
 

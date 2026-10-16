@@ -105,12 +105,36 @@ public final class JvmPlatform implements Platform {
         } catch (Exception e) { return null; }
     }
 
+    private static com.storageplanner.core.FaceNet net;
+    private static boolean netTried;
+
+    /** The app's face detector (YuNet, from app/src/main/assets/faces/yunet.bin or -Dfacemodel=...); null if missing. */
+    static synchronized com.storageplanner.core.FaceNet net() {
+        if (!netTried) {
+            netTried = true;
+            File m = new File(System.getProperty("facemodel", "app/src/main/assets/faces/yunet.bin"));
+            if (!m.exists()) m = new File(System.getProperty("user.dir"), "../app/src/main/assets/faces/yunet.bin");
+            try { if (m.exists()) net = com.storageplanner.core.FaceNet.load(Files.readAllBytes(m.toPath())); } catch (Exception e) { net = null; }
+        }
+        return net;
+    }
+
     /**
-     * Stand-in for Android's face detector: faces listed in a "<photo>.faces" sidecar (one face per line:
-     * x y eyeDistance confidence, as fractions of the decoded width/height), written by the test that
-     * built the photo. No sidecar = no faces.
+     * Faces with the same detector the phone runs (YuNet). With -Dfaces=sidecar, or when the model is missing,
+     * the "<photo>.faces" sidecars are used instead (see otherFaces).
      */
     public float[] faces(String path, int[] argb, int w, int h) {
+        if (!"sidecar".equals(System.getProperty("faces")) && net() != null) return com.storageplanner.core.Faces.detect(net(), argb, w, h);
+        return otherFaces(path, argb, w, h);
+    }
+
+    public String otherFacesName() { return "sidecar file (test stand-in)"; }
+
+    /**
+     * Faces listed in a "<photo>.faces" sidecar (one face per line: x y eyeDistance confidence, as fractions of the
+     * decoded width/height), written by the test that built the photo. No sidecar = no faces.
+     */
+    public float[] otherFaces(String path, int[] argb, int w, int h) {
         File side = new File(path + ".faces");
         if (!side.exists()) return new float[0];
         try {
@@ -123,7 +147,7 @@ public final class JvmPlatform implements Platform {
             }
             float[] out = new float[fs.size() * 4];
             for (int i = 0; i < fs.size(); i++) System.arraycopy(fs.get(i), 0, out, i * 4, 4);
-            return out;
+            return com.storageplanner.core.Faces.fromMidpoints(out);
         } catch (Exception e) { return new float[0]; }
     }
 

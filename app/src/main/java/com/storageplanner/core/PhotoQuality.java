@@ -13,8 +13,13 @@ import java.util.List;
 public final class PhotoQuality {
     private PhotoQuality() {}
 
-    /** Detector confidence needed to count a face (android.media.FaceDetector.Face.CONFIDENCE_THRESHOLD). */
-    public static final double MIN_FACE_CONFIDENCE = 0.4;
+    /**
+     * Detector score needed to count a face. YuNet scores: real faces 0.8-0.95 even when small or tilted; at 0.7
+     * the test pictures without faces gave 1 false face in 271 (0.5 gave 13) and no real face was lost.
+     */
+    public static final double MIN_FACE_CONFIDENCE = 0.7;
+    /** A face whose eyes are closer together than this share of the biggest face's is a bystander and not counted. */
+    public static final double BACKGROUND = 0.3;
     /** A face whose two eyes average below this is reported as "eyes closed". */
     public static final double OPEN = 0.5;
     static final int FACE_FIELDS = 5;
@@ -54,11 +59,14 @@ public final class PhotoQuality {
         q.sharp = sharpness(luma, w, h);
         List<float[]> kept = new ArrayList<float[]>();
         double eyes = 0, fs = 0, fl = 0;
+        double biggest = 0;                                     // people far in the background don't decide the shot
         if (faces != null)
-            for (int i = 0; i + 3 < faces.length; i += 4) {
+            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) if (faces[i + 3] >= MIN_FACE_CONFIDENCE) biggest = Math.max(biggest, faces[i + 2]);
+        if (faces != null)
+            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) {
                 double mx = faces[i], my = faces[i + 1], d = faces[i + 2], conf = faces[i + 3];
-                if (conf < MIN_FACE_CONFIDENCE || d < 6 || mx < 0 || my < 0 || mx >= w || my >= h) continue;
-                double p = EyeState.openProbability(luma, w, h, mx, my, d);
+                if (conf < MIN_FACE_CONFIDENCE || d < 6 || d < BACKGROUND * biggest || mx < 0 || my < 0 || mx >= w || my >= h) continue;
+                double p = EyeState.openProbability(luma, w, h, faces[i + 4], faces[i + 5], faces[i + 6], faces[i + 7]);
                 double[] st = faceStats(luma, w, h, mx, my, d);
                 eyes += p; fs += st[0]; fl += st[1];
                 if (p >= OPEN) q.openFaces++;

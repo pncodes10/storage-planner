@@ -27,10 +27,17 @@ public interface Platform {
     int[] argb(String path, int longEdge, int[] dims);
 
     /**
-     * Faces in a decoded picture (from argb): 4 floats per face {x between the eyes, y, eye distance,
-     * detector confidence 0..1}, in the picture's pixels. Empty array if none; null if detection is unavailable.
+     * Faces in a decoded picture (from argb), in the picture's pixels, Faces.F floats per face
+     * {x between the eyes, y, eye distance, score 0..1, eye-on-the-left x, y, other eye x, y}.
+     * Empty array if none; null if detection is unavailable.
      */
     float[] faces(String path, int[] argb, int w, int h);
+
+    /** A second face detector for comparison in the Algorithm Lab (same format as faces), or null if there is none. */
+    float[] otherFaces(String path, int[] argb, int w, int h);
+
+    /** Name of the detector behind otherFaces, for the Lab. */
+    String otherFacesName();
 
     /**
      * Words in a decoded picture, read on the device (null when no text reader is available or it failed).

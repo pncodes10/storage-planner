@@ -190,20 +190,21 @@ public final class PhotoQualityTest {
             g.dispose();
             return out;
         }
-        /** What a phone's detector would report: eye midpoint and distance with ~6% error, confidence 0.5-0.9. */
-        float[] detector(Random rnd, int unused) {
+        /** What a detector would report: eye midpoint and distance with ~6% error, score 0.75-0.95 (Faces.F layout). */
+        float[] detector(Random rnd, int unused) { return com.storageplanner.core.Faces.fromMidpoints(midpoints(rnd)); }
+        float[] midpoints(Random rnd) {
             float[] o = new float[nf * 4];
             for (int i = 0; i < nf; i++) {
                 double d = scale[i] * Double.parseDouble(who[i][5]);
                 o[i * 4] = (float) (x[i] + rnd.nextGaussian() * 0.06 * d);
                 o[i * 4 + 1] = (float) (y[i] + rnd.nextGaussian() * 0.06 * d);
                 o[i * 4 + 2] = (float) (d * (1 + rnd.nextGaussian() * 0.06));
-                o[i * 4 + 3] = (float) (0.5 + 0.4 * rnd.nextDouble());
+                o[i * 4 + 3] = (float) (0.75 + 0.2 * rnd.nextDouble());
             }
             return o;
         }
         void sidecar(File photo, Random rnd, int unused) throws Exception {
-            float[] f = detector(rnd, unused);
+            float[] f = midpoints(rnd);
             StringBuilder b = new StringBuilder();
             for (int i = 0; i < nf; i++)
                 b.append(f[i * 4] / bg.getWidth()).append(' ').append(f[i * 4 + 1] / bg.getHeight()).append(' ')

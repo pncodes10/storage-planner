@@ -28,6 +28,8 @@ import android.provider.Telephony;
 import android.telecom.TelecomManager;
 
 import com.storageplanner.core.AppItem;
+import com.storageplanner.core.FaceNet;
+import com.storageplanner.core.Faces;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Platform;
 
@@ -253,11 +255,43 @@ public final class AndroidPlatform implements Platform {
         return 0;
     }
 
-    /**
-     * Faces with Android's built-in, on-device detector (android.media.FaceDetector; nothing leaves the phone).
-     * It needs an RGB_565 bitmap of even width. Reports the point between the eyes and the eye distance.
-     */
+    // ---- face detector: YuNet in plain Java (assets/faces/yunet.bin), loaded on first use
+    private FaceNet faceNet;
+    private boolean faceNetFailed;
+
+    private synchronized FaceNet faceNet() {
+        if (faceNet != null || faceNetFailed) return faceNet;
+        java.io.InputStream in = null;
+        try {
+            in = ctx.getAssets().open("faces/yunet.bin");
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(1 << 18);
+            byte[] buf = new byte[65536]; int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            faceNet = FaceNet.load(bo.toByteArray());
+        } catch (Throwable t) {
+            faceNetFailed = true;
+            android.util.Log.w("StoragePlanner", "face model unavailable: " + t);
+        } finally {
+            if (in != null) try { in.close(); } catch (Throwable ignored) {}
+        }
+        return faceNet;
+    }
+
+    /** Faces with the bundled YuNet detector (on the phone; nothing leaves it). Falls back to Android's own detector. */
     public float[] faces(String path, int[] argb, int w, int h) {
+        FaceNet net = faceNet();
+        if (net == null) return otherFaces(path, argb, w, h);
+        try { return Faces.detect(net, argb, w, h); } catch (Throwable t) { return otherFaces(path, argb, w, h); }
+    }
+
+    public String otherFacesName() { return "android.media.FaceDetector (built into Android)"; }
+
+    /**
+     * Android's built-in detector (android.media.FaceDetector), the one used up to version 1.7. It needs an RGB_565
+     * bitmap of even width, reports only the point between the eyes and the eye distance, and its confidence is
+     * nearly always 0.51 - hence the switch to YuNet.
+     */
+    public float[] otherFaces(String path, int[] argb, int w, int h) {
         int ew = w & ~1;
         if (ew < 32 || h < 32) return new float[0];
         Bitmap b = null;
@@ -273,9 +307,9 @@ public final class AndroidPlatform implements Platform {
                 fs[i].getMidPoint(p);
                 out[i * 4] = p.x; out[i * 4 + 1] = p.y; out[i * 4 + 2] = fs[i].eyesDistance(); out[i * 4 + 3] = fs[i].confidence();
             }
-            return out;
+            return Faces.fromMidpoints(out);
         } catch (Throwable t) {
-            return null;                                   // no detector: photos are judged on focus and light only
+            return null;
         } finally {
             if (b != null) b.recycle();
         }

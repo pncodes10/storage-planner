@@ -134,9 +134,7 @@ final class Sorter {
         try {
             float[] f = pf.faces(path, small, sw, sh);
             if (f == null) return -1;
-            int n = 0;
-            for (int i = 0; i + 3 < f.length; i += 4) if (f[i + 3] >= PhotoQuality.MIN_FACE_CONFIDENCE) n++;
-            return n;
+            return Faces.count(f);
         } catch (Throwable t) { return -1; }
     }
 

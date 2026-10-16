@@ -47,7 +47,28 @@ public final class Lab {
     static String f(String fmt, Object... a) { return String.format(Locale.US, fmt, a); }
 
     // ------------------------------------------------------------------ faces
-    /** Face detection exactly as the photo-quality check runs it (1280 px, the phone's detector, confidence >= 0.4). */
+    /** Why a detected face is or is not counted (same rules as PhotoQuality.analyse). */
+    static String verdict(float[] raw, int i, int w, int h, double biggest) {
+        double mx = raw[i], my = raw[i + 1], d = raw[i + 2], c = raw[i + 3];
+        if (c < PhotoQuality.MIN_FACE_CONFIDENCE) return "ignored (score below " + PhotoQuality.MIN_FACE_CONFIDENCE + ")";
+        if (d < 6 || mx < 0 || my < 0 || mx >= w || my >= h) return "ignored (too small or outside)";
+        if (d < PhotoQuality.BACKGROUND * biggest) return "ignored (far smaller than the main face: a bystander)";
+        return null;
+    }
+
+    static double biggest(float[] raw) {
+        double b = 0;
+        for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) if (raw[i + 3] >= PhotoQuality.MIN_FACE_CONFIDENCE) b = Math.max(b, raw[i + 2]);
+        return b;
+    }
+
+    static float[] shown(Img m, float[] raw, int i, double pOpen) {
+        return new float[]{raw[i] / m.w, raw[i + 1] / m.h, raw[i + 2] / m.w, (float) pOpen, raw[i + 3]};
+    }
+
+    static double open(Img m, float[] raw, int i) { return EyeState.openProbability(m.l, m.w, m.h, raw[i + 4], raw[i + 5], raw[i + 6], raw[i + 7]); }
+
+    /** Face detection exactly as the photo-quality check runs it (1280 px picture, YuNet, score >= MIN_FACE_CONFIDENCE). */
     public static Shown faces(Platform pf, Pic p, Out o) {
         o.line("FACE DETECTION (as used to pick the best shot) — " + p.name);
         Shown sh = new Shown();
@@ -57,22 +78,30 @@ public final class Lab {
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
         long ms = (System.nanoTime() - t0) / 1000000;
         if (raw == null) { o.line("  ! the face detector is not available on this phone"); return sh; }
-        o.line(f("  detector returned %d face(s) in %d ms", raw.length / 4, ms));
+        o.line(f("  detector (YuNet, on a copy at most %d px) returned %d face(s) in %d ms", Faces.DETECT_EDGE, raw.length / Faces.F, ms));
+        double big = biggest(raw);
         List<float[]> kept = new ArrayList<float[]>();
-        for (int i = 0; i + 3 < raw.length; i += 4) {
-            double mx = raw[i], my = raw[i + 1], d = raw[i + 2], c = raw[i + 3];
-            boolean ok = c >= PhotoQuality.MIN_FACE_CONFIDENCE && d >= 6 && mx >= 0 && my >= 0 && mx < m.w && my < m.h;
-            o.line(f("  face %d: between the eyes at (%.0f, %.0f) = (%.1f%%, %.1f%%), eye distance %.1f px (%.1f%% of width), confidence %.2f -> %s",
-                    i / 4 + 1, mx, my, 100 * mx / m.w, 100 * my / m.h, d, 100 * d / m.w, c,
-                    ok ? "counted" : c < PhotoQuality.MIN_FACE_CONFIDENCE ? "ignored (confidence below " + PhotoQuality.MIN_FACE_CONFIDENCE + ")" : "ignored (too small or outside)"));
-            if (ok) kept.add(new float[]{(float) (mx / m.w), (float) (my / m.h), (float) (d / m.w), (float) EyeState.openProbability(m.l, m.w, m.h, mx, my, d), (float) c});
+        for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) {
+            String why = verdict(raw, i, m.w, m.h, big);
+            o.line(f("  face %d: eyes at (%.0f, %.0f) and (%.0f, %.0f), between them (%.1f%%, %.1f%%), %.1f px apart (%.1f%% of width), score %.2f -> %s",
+                    i / Faces.F + 1, raw[i + 4], raw[i + 5], raw[i + 6], raw[i + 7], 100 * raw[i] / m.w, 100 * raw[i + 1] / m.h, raw[i + 2], 100 * raw[i + 2] / m.w, raw[i + 3],
+                    why == null ? "counted" : why));
+            if (why == null) kept.add(shown(m, raw, i, open(m, raw, i)));
         }
         if (kept.isEmpty()) o.line("  => no face counted: this picture is judged on sharpness and light only");
+        float[] old = null;
+        try { old = pf.otherFaces(p.path, m.px, m.w, m.h); } catch (Throwable ignored) {}
+        if (old != null) {
+            StringBuilder b = new StringBuilder();
+            for (int i = 0; i + Faces.F - 1 < old.length; i += Faces.F)
+                b.append(f(" [(%.1f%%, %.1f%%), eyes %.0f px apart, conf %.2f]", 100 * old[i] / m.w, 100 * old[i + 1] / m.h, old[i + 2], old[i + 3]));
+            o.line(f("  for comparison, %s finds %d:%s", pf.otherFacesName(), old.length / Faces.F, b));
+        }
         sh.faces = flat(kept);
         return sh;
     }
 
-    /** The same detector on other sizes and on the picture turned a little: shows whether size or head tilt is the problem. */
+    /** The detector on other sizes and on the picture turned a little, and the old detector: shows what changes the answer. */
     public static Shown facesDetailed(Platform pf, Pic p, Out o) {
         o.line("FACE DETECTION, SIZES AND TILTS — " + p.name);
         Shown best = new Shown();
@@ -87,18 +116,24 @@ public final class Lab {
                 long ms = (System.nanoTime() - t0) / 1000000;
                 if (raw == null) { o.line("  ! the face detector is not available on this phone"); return best; }
                 StringBuilder b = new StringBuilder();
-                int n = 0;
-                for (int i = 0; i + 3 < raw.length; i += 4) {
-                    if (raw[i + 3] >= PhotoQuality.MIN_FACE_CONFIDENCE) n++;
-                    b.append(f(" [eyes %.0f px apart, conf %.2f]", raw[i + 2], raw[i + 3]));
-                }
-                o.line(f("  up to %4d px, turned %+3d°: %d face(s) counted, %d ms%s%s", edge, deg, n, ms, b, edge == 1280 && deg == 0 ? "   <- what the app uses" : ""));
+                int n = Faces.count(raw);
+                for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) b.append(f(" [eyes %.0f px apart, score %.2f]", raw[i + 2], raw[i + 3]));
+                o.line(f("  up to %4d px, turned %+3d°: %d face(s) with score >= %.1f, %d ms%s%s", edge, deg, n, PhotoQuality.MIN_FACE_CONFIDENCE, ms, b,
+                        edge == 1280 && deg == 0 ? "   <- what the app uses" : ""));
                 if (deg == 0 && n > bestN) {                        // overlay: faces found without turning, at the size that found most
                     bestN = n;
                     List<float[]> kept = new ArrayList<float[]>();
-                    for (int i = 0; i + 3 < raw.length; i += 4) if (raw[i + 3] >= PhotoQuality.MIN_FACE_CONFIDENCE)
-                        kept.add(new float[]{raw[i] / m.w, raw[i + 1] / m.h, raw[i + 2] / m.w, (float) EyeState.openProbability(m.l, m.w, m.h, raw[i], raw[i + 1], raw[i + 2]), raw[i + 3]});
+                    for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) if (raw[i + 3] >= PhotoQuality.MIN_FACE_CONFIDENCE) kept.add(shown(m, raw, i, open(m, raw, i)));
                     best.faces = flat(kept);
+                }
+                if (edge == 1280 && deg == 0) {
+                    float[] old = null;
+                    try { old = pf.otherFaces(p.path, px, m.w, m.h); } catch (Throwable ignored) {}
+                    if (old != null) {
+                        StringBuilder ob = new StringBuilder();
+                        for (int i = 0; i + Faces.F - 1 < old.length; i += Faces.F) ob.append(f(" [(%.1f%%, %.1f%%), conf %.2f]", 100 * old[i] / m.w, 100 * old[i + 1] / m.h, old[i + 3]));
+                        o.line(f("  up to 1280 px with %s: %d face(s)%s", pf.otherFacesName(), old.length / Faces.F, ob));
+                    }
                 }
             }
         }
@@ -127,32 +162,31 @@ public final class Lab {
         if (m == null) return sh;
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
         if (raw == null) { o.line("  ! the face detector is not available on this phone"); return sh; }
+        double big = biggest(raw);
         List<float[]> kept = new ArrayList<float[]>();
         int k = 0;
-        for (int i = 0; i + 3 < raw.length; i += 4) {
-            double mx = raw[i], my = raw[i + 1], d = raw[i + 2], c = raw[i + 3];
-            if (c < PhotoQuality.MIN_FACE_CONFIDENCE || d < 6) continue;
+        for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) {
+            if (verdict(raw, i, m.w, m.h, big) != null) continue;
             k++;
-            double sum = 0; int n = 0;
+            double x1 = raw[i + 4], y1 = raw[i + 5], x2 = raw[i + 6], y2 = raw[i + 7], d = raw[i + 2], mx = raw[i], my = raw[i + 1];
             StringBuilder shifts = new StringBuilder();
             for (double[] s : EyeState.SHIFTS) {
-                double x = mx + s[0] * d, y = my + s[1] * d, dd = d * s[2];
-                double l = EyeState.eye(m.l, m.w, m.h, x - dd / 2, y, dd, false), r = EyeState.eye(m.l, m.w, m.h, x + dd / 2, y, dd, true);
-                sum += l + r; n += 2;
+                double dx = s[0] * d, dy = s[1] * d, sc = s[2];
+                double l = EyeState.eye(m.l, m.w, m.h, mx + (x1 - mx) * sc + dx, my + (y1 - my) * sc + dy, d * sc, false),
+                       r = EyeState.eye(m.l, m.w, m.h, mx + (x2 - mx) * sc + dx, my + (y2 - my) * sc + dy, d * sc, true);
                 shifts.append(f(" %.2f/%.2f", l, r));
             }
-            double pOpen = sum / n;
-            o.line(f("  face %d (eyes %.0f px apart): eyes-open probability %.2f -> %s", k, d, pOpen,
+            double pOpen = open(m, raw, i);
+            o.line(f("  face %d (eyes at (%.0f, %.0f) and (%.0f, %.0f), %.0f px apart, score %.2f): eyes-open probability %.2f -> %s", k, x1, y1, x2, y2, d, raw[i + 3], pOpen,
                     pOpen >= PhotoQuality.OPEN ? "EYES OPEN" : "EYES CLOSED"));
             o.line("    left/right eye at the 7 positions tried (centre, up, down, left, right, smaller, larger):" + shifts);
             o.line(f("    counts towards the score as %.2f of a face (0 below p=0.2, full above p=0.8)", PhotoQuality.openness(pOpen)));
             for (int e = 0; e < 2; e++) {
-                double[] patch = EyeState.patch(m.l, m.w, m.h, mx + (e == 0 ? -d / 2 : d / 2), my, d, e == 1);
-                sh.patches.add(gray(patch));
-                sh.patchLabels.add("face " + k + (e == 0 ? " left eye " : " right eye ")
-                        + f("%.2f", EyeState.eye(m.l, m.w, m.h, mx + (e == 0 ? -d / 2 : d / 2), my, d, e == 1)));
+                double ex = e == 0 ? x1 : x2, ey = e == 0 ? y1 : y2;
+                sh.patches.add(gray(EyeState.patch(m.l, m.w, m.h, ex, ey, d, e == 1)));
+                sh.patchLabels.add("face " + k + (e == 0 ? " left eye " : " right eye ") + f("%.2f", EyeState.eye(m.l, m.w, m.h, ex, ey, d, e == 1)));
             }
-            kept.add(new float[]{(float) (mx / m.w), (float) (my / m.h), (float) (d / m.w), (float) pOpen, (float) c});
+            kept.add(shown(m, raw, i, pOpen));
         }
         if (k == 0) o.line("  => no face counted, so eyes cannot be checked");
         sh.faces = flat(kept);
@@ -180,10 +214,11 @@ public final class Lab {
         }
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
         List<float[]> kept = new ArrayList<float[]>();
-        if (raw != null) for (int i = 0; i + 3 < raw.length; i += 4) if (raw[i + 3] >= PhotoQuality.MIN_FACE_CONFIDENCE && raw[i + 2] >= 6) {
+        double big = raw == null ? 0 : biggest(raw);
+        if (raw != null) for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) if (verdict(raw, i, m.w, m.h, big) == null) {
             double[] st = PhotoQuality.faceStats(m.l, m.w, m.h, raw[i], raw[i + 1], raw[i + 2]);
             o.line(f("  face %d focus: %.3f (brightness %.0f)", kept.size() + 1, st[0], st[1]));
-            kept.add(new float[]{raw[i] / m.w, raw[i + 1] / m.h, raw[i + 2] / m.w, (float) EyeState.openProbability(m.l, m.w, m.h, raw[i], raw[i + 1], raw[i + 2]), raw[i + 3]});
+            kept.add(shown(m, raw, i, open(m, raw, i)));
         }
         if (kept.isEmpty()) o.line("  no face counted: only the whole picture's focus is used");
         sh.faces = flat(kept);
