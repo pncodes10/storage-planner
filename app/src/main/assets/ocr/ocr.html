@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<!-- Storage Planner's text reader: Tesseract (tesseract.js, Apache-2.0) running on the phone.
+     Every file is served from inside the app; the app has no internet permission. -->
+<script src="tesseract.min.js"></script>
+<script>
+let scheduler = null;
+async function start(workers) {
+  try {
+    scheduler = Tesseract.createScheduler();
+    for (let i = 0; i < workers; i++) {
+      const w = await Tesseract.createWorker('eng', 1, {
+        workerPath: '/ocr/worker.min.js', corePath: '/ocr/', langPath: '/ocr/', gzip: false, cacheMethod: 'none', logger: () => {}
+      });
+      scheduler.addWorker(w);
+    }
+    Native.ready(workers);
+  } catch (e) {
+    Native.failed(-1, String(e && e.message || e));
+  }
+}
+async function read(id) {
+  try {
+    const r = await scheduler.addJob('recognize', '/img/' + id, {}, {text: false, blocks: true});
+    const words = [];
+    for (const b of (r.data.blocks || [])) for (const p of b.paragraphs) for (const l of p.lines) for (const w of l.words)
+      words.push([w.text, Math.round(w.confidence)]);
+    Native.done(id, JSON.stringify(words));
+  } catch (e) {
+    Native.failed(id, String(e && e.message || e));
+  }
+}
+</script>

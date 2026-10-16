@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.png binary
+*.traineddata binary
+*.wasm binary
+*.wasm.js -diff linguist-vendored
+app/src/main/java/com/google/zxing/** linguist-vendored
+app/src/main/assets/ocr/** linguist-vendored

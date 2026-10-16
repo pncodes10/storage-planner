@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 10+: follow the system dark theme -->
+    <style name="AppTheme" parent="android:Theme.DeviceDefault.DayNight" />
+</resources>

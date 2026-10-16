@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Read-only access to shared storage (Android 11+: "All files access") -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- Only used to save the report to Downloads on Android 8-10 -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <!-- App sizes, caches and last-used dates (the user grants it in Settings > Usage access) -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- See all installed apps (Android 11+ package visibility) -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+    <!-- Keep the analysis running while the user is in other apps or the screen is off -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Progress and "your plan is ready" notification (Android 13+ asks the user; the scan runs either way) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Deliberately NO internet permission: the app cannot send anything off the phone. -->
+
+    <application
+        android:label="Storage Planner"
+        android:icon="@drawable/ic_launcher"
+        android:theme="@style/AppTheme"
+        android:allowBackup="false"
+        android:largeHeap="true"
+        android:requestLegacyExternalStorage="true">
+        <activity
+            android:name="com.storageplanner.app.MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|density"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Runs the (read-only) analysis of local files; dataSync covers local file processing -->
+        <service
+            android:name="com.storageplanner.app.AnalysisService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+        <!-- Read-only, private: lets an app the user picks (Open with / Share) read that one file -->
+        <provider
+            android:name="com.storageplanner.app.FileAccessProvider"
+            android:authorities="com.storageplanner.files"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

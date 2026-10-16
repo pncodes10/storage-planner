@@ -1,0 +1,35 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.storageplanner'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.storageplanner'
+        minSdk 26
+        targetSdk 34
+        versionCode 7
+        versionName '1.6'
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            // Debug-signed so "Build > Build APK(s)" gives an installable file without a keystore.
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lint {
+        // PACKAGE_USAGE_STATS / QUERY_ALL_PACKAGES / MANAGE_EXTERNAL_STORAGE are intentional (see manifest)
+        abortOnError false
+    }
+}
+// No dependencies: plain Android framework only.

@@ -1,0 +1,18 @@
+# build output
+build/
+work/
+*.class
+*.apk
+*.aab
+*.dex
+.gradle/
+local.properties
+.idea/
+*.iml
+__pycache__/
+# signing keys never belong in the repo (the offline build reads them from ../keystore)
+*.jks
+*.keystore
+*.pem
+*.p12
+keystore/
