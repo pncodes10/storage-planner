@@ -13,8 +13,13 @@ import java.util.List;
 public final class PhotoQuality {
     private PhotoQuality() {}
 
-    /** Detector confidence needed to count a face (android.media.FaceDetector.Face.CONFIDENCE_THRESHOLD). */
-    public static final double MIN_FACE_CONFIDENCE = 0.4;
+    /**
+     * Detector score needed to count a face. YuNet scores: real faces 0.8-0.95 even when small or tilted; at 0.7
+     * the test pictures without faces gave 1 false face in 271 (0.5 gave 13) and no real face was lost.
+     */
+    public static final double MIN_FACE_CONFIDENCE = 0.7;
+    /** A face whose eyes are closer together than this share of the biggest face's is a bystander and not counted. */
+    public static final double BACKGROUND = 0.3;
     /** A face whose two eyes average below this is reported as "eyes closed". */
     public static final double OPEN = 0.5;
     static final int FACE_FIELDS = 5;
@@ -54,11 +59,14 @@ public final class PhotoQuality {
         q.sharp = sharpness(luma, w, h);
         List<float[]> kept = new ArrayList<float[]>();
         double eyes = 0, fs = 0, fl = 0;
+        double biggest = 0;                                     // people far in the background don't decide the shot
         if (faces != null)
-            for (int i = 0; i + 3 < faces.length; i += 4) {
+            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) if (faces[i + 3] >= MIN_FACE_CONFIDENCE) biggest = Math.max(biggest, faces[i + 2]);
+        if (faces != null)
+            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) {
                 double mx = faces[i], my = faces[i + 1], d = faces[i + 2], conf = faces[i + 3];
-                if (conf < MIN_FACE_CONFIDENCE || d < 6 || mx < 0 || my < 0 || mx >= w || my >= h) continue;
-                double p = EyeState.openProbability(luma, w, h, mx, my, d);
+                if (conf < MIN_FACE_CONFIDENCE || d < 6 || d < BACKGROUND * biggest || mx < 0 || my < 0 || mx >= w || my >= h) continue;
+                double p = EyeState.openProbability(luma, w, h, faces[i + 4], faces[i + 5], faces[i + 6], faces[i + 7]);
                 double[] st = faceStats(luma, w, h, mx, my, d);
                 eyes += p; fs += st[0]; fl += st[1];
                 if (p >= OPEN) q.openFaces++;
@@ -146,21 +154,32 @@ public final class PhotoQuality {
      * focus or light difference between near-identical shots.
      */
     public static double[] scores(List<Q> g) {
+        double[][] t = terms(g);
+        double[] s = new double[g.size()];
+        for (int i = 0; i < s.length; i++) for (double x : t[i]) s[i] += x;
+        return s;
+    }
+
+    /** Names of the parts of a score, in the order terms() returns them. */
+    public static final String[] TERMS = {"eyes open (3 per face)", "people missing or blinking (-3 each)", "face sharpness", "overall sharpness", "lighting"};
+
+    /** The parts that add up to each shot's score (see TERMS); used by scores() and shown by the Algorithm Lab. */
+    public static double[][] terms(List<Q> g) {
         int maxFaces = 0; double maxFS = 0, maxS = 0;
         for (Q q : g) { maxFaces = Math.max(maxFaces, q.faces); maxFS = Math.max(maxFS, q.faceSharp); maxS = Math.max(maxS, q.sharp); }
-        double[] s = new double[g.size()];
-        for (int i = 0; i < s.length; i++) {
+        double[][] t = new double[g.size()][5];
+        for (int i = 0; i < g.size(); i++) {
             Q q = g.get(i);
-            double v = 0, rs = maxS > 0 && q.sharp > 0 ? q.sharp / maxS : 0;
+            double rs = maxS > 0 && q.sharp > 0 ? q.sharp / maxS : 0;
             if (maxFaces > 0) {
-                for (int k = 0; k < q.faces; k++) v += 3.0 * openness(q.face[k * FACE_FIELDS + 3]);
-                v -= 3.0 * maxFaces;                                // people missing from this shot count as blinking
-                v += 1.0 * (q.faceSharp > 0 && maxFS > 0 ? q.faceSharp / maxFS : 0) + 0.5 * rs;
-            } else v += 1.5 * rs;
-            v += 1.0 * exposure(q);
-            s[i] = v;
+                for (int k = 0; k < q.faces; k++) t[i][0] += 3.0 * openness(q.face[k * FACE_FIELDS + 3]);
+                t[i][1] = -3.0 * maxFaces;                          // people missing from this shot count as blinking
+                t[i][2] = 1.0 * (q.faceSharp > 0 && maxFS > 0 ? q.faceSharp / maxFS : 0);
+                t[i][3] = 0.5 * rs;
+            } else t[i][3] = 1.5 * rs;
+            t[i][4] = 1.0 * exposure(q);
         }
-        return s;
+        return t;
     }
 
     /** Index of the best shot. */

@@ -81,10 +81,13 @@ with zipfile.ZipFile(apk_path) as z:
 # 1.6: the offline text reader's files, and nothing else, under assets/ocr/ (checked against the npm releases' hashes)
 OCR_ASSETS = {"assets/ocr/ocr.html", "assets/ocr/tesseract.min.js", "assets/ocr/worker.min.js", "assets/ocr/tesseract-core-simd-lstm.wasm.js",
               "assets/ocr/tesseract-core-lstm.wasm.js", "assets/ocr/eng.traineddata", "assets/ocr/LICENSE-tesseract.js.md", "assets/ocr/LICENSE-tesseract.js-core"}
+# 1.8: the face detector's weights (YuNet, converted by tools/facemodel/export_yunet.py) and its licence
+FACE_ASSETS = {"assets/faces/yunet.bin", "assets/faces/LICENSE-yunet.txt"}
 other = [n for n in names if n not in ("AndroidManifest.xml", "classes.dex", "resources.arsc")]
 check("zip entries", set(names) >= {"AndroidManifest.xml", "classes.dex", "resources.arsc"}
-      and all(n.startswith("res/") or n in OCR_ASSETS for n in other) and OCR_ASSETS <= set(names),
-      ", ".join(n for n in names if not n.startswith("assets/")) + " + " + str(len([n for n in names if n.startswith("assets/")])) + " text-reader files")
+      and all(n.startswith("res/") or n in OCR_ASSETS or n in FACE_ASSETS for n in other) and OCR_ASSETS <= set(names) and FACE_ASSETS <= set(names),
+      ", ".join(n for n in names if not n.startswith("assets/")) + " + " + str(len([n for n in names if n.startswith("assets/ocr/")])) + " text-reader files + "
+      + str(len([n for n in names if n.startswith("assets/faces/")])) + " face-detector files")
 import hashlib
 pinned = {}
 pin_file = os.path.join(os.path.dirname(__file__), "ocr_assets.sha256")
@@ -93,6 +96,12 @@ for line in open(pin_file):
 with zipfile.ZipFile(apk_path) as z:
     bad = [n for n in pinned if hashlib.sha256(z.read(n)).hexdigest() != pinned[n]]
 check("text-reader files are the pinned, unmodified releases (tesseract.js 7.0.0, core 7.0.0, tessdata_fast eng)", not bad, "; ".join(bad))
+fpinned = {}
+for line in open(os.path.join(os.path.dirname(__file__), "face_assets.sha256")):
+    h, n = line.split(); fpinned["assets/faces/" + n] = h
+with zipfile.ZipFile(apk_path) as z:
+    fbad = [n for n in fpinned if hashlib.sha256(z.read(n)).hexdigest() != fpinned[n]]
+check("face-detector files are the pinned conversion of face_detection_yunet_2023mar.onnx", not fbad, "; ".join(fbad))
 check("resources.arsc stored + 4-byte aligned", arsc.compress_type == zipfile.ZIP_STORED and off % 4 == 0, f"offset {off}")
 
 # 4) dex: classes and every external reference
@@ -124,7 +133,8 @@ BAD = {
 loads = sorted(set(r for r in ext if "WebView;->loadUrl" in r))
 check("WebView only loads the bundled text-reader page", loads == ["Landroid/webkit/WebView;->loadUrl(Ljava/lang/String;)V"], "; ".join(loads))
 web_users = sorted(set(c.get_name() for c in d.get_classes() for m in c.get_methods() if m.get_code()
-                       for ins in m.get_code().get_bc().get_instructions() if ins.get_name().startswith("invoke") and "Landroid/webkit/WebView;" in ins.get_output()))
+                       for ins in m.get_code().get_bc().get_instructions() if ins.get_name().startswith("invoke") and "Landroid/webkit/WebView;" in ins.get_output()
+                       and "getCurrentWebViewPackage" not in ins.get_output()))   # reading the WebView version for the Lab log is allowed
 check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/app/OcrEngine") for n in web_users), ", ".join(web_users))
 for k, pat in BAD.items():
     hits = [r for r in ext if re.search(pat, r)]

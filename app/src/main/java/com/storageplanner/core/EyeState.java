@@ -9,7 +9,8 @@ package com.storageplanner.core;
 public final class EyeState {
     private EyeState() {}
 
-    static final int PW = 24, PH = 16, CELL = 4, BINS = 8, NF = 304, NH = 16;
+    public static final int PW = 24, PH = 16;
+    static final int CELL = 4, BINS = 8, NF = 304, NH = 16;
     static final double SPAN_W = 0.75, SPAN_H = 0.5;
 
     private static final float[] W = load();
@@ -33,6 +34,24 @@ public final class EyeState {
         for (double[] o : SHIFTS) {
             double x = mx + o[0] * d, y = my + o[1] * d, dd = d * o[2];
             sum += eye(luma, w, h, x - dd / 2, y, dd, false) + eye(luma, w, h, x + dd / 2, y, dd, true);
+            n += 2;
+        }
+        return sum / n;
+    }
+
+    /**
+     * Same, from the two eye positions a landmark detector gives (x1,y1 = the eye on the image's left).
+     * Each eye is looked at where it really is, so a tilted head still gets both eyes in the patch.
+     */
+    public static double openProbability(int[] luma, int w, int h, double x1, double y1, double x2, double y2) {
+        double d = Math.hypot(x2 - x1, y2 - y1);
+        if (d < 1) return 0;
+        double sum = 0; int n = 0;
+        for (double[] o : SHIFTS) {
+            double dx = o[0] * d, dy = o[1] * d, sc = o[2];
+            double mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+            double ax = mx + (x1 - mx) * sc + dx, ay = my + (y1 - my) * sc + dy, bx = mx + (x2 - mx) * sc + dx, by = my + (y2 - my) * sc + dy;
+            sum += eye(luma, w, h, ax, ay, d * sc, false) + eye(luma, w, h, bx, by, d * sc, true);
             n += 2;
         }
         return sum / n;

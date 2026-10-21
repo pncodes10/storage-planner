@@ -4,7 +4,7 @@ An Android app that scans your phone and builds a plan to reach a storage target
 
 ## Install
 
-1. Copy `StoragePlanner-1.6.apk` to the phone and open it. Allow "Install unknown apps" for your file manager or browser if asked. Play Protect may warn about an unknown developer; choose **Install anyway**. It installs over 1.0–1.5 as an update (same signing key); your Keep decisions are kept.
+1. Copy `StoragePlanner-1.8.1.apk` to the phone and open it. Allow "Install unknown apps" for your file manager or browser if asked. Play Protect may warn about an unknown developer; choose **Install anyway**. It installs over 1.0–1.8 as an update (same signing key); your Keep decisions are kept.
 2. Open **Storage Planner**. Then:
    - **Grant all files access.** This is needed to read photos, videos, downloads and WhatsApp media.
    - **Grant usage access** (optional). This adds app sizes, caches, and apps you haven't opened in months. If the toggle is greyed out, go to Settings → Apps → Storage Planner → ⋮ → **Allow restricted settings**, then try again.
@@ -124,8 +124,8 @@ For near-identical shots, every photo in the group is checked on the phone durin
 
 | Check | How |
 |---|---|
-| **Faces** | Android's built-in, on-device face detector (`android.media.FaceDetector`). It finds frontal faces and reports where the eyes are. |
-| **Eyes open or closed** | A small neural network built into the app looks at each eye. It was trained on real faces: Closed Eyes In The Wild for closed eyes, plus aligned open-eye faces. On 716 faces it never saw, it is right 97% of the time. It is still 98% right when the eye positions are off by 6%, and 91% when they are off by 12%. |
+| **Faces** | YuNet (OpenCV Zoo, MIT licence), a small face-detection network built into the app and run on the phone in plain Java (since 1.8; before that Android's `android.media.FaceDetector`). It finds faces down to about 10 px, tilted or partly turned, and gives the position of each eye. A face counts when its score is at least 0.7; faces much smaller than the main one (bystanders) are not counted. |
+| **Eyes open or closed** | A small neural network built into the app looks at each eye. It was trained on real faces: Closed Eyes In The Wild for closed eyes, plus aligned open-eye faces. On 716 faces it never saw, it is right 98.5% of the time when it looks at each eye where the detector found it (97% from the old detector's eye midpoint). It is still 98% right when the eye positions are off by 6%, and 91% when they are off by 12%. |
 | **Faces visible** | A shot where someone turned away has fewer faces. Each missing face counts like a blink. |
 | **Focus** | Sharpness of the faces, then of the whole photo. It is measured so that a brighter or darker copy of the same photo doesn't look "sharper". |
 | **Lighting** | Blown-out highlights cost the most because they can't be recovered. Then crushed shadows, a photo that is far too dark or too bright, and a face that is too dark or washed out. |
@@ -144,7 +144,7 @@ the card, for example "Near-duplicate of a better shot, IMG_2.jpg: eyes open, fa
 | Same scene with 1–3 real people, one blinking in one shot: open-eyes shot kept | 96% |
 | Same, when the blinking shot is the sharper one | 93% |
 | Three shots (0, 1 or 2 people blinking): best shot kept | 84 of 86 |
-| End to end (scan, plan and reason) on a virtual phone with 30 such bursts | the right shot kept every time |
+| End to end (scan, plan and reason) on a virtual phone with 30 such bursts, faces found by the real detector | 28 bursts found; the right shot kept in 27 |
 
 Photos analysed by version 1.4 or earlier keep working. Their shots are ranked by sharpness until you tap
 **Analyse** again.
@@ -156,12 +156,12 @@ Not judged: smiles, head turns that keep both eyes visible, and composition.
 The overview has a **Your pictures** section. It shows every category with its count and size, plus a
 **search box** for the text found in pictures (try a shop name, "pnr" or "invoice").
 
-Since 1.7 the last column is decided by what each picture shows, not by its category alone (see
-[Will you need it again?](#will-you-need-it-again-new-in-17)).
+Since 1.9 the last column is decided by what each picture shows, not by its category alone (see
+[Will you need it again?](#will-you-need-it-again-new-in-19)).
 
 | Category | How it is recognised | Suggested for deletion? (1.6) |
 |---|---|---|
-| People | Android's on-device face detector | No |
+| People | The face detector (YuNet, on the phone); 31 of 31 test photos with people | No |
 | Photos without faces | Camera photos with no faces and no text | No |
 | QR codes & barcodes | The code is decoded (ZXing). The card says what it is for: "UPI payment code for …", "Wi-Fi network …", "Link to …" | No |
 | Receipts | Text: totals, cash, change, GST lines, many prices; a tall, narrow shape | No (browse and search) |
@@ -235,7 +235,7 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 - **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
 - **The app's own reader page** (`tools/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
 
-## Will you need it again? (new in 1.7)
+## Will you need it again? (new in 1.9)
 
 Every sorted picture now gets a verdict from what it shows (`FutureNeed`):
 - **Keep:** likely needed again.
@@ -293,11 +293,65 @@ They replace 1.6's fixed rules for one-time codes, payments, tickets, greetings 
 
 | | Not needed and suggested | Still needed but suggested |
 |---|---|---|
-| 1.7 | **132 of 144 (91.7%)** | **0 of 224** |
+| 1.9 | **132 of 144 (91.7%)** | **0 of 224** |
 | 1.6 rules on the same pictures | 33 of 144 (22.9%) | 31 of 224 (large and rent payments, cancelled tickets awaiting refund, pictures in "Important") |
 
 What is still missed is mostly payments whose amount can't be read reliably. They are left as "your call".
 `FutureNeedTest` checks 56 hand-written cases (each kind, dates, amounts, folders and the safety floors).
+
+## Face detector replaced (new in 1.8)
+
+Found with the Algorithm Lab on a night photo (IMG-20261015-WA0005): the Lab said "Eyes closed" and outlined a
+dark patch of background. Android's built-in detector had reported a "face" there, missed the real face, and
+gives every face the same confidence (about 0.51), so false faces could not be filtered out. The eye model
+then judged the dark patch and called it closed eyes. The same kind of false face showed up on a dress and a
+building in another photo.
+
+1.8 uses **YuNet** instead (OpenCV Zoo `face_detection_yunet_2023mar`, MIT licence, 53,000 weights, 216 KB):
+
+- It runs in plain Java on the phone (`core/FaceNet.java`), with no native code and nothing sent anywhere.
+  `FaceNetTest` checks it against OpenCV's own `FaceDetectorYN`: 29 faces in 19 pictures, identical to 0.001 px.
+- It gives a real score. At 0.7, 1 false face in 271 test pictures without people (Android's detector cannot be filtered at all), and no real face lost among 57.
+- It gives both eye positions, so the eye check looks at each eye where it is, also when the head is tilted.
+- **Second look.** A face that is small in the 640 px copy can score just under 0.7 (IMG-20261015-WA0005 on a phone: 0.69). Every candidate scoring 0.45 to 0.7 is looked at again on a crop two face-widths wide, taken from the full picture; that score replaces the first. It lifted that face to 0.85, and on the 368 test pictures without people it added no false face (it did find a real woman in sunglasses in one).
+- Speed: about 0.2 s per picture on a desktop for the best-shot check (640 px copy), less for sorting (512 px copy). On a phone expect 2 to 4 times that, so the first scan takes longer.
+- In the Lab, **Face detection** also lists what Android's old detector finds in the same picture, for comparison.
+
+## Algorithm Lab: debug tool (new in 1.7)
+
+**Algorithm Lab (debug)** is on the start screen and at the bottom of the plan. On the compare screen,
+**Debug this choice in the Algorithm Lab** opens the Lab with every copy of that group already loaded.
+
+1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
+   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
+2. **Run on the selected picture:**
+
+| Button | What it shows |
+|---|---|
+| Run everything | All of the below, plus the group checks when two or more pictures are picked |
+| Face detection | Exactly what the best-shot check sees (YuNet on the 1280 px picture): every face with both eye positions, eye distance and score, and whether it was counted. Faces are outlined on the picture. Since 1.8 it also lists what Android's old built-in detector finds |
+| Faces: other sizes and tilts | The same detector at 640, 1280 and 2048 px, and with the picture turned ±10° and ±20°. Shows whether face size or a tilted head made it miss a face |
+| Eyes open or closed | For each face: the eyes-open probability, each eye at the 7 positions tried, how much it counts in the score, and the eye patches the model looked at |
+| Sharpness / blur | The focus number used to compare shots, the blur score used for "possibly blurry", and each face's focus |
+| Lighting | Brightness, blown-out and black share, and each penalty that makes up the lighting score |
+| Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
+| QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
+| Read text | Every word the reader found, with its confidence, and what the text rules decided |
+
+3. **Run on all picked pictures:**
+
+| Button | What it shows |
+|---|---|
+| Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
+| Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
+| Exact duplicate check | SHA-256 of each file |
+
+4. **Log.**
+   - Every line, with the phone model, Android and WebView versions and the app version, is written to a log in the app's private storage.
+   - **Save log** copies it to `Download/StoragePlanner/lab-log-<time>.txt`, **Share log** sends that copy, and **Clear log** starts a new one.
+   - Picked pictures are copied into the app's cache (20 slots, reused); the originals are not touched.
+
+The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the scan's numbers. `LabTest` runs every tool on real pictures on the desktop.
 
 ## Runs in the background
 
@@ -349,26 +403,30 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **Classifier:** path rules.
   - **ImageFeatures:** perceptual hash and sharpness.
   - **PhotoQuality / EyeState:** which near-identical shot is better (faces, eyes, focus, light).
+  - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
-  - **FutureNeed:** whether each picture will be needed again (1.7).
+  - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
+  - **FutureNeed:** whether each picture will be needed again (1.9).
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
+- `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
   - **UnitBuilder:** options.
   - **Planner:** tiered planner.
   - **Report:** output.
   - **ResultStore:** versioned binary format for saved results (with checksum).
-- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
+- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; LabScreen and LabLog are the Algorithm Lab; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
   - **AndroidPlatform:** reads files and system stats.
   - **Calibrator:** on-device measurement.
   - **Ssim:** matches scikit-image to 1e-14.
   - **MainActivity:** the UI, back stack and its restore after process death.
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), picture-category (CategoryTest, TextRulesTest), future-need (FutureNeedTest, FutureNeedCorpusTest) and reader-bridge (OcrBridgeTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), future-need (FutureNeedTest, FutureNeedCorpusTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/futureneed/`: the labelled test phone for FutureNeed (build.py, ocr.py) and its results.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
-- `tools/ocr_assets.sha256`: pinned hashes of the text-reader files (checked by the audit).
+- `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
+- `tools/facemodel/`: converts YuNet for the app, and records OpenCV's answers for FaceNetTest.
 - `tools/`:
   - **apkbuild.py:** packager and v2 signer.
   - **strip_methodparams.py:** strips an attribute old D8 can't read.
@@ -380,7 +438,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 - **Not run on a real device.** It was compiled against API 34 and the algorithm was tested on a desktop. The Android-specific code (permissions, decoding, system stats, the background service and notifications) has not run on a phone, so first-run issues are possible.
 - **Background limits.** Some manufacturers (e.g. aggressive battery savers) can still stop a foreground service; the app then reports the interrupted scan. Results are only saved once a scan finishes.
 - **Android/data is unreadable on Android 11+.** App data there is counted through system stats instead, so leftover files of uninstalled apps in that folder can't be found.
-- **Face detection is basic.** Android's built-in detector finds frontal, upright faces. Faces in profile, very small faces (eyes under about 16 px apart in a 1280 px photo) and faces behind sunglasses aren't checked, and those shots are judged on focus and light only. The face and eye code has not run on a real phone yet. The eye model was tested on a desktop with eye positions from another detector plus added error.
+- **Face detection.** YuNet finds most faces, but faces in full profile, very small faces (eyes under about 6 px apart in the 640 px copy) and heavily covered faces can be missed; those shots are judged on focus and light only. Eyes that are looking down can read as closed. The detector has been checked against OpenCV on a desktop; its speed on a phone has not been measured yet.
 - **Picture sorting is new and untested on a phone.**
   - The text reader runs in Android's WebView, which differs between phones; if it cannot start, pictures are sorted without reading text.
   - The first scan with sorting on takes noticeably longer. Estimated from desktop timings, not measured on a phone: about a quarter of a second per picture, plus one to three seconds for each picture whose text is read.

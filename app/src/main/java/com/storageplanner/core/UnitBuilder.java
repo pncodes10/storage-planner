@@ -141,7 +141,7 @@ public final class UnitBuilder {
             String burstOf = det.burstExtraOf.get(f.rel);
             if (burstOf != null) u.add(new Option("delete", Techniques.BURSTS, s, Option.R4, true, burstWhy(f, byRel.get(burstOf))));
             if (det.blurry.contains(f.rel)) u.add(new Option("delete", Techniques.BLURRY, s, Option.R4, true, "Much softer than your other photos"));
-            // pictures: suggested only when what they show is no longer needed (FutureNeed, 1.7)
+            // pictures: suggested only when what they show is no longer needed (FutureNeed, 1.9)
             if (f.category != null) {
                 FutureNeed.Assessment fn = FutureNeed.assess(f, now);
                 need.put(f.rel, fn);
