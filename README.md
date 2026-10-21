@@ -459,6 +459,23 @@ app/src/main/java/com/storageplanner/
 `AlgorithmBench` on the test phones. Change `Registry.current()` only when it beats the current version without
 any wrong suggestion.
 
+## Code review
+
+Every pull request is reviewed by Claude (`.github/workflows/claude-code-review.yml`, using
+`anthropics/claude-code-action`). It posts inline comments on the lines it has findings for and one summary
+comment, checked against this project's rules: read-only, no network, tools measure and algorithms decide, and
+deletion suggestions stay safe. It runs again on every push to the pull request; drafts are skipped.
+
+One-time setup by a repository admin:
+1. Install the Claude GitHub App on the repository: https://github.com/apps/claude
+2. Add the repository secret `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions → New repository
+   secret) with a key from console.anthropic.com.
+   To use a Claude Pro or Max subscription instead, run `claude setup-token` and store the token as
+   `CLAUDE_CODE_OAUTH_TOKEN`, then replace `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` with
+   `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}` in the workflow.
+
+Pull requests from forks get no secrets, so they are not reviewed.
+
 ## Known limits
 
 - **Not run on a real device.** It was compiled against API 34 and the algorithm was tested on a desktop. The Android-specific code (permissions, decoding, system stats, the background service and notifications) has not run on a phone, so first-run issues are possible.
