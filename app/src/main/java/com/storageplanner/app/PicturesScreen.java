@@ -15,7 +15,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
-import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
+import com.storageplanner.algorithms.Decision;
 import com.storageplanner.tools.category.PhotoCategory;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Unit;
@@ -278,8 +278,8 @@ public final class PicturesScreen extends Screen {
             f = file;
             Thumbs.load(iv, f, dp(140));
             String date = f.catDate > 0 ? Report.day(f.catDate) : Ui.date(f.mtime);
-            FutureNeed.Assessment fn = Session.NOT_NEEDED.equals(category) && Session.ub != null ? Session.ub.need.get(f.rel) : null;
-            caption.setText(fn != null ? FutureNeed.label(fn.kind) : f.code != null ? f.code : date + " · " + Report.size(f.size));
+            Decision fn = Session.NOT_NEEDED.equals(category) && Session.ub != null ? Session.ub.need.get(f.rel) : null;
+            caption.setText(fn != null ? fn.kindLabel : f.code != null ? f.code : date + " · " + Report.size(f.size));
             String st = Session.pictureState(f);
             if ("deleted".equals(st)) { state.setText("✕ approved"); state.setBackground(Ui.round(0xE6B3261E, dp(6))); state.setVisibility(View.VISIBLE); }
             else if ("kept".equals(st)) { state.setText("✓ kept"); state.setBackground(Ui.round(0xE61E6B2E, dp(6))); state.setVisibility(View.VISIBLE); }

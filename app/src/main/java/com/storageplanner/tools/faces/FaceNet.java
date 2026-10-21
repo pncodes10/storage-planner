@@ -10,7 +10,7 @@ import java.util.List;
 /**
  * Face detector: YuNet (OpenCV Zoo, face_detection_yunet_2023mar, MIT licence, 53 k weights), run in plain Java.
  * The network (depthwise and pointwise convolutions, max-pooling, a small feature pyramid) is read from the
- * binary written by tools/facemodel/export_yunet.py; decoding and non-maximum suppression follow OpenCV's
+ * binary written by scripts/facemodel/export_yunet.py; decoding and non-maximum suppression follow OpenCV's
  * FaceDetectorYN line by line. Finds faces down to about 10 px and gives both eye positions.
  */
 public final class FaceNet {

@@ -1,6 +1,9 @@
 package com.storageplanner.core;
 
-import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
+import com.storageplanner.algorithms.Decision;
+import com.storageplanner.algorithms.DeletionAlgorithm;
+import com.storageplanner.algorithms.Registry;
+import com.storageplanner.facts.PictureFacts;
 import com.storageplanner.tools.category.PhotoCategory;
 import com.storageplanner.tools.quality.PhotoQuality;
 import com.storageplanner.tools.similarity.PerceptualHash;
@@ -35,10 +38,15 @@ public final class UnitBuilder {
 
     public final List<Unit> units = new ArrayList<Unit>();
     public final Detections det = new Detections();
-    /** Whether each sorted picture will be needed again (by path). */
-    public final Map<String, FutureNeed.Assessment> need = new HashMap<String, FutureNeed.Assessment>();
+    /** Whether each sorted picture will be needed again (by path), as the deletion algorithm decided. */
+    public final Map<String, Decision> need = new HashMap<String, Decision>();
+    /** The deletion algorithm that decided about pictures (Registry.current() unless chosen). */
+    public final DeletionAlgorithm algorithm;
 
-    public UnitBuilder(Scanner.Result r, Estimates est, int sdk) {
+    public UnitBuilder(Scanner.Result r, Estimates est, int sdk) { this(r, est, sdk, Registry.current()); }
+
+    public UnitBuilder(Scanner.Result r, Estimates est, int sdk, DeletionAlgorithm algorithm) {
+        this.algorithm = algorithm;
         long now = r.now;
         Map<String, FileItem> byRel = new HashMap<String, FileItem>();
         for (FileItem f : r.files) byRel.put(f.rel, f);
@@ -146,11 +154,11 @@ public final class UnitBuilder {
             String burstOf = det.burstExtraOf.get(f.rel);
             if (burstOf != null) u.add(new Option("delete", Techniques.BURSTS, s, Option.R4, true, burstWhy(f, byRel.get(burstOf))));
             if (det.blurry.contains(f.rel)) u.add(new Option("delete", Techniques.BLURRY, s, Option.R4, true, "Much softer than your other photos"));
-            // pictures: suggested only when what they show is no longer needed (FutureNeed, 1.9)
+            // pictures: suggested only when the deletion algorithm finds what they show no longer needed (1.9)
             if (f.category != null) {
-                FutureNeed.Assessment fn = FutureNeed.assess(f, now);
+                Decision fn = algorithm.decide(PictureFacts.of(f), now);
                 need.put(f.rel, fn);
-                if (fn.verdict == FutureNeed.NOT_NEEDED && fn.technique != null)
+                if (fn.verdict == Decision.NOT_NEEDED && fn.technique != null)
                     u.add(new Option("delete", fn.technique, s, Option.R4, true, fn.why));
             }
             if (a.equals("download") && age > OLD_DOWNLOAD_DAYS && s >= OLD_DOWNLOAD_MIN && u.options.isEmpty())

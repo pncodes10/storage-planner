@@ -1,13 +1,14 @@
 package com.storageplanner.algorithms.v2_futureneed;
 
+import com.storageplanner.algorithms.Decision;
+import com.storageplanner.algorithms.DeletionAlgorithm;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Techniques;
+import com.storageplanner.facts.PictureFacts;
 import com.storageplanner.tools.category.PhotoCategory;
 import com.storageplanner.tools.ocr.TextRules;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -22,23 +23,16 @@ import java.util.regex.Pattern;
  * useful, then halves every halfDays down to a floor. Kinds whose floor is at or above DELETE_BELOW can never
  * be suggested for deletion, however old: only content with a clear end of usefulness is.
  */
-public final class FutureNeed {
-    private FutureNeed() {}
+public final class FutureNeed implements DeletionAlgorithm {
+    public String id() { return "v2_futureneed"; }
 
-    public static final int KEEP = 0, UNSURE = 1, NOT_NEEDED = 2;
+    public String name() { return "Useful life of what the picture shows (1.9)"; }
+
+    public Decision decide(PictureFacts p, long now) { return assess(p, now); }
+
     public static final double KEEP_AT = 0.5, DELETE_BELOW = 0.2;
     static final long DAY = 86400000L;
 
-    public static final class Assessment {
-        public int verdict;
-        public double need;               // 0-1
-        public String kind;               // what the picture is for (a key of LIFE)
-        public String technique;          // recommendation it goes under when not needed, else null
-        public String why = "";           // one line for the UI
-        public final List<String> reasons = new ArrayList<String>();
-        public long usefulUntil;          // expiry, trip, delivery or appointment date read in it; 0 if none
-        public long deletableFrom;        // when it becomes "not needed" if nothing changes; 0 = never (or already)
-    }
 
     /** Useful life of a kind: base value, floor, days at full value (from the picture's date or usefulUntil), half-life after. */
     static final class Life {
@@ -99,9 +93,6 @@ public final class FutureNeed {
 
     public static String label(String kind) { Life l = LIFE.get(kind); return l == null ? kind : l.label; }
 
-    public static String verdictLabel(int v) {
-        return v == KEEP ? "Keep: likely needed again" : v == UNSURE ? "Your call: may not be needed" : "Not needed any more";
-    }
 
     // ------------------------------------------------------------------ what the text is about
     /** A purpose read from words: strong phrases count 2, weak ones 1; it applies at `need` points or more. */
@@ -266,13 +257,17 @@ public final class FutureNeed {
             "images", "sent", "download", "downloads", "pictures", "dcim", "telegram", "telegram images", "instagram", "snapchat", "facebook",
             "messenger", "twitter", "restored", "edited", ".private", "100andro", "100media", "gallery", "raw", "portrait", "selfies", "documents"};
 
-    /** Assessment of one sorted picture at time now. */
-    public static Assessment assess(FileItem f, long now) {
-        Assessment a = new Assessment();
+    /** Decision for one file (wraps it in PictureFacts). */
+    public static Decision assess(FileItem f, long now) { return assess(PictureFacts.of(f), now); }
+
+    /** Decision for one sorted picture at time now. */
+    public static Decision assess(PictureFacts f, long now) {
+        Decision a = new Decision();
+        a.algorithm = "v2_futureneed";
         String t = f.text == null ? "" : f.text;
-        boolean chatImage = f.area != null && (f.area.startsWith("wa_") || f.area.equals("telegram_media"));
+        boolean chatImage = f.chatImage;
         String c = f.category == null ? PhotoCategory.PHOTO : f.category;
-        long anchor = f.mtime;
+        long anchor = f.savedAt;
         StringBuilder ev = new StringBuilder();
         String kind = null;
 
@@ -292,7 +287,7 @@ public final class FutureNeed {
             else if (c.equals(PhotoCategory.PAYMENT)) kind = payment(t, a);
             else if (c.equals(PhotoCategory.TICKET)) {
                 if (any(t, "cancelled", "canceled", "refund")) { kind = "ticket_refund"; a.reasons.add("Cancelled or refund mentioned: kept until the refund is likely done"); }
-                else if (f.catDate > 0) { kind = "ticket"; a.usefulUntil = f.catDate; anchor = f.catDate; }
+                else if (f.dateInPicture > 0) { kind = "ticket"; a.usefulUntil = f.dateInPicture; anchor = f.dateInPicture; }
                 else kind = "ticket_nodate";
             } else if (c.equals(PhotoCategory.RECEIPT)) {
                 double amt = total(t);
@@ -312,7 +307,7 @@ public final class FutureNeed {
         if (kind == null && !t.isEmpty()) {
             int best = 0; String bestKind = null; String bestWhy = null;
             for (Topic tp : SHORT_LIVED) {
-                if (tp.kind.equals("forward") && !(chatImage || PhotoCategory.isScreenshot(f))) continue;
+                if (tp.kind.equals("forward") && !(chatImage || f.screenshot)) continue;
                 StringBuilder w = new StringBuilder();
                 int p = points(t, tp, w, false);
                 int needP = tp.kind.equals("forward") && chatImage && t.length() < 80 ? 2 : tp.need;   // a caption on a picture says little
@@ -320,17 +315,17 @@ public final class FutureNeed {
             }
             if (bestKind != null) { kind = bestKind; a.reasons.add(label(kind) + ": " + bestWhy); }
             if ("coupon".equals(kind)) {
-                long exp = find(EXPIRY, t, f.mtime);
+                long exp = find(EXPIRY, t, f.savedAt);
                 if (exp > 0) { a.usefulUntil = exp; anchor = exp; } else kind = "coupon_nodate";
             } else if ("delivery".equals(kind)) {
-                long d = find(DELIVERED, t, f.mtime);
+                long d = find(DELIVERED, t, f.savedAt);
                 if (d > 0 && d <= now) anchor = Math.max(anchor, d);
                 if (d > now) { a.usefulUntil = d; anchor = d; }
             } else if ("appointment".equals(kind) || "invitation".equals(kind)) {
                 long d = TextRules.date(t, now);
-                if (d == 0) d = find(ANY_DATE, t, f.mtime);
+                if (d == 0) d = find(ANY_DATE, t, f.savedAt);
                 if (d > 0) { a.usefulUntil = d; anchor = d; }
-                else if ("appointment".equals(kind)) anchor = f.mtime + 14 * DAY;   // no date read: assume it is within two weeks
+                else if ("appointment".equals(kind)) anchor = f.savedAt + 14 * DAY;   // no date read: assume it is within two weeks
             }
         }
         if (kind == null) {
@@ -341,7 +336,7 @@ public final class FutureNeed {
             else if (c.equals(PhotoCategory.PHOTO)) kind = "photo";
             else kind = "screenshot";
         }
-        a.kind = kind;
+        a.kind = kind; a.kindLabel = label(kind);
         Life l = LIFE.get(kind);
 
         // 2. how useful it still is
@@ -353,7 +348,7 @@ public final class FutureNeed {
         if (a.usefulUntil > 0 && a.usefulUntil <= now) a.reasons.add(dateWhy(kind) + " " + Report.day(a.usefulUntil) + ", " + ago(now - a.usefulUntil));
 
         // 3. what the picture's surroundings say
-        String folder = folder(f.rel);
+        String folder = folder(f.path);
         if (folder != null && need < 0.75) { need = 0.75; a.reasons.add("You saved it in the folder \"" + folder + "\""); }
         if (f.faces > 0 && !kind.equals("people") && need < 0.35 && !kind.equals("otp") && !kind.equals("accidental")) {
             need = 0.35; a.reasons.add("Has " + (f.faces > 1 ? f.faces + " faces" : "a face") + " in it");
@@ -361,10 +356,10 @@ public final class FutureNeed {
         if (f.textPending && need < 0.35) { need = 0.35; a.reasons.add("Its text is not read yet"); }
 
         a.need = Math.max(0, Math.min(1, need));
-        a.verdict = a.need >= KEEP_AT ? KEEP : a.need >= DELETE_BELOW ? UNSURE : NOT_NEEDED;
-        if (a.verdict == NOT_NEEDED) a.technique = l.technique;
+        a.verdict = a.need >= KEEP_AT ? Decision.KEEP : a.need >= DELETE_BELOW ? Decision.UNSURE : Decision.NOT_NEEDED;
+        if (a.verdict == Decision.NOT_NEEDED) a.technique = l.technique;
         // when it will stop being needed, if nothing else changes
-        if (a.verdict != NOT_NEEDED && l.floor < DELETE_BELOW && folder == null && f.faces <= 0 && !f.textPending) {
+        if (a.verdict != Decision.NOT_NEEDED && l.floor < DELETE_BELOW && folder == null && f.faces <= 0 && !f.textPending) {
             double after = l.halfDays * Math.log((l.base - l.floor) / (DELETE_BELOW - l.floor)) / Math.log(2);
             a.deletableFrom = anchor + (long) ((l.lifeDays + after) * DAY);
             if (a.usefulUntil > now) a.deletableFrom = Math.max(a.deletableFrom, a.usefulUntil + DAY);
@@ -379,7 +374,7 @@ public final class FutureNeed {
         return TextRules.hits(t, TextRules.GREET, null) >= 1 || TextRules.prefixHits(t, TextRules.GREET_WORDS, null) >= 1;
     }
 
-    static String payment(String t, Assessment a) {
+    static String payment(String t, Decision a) {
         if (any(t, FAILED) && !any(t, "successful", "successfully")) {
             if (any(t, DEBITED) && !any(t, NOT_DEBITED)) { a.reasons.add("Failed payment with money debited: kept until the refund is likely done"); return "payment_pending"; }
             a.reasons.add("The payment did not go through"); return "payment_failed";
@@ -429,11 +424,11 @@ public final class FutureNeed {
         return (d / 365) + " years ago";
     }
 
-    static String summary(Assessment a, Life l, FileItem f, long now) {
+    static String summary(Decision a, Life l, PictureFacts f, long now) {
         String main = a.reasons.isEmpty() ? l.label : a.reasons.get(0);
-        if (a.verdict == NOT_NEEDED) {
+        if (a.verdict == Decision.NOT_NEEDED) {
             String last = a.reasons.size() > 1 ? a.reasons.get(a.reasons.size() - 1) : null;
-            String age = "saved " + ago(now - f.mtime);
+            String age = "saved " + ago(now - f.savedAt);
             return main + (last != null && !last.equals(main) ? "; " + last : "") + "; " + age;
         }
         if (a.deletableFrom > now) return main + "; not needed after about " + Report.day(a.deletableFrom);

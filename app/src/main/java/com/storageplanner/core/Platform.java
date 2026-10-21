@@ -1,11 +1,15 @@
 package com.storageplanner.core;
 
-import com.storageplanner.tools.ocr.TextRules;
+import com.storageplanner.tools.faces.FaceDetector;
+import com.storageplanner.tools.ocr.TextReader;
 
 import java.util.List;
 
-/** Everything the core needs from the device. Android and the desktop test harness implement it. */
-public interface Platform {
+/**
+ * Everything the core needs from the device. Android and the desktop test harness implement it, including the
+ * tools that run differently on each (FaceDetector, TextReader).
+ */
+public interface Platform extends FaceDetector, TextReader {
     /** Root of shared storage (e.g. /storage/emulated/0). */
     String storageRoot();
 
@@ -28,24 +32,11 @@ public interface Platform {
      */
     int[] argb(String path, int longEdge, int[] dims);
 
-    /**
-     * Faces in a decoded picture (from argb), in the picture's pixels, Faces.F floats per face
-     * {x between the eyes, y, eye distance, score 0..1, eye-on-the-left x, y, other eye x, y}.
-     * Empty array if none; null if detection is unavailable.
-     */
-    float[] faces(String path, int[] argb, int w, int h);
-
     /** A second face detector for comparison in the Algorithm Lab (same format as faces), or null if there is none. */
     float[] otherFaces(String path, int[] argb, int w, int h);
 
     /** Name of the detector behind otherFaces, for the Lab. */
     String otherFacesName();
-
-    /**
-     * Words in a decoded picture, read on the device (null when no text reader is available or it failed).
-     * The picture is the ARGB array from argb(); path identifies the file.
-     */
-    TextRules.Words readText(String path, int[] argb, int w, int h);
 
     /** Image dimensions without decoding pixels: dims receives {w, h}. Returns false if unreadable. */
     boolean imageSize(String path, int[] dims);

@@ -107,12 +107,13 @@ public final class DetailScreen extends Screen {
             if (f.code != null) fact(facts, "Code", f.code);
             if (f.catDate > 0) fact(facts, "Date in the picture", Report.day(f.catDate));
             if (f.faces > 0) fact(facts, "Faces", String.valueOf(f.faces));
-            com.storageplanner.algorithms.v2_futureneed.FutureNeed.Assessment fn = Session.ub == null ? null : Session.ub.need.get(f.rel);
+            com.storageplanner.algorithms.Decision fn = Session.ub == null ? null : Session.ub.need.get(f.rel);
             if (fn != null) {
-                StringBuilder w = new StringBuilder(com.storageplanner.algorithms.v2_futureneed.FutureNeed.verdictLabel(fn.verdict));
-                w.append(" (").append(com.storageplanner.algorithms.v2_futureneed.FutureNeed.label(fn.kind)).append(")");
+                StringBuilder w = new StringBuilder(com.storageplanner.algorithms.Decision.verdictLabel(fn.verdict));
+                if (!fn.kindLabel.isEmpty()) w.append(" (").append(fn.kindLabel).append(")");
                 for (String r : fn.reasons) w.append("\n• ").append(r);
                 if (fn.deletableFrom > Session.result.now) w.append("\n• Not needed after about ").append(Report.day(fn.deletableFrom));
+                w.append("\n• Decided by ").append(Session.ub.algorithm.name());
                 fact(facts, "Needed later?", w.toString());
             }
             if (f.text != null) fact(facts, "Text read", f.text.length() > 300 ? f.text.substring(0, 300) + "…" : f.text);

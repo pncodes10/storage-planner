@@ -286,7 +286,7 @@ They replace 1.6's fixed rules for one-time codes, payments, tickets, greetings 
   larger, so it is used as an upper bound.
 - Completely black camera frames (lens covered) are now "Accidental shots".
 
-**Tests on pictures** (`FutureNeedCorpusTest`; how they were made is in `testdata/futureneed/README.md`):
+**Tests on pictures** (`AlgorithmBench`; how they were made is in `testdata/futureneed/README.md`):
 - A test phone with 368 pictures, rendered and read with the app's own text reader.
 - The rules were tuned on one set. The numbers below come from a fresh set made after the rules stopped
   changing:
@@ -398,40 +398,66 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 
 ## Layout
 
-- `app/src/main/java/com/storageplanner/core/`: the algorithm in pure Java, with no Android imports.
-  - **Scanner:** walk, duplicate check, media features.
-  - **Classifier:** path rules.
-  - **ImageFeatures:** perceptual hash and sharpness.
-  - **PhotoQuality / EyeState:** which near-identical shot is better (faces, eyes, focus, light).
-  - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
-  - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
-  - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
-  - **FutureNeed:** whether each picture will be needed again (1.9).
+The code is split into **tools that measure**, **algorithms that decide**, and the pipeline and app around them.
+Tools never decide anything; algorithms never touch pixels, files or Android. They meet in `facts/PictureFacts`,
+so any algorithm version can be swapped in and compared on the same pictures.
+
+```
+app/src/main/java/com/storageplanner/
+├── tools/               detectors: look at a picture, report facts (versions listed in tools/Tools.java)
+│   ├── faces/           FaceDetector (interface), FaceNet + Faces: YuNet in plain Java (1.8)
+│   ├── eyes/            EyeState: eyes open or closed, a small CNN (1.5)
+│   ├── ocr/             TextReader (interface), TextRules: what kind of text it is, dates, amounts
+│   ├── codes/           Codes: QR codes and barcodes (wraps ZXing)
+│   ├── layout/          ImageSignals: text rows, paper, flat screen areas, colour, darkness
+│   ├── sharpness/       Sharpness: focus of the sharpest parts
+│   ├── similarity/      PerceptualHash: near-identical pictures
+│   ├── exposure/        Exposure: dark, covered, featureless or shaken shots
+│   ├── quality/         PhotoQuality: which near-identical shot is better (faces, eyes, focus, light)
+│   ├── category/        PhotoCategory: the picture's category from all of the above
+│   └── Pixels           down-scaling and luma, shared by the tools
+├── facts/               PictureFacts: everything the tools found about one picture, plus its file details
+├── algorithms/          deciders: PictureFacts -> Decision (keep / your call / not needed, with reasons)
+│   ├── DeletionAlgorithm, Decision, Registry (every version; which one the app uses)
+│   ├── v1_rules/        RulesV1: 1.6's fixed rules per category, kept as the baseline
+│   └── v2_futureneed/   FutureNeed: useful life of what the picture shows (1.9); the app uses this
+├── core/                the pipeline, pure Java, no Android imports
+│   ├── Scanner, Classifier, Sorter: walk, path rules, duplicate check, running the tools
+│   ├── UnitBuilder, Planner, Review: options, tiered plan, your decisions
+│   ├── Report, ResultStore: output; saved results (versioned binary, with checksum)
+│   ├── Lab: the Algorithm Lab's step-by-step runs (1.7)
+│   └── Platform: what the core needs from the device (implements FaceDetector and TextReader)
+├── platform/android/    AndroidPlatform (files, system stats, faces), OcrEngine (offline text reader in a WebView),
+│                        Calibrator + Ssim (on-device compression measurement)
+└── app/                 the Android screens and service: Setup, Overview, List, Detail, Deck (swipe cards), Compare,
+                         Viewer, Pictures, Lab; MainActivity, Session, AnalysisService/Runner/State, ResultFiles
+```
+
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `scripts/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
-  - **UnitBuilder:** options.
-  - **Planner:** tiered planner.
-  - **Report:** output.
-  - **ResultStore:** versioned binary format for saved results (with checksum).
-- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; LabScreen and LabLog are the Algorithm Lab; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
-  - **AndroidPlatform:** reads files and system stats.
-  - **Calibrator:** on-device measurement.
-  - **Ssim:** matches scikit-image to 1e-14.
-  - **MainActivity:** the UI, back stack and its restore after process death.
-  - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
-  - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), future-need (FutureNeedTest, FutureNeedCorpusTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
-- `tools/eyemodel/`: how the eye model was trained and checked.
-- `testdata/futureneed/`: the labelled test phone for FutureNeed (build.py, ocr.py) and its results.
-- `scripts/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
-- `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
-- `scripts/facemodel/`: converts YuNet for the app, and records OpenCV's answers for FaceNetTest.
-- `tools/`:
-  - **apkbuild.py:** packager and v2 signer.
-  - **strip_methodparams.py:** strips an attribute old D8 can't read.
-  - **audit_apk.py:** independent APK audit.
-  - **build_offline.sh:** the offline build.
+- `jvmtest/com/storageplanner/test/`: runs the unchanged code on a desktop. `JvmPlatform` stands in for Android
+  (faces with the same YuNet code, words recorded from the app's own text reader); `TestMain` runs the study's
+  virtual phone.
+  - `tools/`: one test per tool: TextRulesTest, EyeStateTest, PhotoQualityTest, FaceNetTest (against OpenCV),
+    CategoryTest, OcrBridgeTest, LabTest.
+  - `algorithms/`: hand-written cases per version: RulesV1Test, FutureNeedTest.
+  - `bench/`: **AlgorithmBench** runs every algorithm version on the same labelled test phone and prints one
+    comparison table (caught, wrongly suggested, your call, per kind of picture).
+  - `core/`: PlannerTest, ReviewTest, DecisionTest, GroupDecisionTest, ResultStoreTest, ClassifierTest.
+- `testdata/`: recipes for the test pictures (the pictures themselves are not included):
+  - `futureneed/`: the labelled test phone for the deletion algorithms (build.py, ocr.py) and its results;
+  - `categories/`: the picture-category corpus.
+- `scripts/`:
+  - **build_offline.sh:** the offline build; **apkbuild.py:** packager and v2 signer; **strip_methodparams.py:** strips an attribute old D8 can't read.
+  - **audit_apk.py:** independent APK audit; **ocr_assets.sha256**, **face_assets.sha256:** pinned hashes it checks.
+  - **test_ocr_page.py:** runs the app's offline text-reader page in Chromium the way the app serves it.
+  - **eyemodel/:** how the eye model was trained and checked; **facemodel/:** converts YuNet for the app and records OpenCV's answers for FaceNetTest.
+
+**Adding an algorithm version:** write `algorithms/v3_<name>/` implementing `DeletionAlgorithm` (read only
+`PictureFacts`), add it to `Registry.ALL`, add hand-written cases under `jvmtest/.../algorithms/`, and run
+`AlgorithmBench` on the test phones. Change `Registry.current()` only when it beats the current version without
+any wrong suggestion.
 
 ## Known limits
 

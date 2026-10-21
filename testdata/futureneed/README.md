@@ -24,7 +24,7 @@ python3 testdata/futureneed/build.py dev   /tmp/fn_dev     # rules are tuned on 
 python3 testdata/futureneed/build.py test  /tmp/fn_test    # held out, measured after each round
 python3 testdata/futureneed/build.py final /tmp/fn_final   # fresh held-out set, made once at the end
 python3 testdata/futureneed/ocr.py /tmp/fn_final           # the app's own text reader, as on the phone
-java -cp <classes> com.storageplanner.test.FutureNeedCorpusTest /tmp/fn_final --list --check
+java -cp <classes> com.storageplanner.test.bench.AlgorithmBench /tmp/fn_final --list --check   # every algorithm version, side by side
 ```
 
 Needs Playwright with Chromium, Pillow and numpy.

@@ -3,7 +3,7 @@ package com.storageplanner.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 
-import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
+import com.storageplanner.algorithms.Decision;
 import com.storageplanner.core.AppItem;
 import com.storageplanner.core.Categories;
 import com.storageplanner.core.Estimates;
@@ -74,8 +74,8 @@ public final class Session {
             List<FileItem> l = pictures.get(f.category);
             if (l == null) { l = new ArrayList<FileItem>(); pictures.put(f.category, l); }
             l.add(f);
-            FutureNeed.Assessment fn = b.need.get(f.rel);
-            if (fn != null && fn.verdict == FutureNeed.NOT_NEEDED) {
+            Decision fn = b.need.get(f.rel);
+            if (fn != null && fn.verdict == Decision.NOT_NEEDED) {
                 List<FileItem> n = pictures.get(NOT_NEEDED);
                 if (n == null) { n = new ArrayList<FileItem>(); pictures.put(NOT_NEEDED, n); }
                 n.add(f);

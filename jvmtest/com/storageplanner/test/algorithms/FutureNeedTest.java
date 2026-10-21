@@ -1,6 +1,7 @@
 package com.storageplanner.test.algorithms;
 
 import com.storageplanner.core.FileItem;
+import com.storageplanner.algorithms.Decision;
 import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
 import com.storageplanner.tools.category.PhotoCategory;
 
@@ -16,8 +17,8 @@ public final class FutureNeedTest {
         return f;
     }
 
-    static FutureNeed.Assessment expect(String what, FileItem f, int verdict, String kind) {
-        FutureNeed.Assessment a = FutureNeed.assess(f, NOW);
+    static Decision expect(String what, FileItem f, int verdict, String kind) {
+        Decision a = FutureNeed.assess(f, NOW);
         checks++;
         boolean ok = a.verdict == verdict && (kind == null || kind.equals(a.kind));
         if (!ok) { fails++; System.out.printf("FAIL %s: got %s/%s need %.2f (%s), want %d/%s%n", what, a.verdict, a.kind, a.need, a.why, verdict, kind); }
@@ -25,7 +26,7 @@ public final class FutureNeedTest {
     }
 
     static final String SHOT = "Pictures/Screenshots/Screenshot_1.png", WA = "WhatsApp/Media/WhatsApp Images/IMG-1.jpg";
-    static final int K = FutureNeed.KEEP, U = FutureNeed.UNSURE, D = FutureNeed.NOT_NEEDED;
+    static final int K = Decision.KEEP, U = Decision.UNSURE, D = Decision.NOT_NEEDED;
 
     public static void main(String[] args) {
         // one-time codes: gone after a day
@@ -103,7 +104,7 @@ public final class FutureNeedTest {
         checks++; if (FutureNeed.amount("paid ₹1,25,000 ref 412345678901") != 125000) { fails++; System.out.println("FAIL Indian grouping amount"); }
         checks++; if (FutureNeed.amount("upi ref 412345678901 order 1234") != 0) { fails++; System.out.println("FAIL reference number taken as money"); }
         checks++; if (FutureNeed.amount("total %450 paid") != 450) { fails++; System.out.println("FAIL rupee sign read as %"); }
-        FutureNeed.Assessment c = FutureNeed.assess(pic(SHOT, "screenshot", null, "Use code SAVE20 for 20% off. Offer valid till 30 Nov 2026", 10), NOW);
+        Decision c = FutureNeed.assess(pic(SHOT, "screenshot", null, "Use code SAVE20 for 20% off. Offer valid till 30 Nov 2026", 10), NOW);
         checks++; if (c.deletableFrom <= c.usefulUntil) { fails++; System.out.println("FAIL coupon deletable before it expires"); }
         System.out.println((checks - fails) + "/" + checks + " future-need checks pass");
         if (fails > 0) System.exit(1);
