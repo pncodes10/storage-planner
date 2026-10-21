@@ -21,6 +21,9 @@ import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Lab;
+import com.storageplanner.core.Report;
+import com.storageplanner.platform.android.AndroidPlatform;
+import com.storageplanner.tools.eyes.EyeState;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -261,7 +264,7 @@ public final class LabScreen extends Screen {
                     LinearLayout c = new LinearLayout(a);
                     c.setOrientation(LinearLayout.VERTICAL);
                     ImageView iv = new ImageView(a);
-                    Bitmap b = Bitmap.createBitmap(s.patches.get(i), com.storageplanner.core.EyeState.PW, com.storageplanner.core.EyeState.PH, Bitmap.Config.ARGB_8888);
+                    Bitmap b = Bitmap.createBitmap(s.patches.get(i), com.storageplanner.tools.eyes.EyeState.PW, com.storageplanner.tools.eyes.EyeState.PH, Bitmap.Config.ARGB_8888);
                     android.graphics.drawable.BitmapDrawable d = new android.graphics.drawable.BitmapDrawable(a.getResources(), b);
                     d.setFilterBitmap(false);                              // show the model's pixels as they are
                     iv.setImageDrawable(d);

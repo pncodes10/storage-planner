@@ -1,5 +1,13 @@
 package com.storageplanner.core;
 
+import com.storageplanner.tools.Pixels;
+import com.storageplanner.tools.category.PhotoCategory;
+import com.storageplanner.tools.codes.Codes;
+import com.storageplanner.tools.exposure.Exposure;
+import com.storageplanner.tools.faces.Faces;
+import com.storageplanner.tools.layout.ImageSignals;
+import com.storageplanner.tools.ocr.TextRules;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -29,18 +37,18 @@ final class Sorter {
         int w = dims[2], h = dims[3];
         if (f.width == 0) { f.width = dims[0]; f.height = dims[1]; }
         ImageSignals.S s = ImageSignals.measure(px, w, h);
-        int[] l = luma(px);
+        int[] l = Pixels.luma(px);
         if (s.paper >= 0.2 && s.textBlobs < 150 && Math.max(dims[0], dims[1]) > 1100) {     // small print: look again bigger
             int[] d2 = new int[4];
             int[] big;
             try { big = pf.argb(f.abs, BIG, d2); } catch (Throwable t) { big = null; }
-            if (big != null) ImageSignals.moreText(luma(big), d2[2], d2[3], s);
+            if (big != null) ImageSignals.moreText(Pixels.luma(big), d2[2], d2[3], s);
         }
         String[] code = Codes.read(l, w, h, false);
         if (code == null && (s.flat >= 0.1 || s.paper >= 0.2)) code = Codes.read(l, w, h, true);
         f.code = code == null ? null : Codes.describe(code[0], code[1]);
         f.faces = -1;
-        if (!PhotoCategory.worthReading(f, s) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);
+        if (!PhotoCategory.worthReading(f, s) && !PhotoCategory.isScreenshot(f) && !Exposure.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);
         Prep p = new Prep();
         p.s = s; p.aspect = dims[0] / (double) Math.max(1, dims[1]);
         return p;
@@ -121,7 +129,7 @@ final class Sorter {
             }
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, v, f.faces);
             f.category = c.category; f.catDate = c.date; f.textPending = false;
-            String t = TextRules.clean(words);
+            String t = TextRules.withAmounts(TextRules.clean(words), words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
     }
@@ -130,37 +138,11 @@ final class Sorter {
     static int faces(Platform pf, String path, int[] px, int w, int h) {
         double s = Math.min(1.0, FACE_EDGE / (double) Math.max(w, h));
         int sw = Math.max(1, (int) (w * s)), sh = Math.max(1, (int) (h * s));
-        int[] small = s >= 1.0 ? px : shrink(px, w, h, sw, sh);
+        int[] small = s >= 1.0 ? px : Pixels.shrink(px, w, h, sw, sh);
         try {
             float[] f = pf.faces(path, small, sw, sh);
             if (f == null) return -1;
             return Faces.count(f);
         } catch (Throwable t) { return -1; }
-    }
-
-    /** Box-filter down-scaling of ARGB pixels. */
-    static int[] shrink(int[] px, int w, int h, int sw, int sh) {
-        int[] o = new int[sw * sh];
-        for (int y = 0; y < sh; y++) {
-            int y0 = y * h / sh, y1 = Math.max(y0 + 1, (y + 1) * h / sh);
-            for (int x = 0; x < sw; x++) {
-                int x0 = x * w / sw, x1 = Math.max(x0 + 1, (x + 1) * w / sw);
-                long rr = 0, gg = 0, bb = 0; int n = 0;
-                for (int yy = y0; yy < y1; yy++) for (int xx = x0; xx < x1; xx++) {
-                    int c = px[yy * w + xx]; rr += (c >> 16) & 255; gg += (c >> 8) & 255; bb += c & 255; n++;
-                }
-                o[y * sw + x] = 0xFF000000 | (int) (rr / n) << 16 | (int) (gg / n) << 8 | (int) (bb / n);
-            }
-        }
-        return o;
-    }
-
-    static int[] luma(int[] px) {
-        int[] l = new int[px.length];
-        for (int i = 0; i < px.length; i++) {
-            int p = px[i];
-            l[i] = (299 * ((p >> 16) & 255) + 587 * ((p >> 8) & 255) + 114 * (p & 255)) / 1000;
-        }
-        return l;
     }
 }

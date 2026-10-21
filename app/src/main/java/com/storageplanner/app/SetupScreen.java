@@ -13,6 +13,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import com.storageplanner.core.Report;
+import com.storageplanner.platform.android.AndroidPlatform;
 
 import java.util.Locale;
 

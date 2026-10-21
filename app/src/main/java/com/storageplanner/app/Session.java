@@ -3,6 +3,7 @@ package com.storageplanner.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.storageplanner.algorithms.Decision;
 import com.storageplanner.core.AppItem;
 import com.storageplanner.core.Categories;
 import com.storageplanner.core.Estimates;
@@ -12,6 +13,7 @@ import com.storageplanner.core.Planner;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Review;
 import com.storageplanner.core.Scanner;
+import com.storageplanner.core.Techniques;
 import com.storageplanner.core.Unit;
 import com.storageplanner.core.UnitBuilder;
 
@@ -47,6 +49,8 @@ public final class Session {
     /** keeper rel -> files flagged as its copies (duplicates, burst extras, Sent copies) */
     public static final Map<String, List<String>> copiesOf = new HashMap<String, List<String>>();
 
+    /** Key in pictures of those whose content is no longer needed (FutureNeed), next to the category ids. */
+    public static final String NOT_NEEDED = "not_needed";
     /** Sorted pictures by category, newest first. */
     public static final Map<String, List<FileItem>> pictures = new HashMap<String, List<FileItem>>();
     /** Pictures that are worth reading but were not read yet (time limit), and whether sorting ran at all. */
@@ -70,6 +74,12 @@ public final class Session {
             List<FileItem> l = pictures.get(f.category);
             if (l == null) { l = new ArrayList<FileItem>(); pictures.put(f.category, l); }
             l.add(f);
+            Decision fn = b.need.get(f.rel);
+            if (fn != null && fn.verdict == Decision.NOT_NEEDED) {
+                List<FileItem> n = pictures.get(NOT_NEEDED);
+                if (n == null) { n = new ArrayList<FileItem>(); pictures.put(NOT_NEEDED, n); }
+                n.add(f);
+            }
         }
         for (List<FileItem> l : pictures.values())
             java.util.Collections.sort(l, new java.util.Comparator<FileItem>() {

@@ -7,7 +7,7 @@ import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Option;
-import com.storageplanner.core.PhotoQuality;
+import com.storageplanner.tools.quality.PhotoQuality;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Review;
 import com.storageplanner.core.Techniques;

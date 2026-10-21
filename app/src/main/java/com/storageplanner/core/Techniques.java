@@ -31,6 +31,12 @@ public final class Techniques {
     public static final String EXPIRED_TICKETS = "Tickets for past trips and shows";
     public static final String GREETINGS = "Greeting images from chats";
     public static final String ACCIDENTAL = "Accidental shots";
+    public static final String EXPIRED_OFFERS = "Expired coupons and offers";
+    public static final String ORDER_UPDATES = "Old delivery, ride and food order updates";
+    public static final String SHORT_LIVED = "Short-lived screenshots: maps, weather, tokens";
+    public static final String SHOPPING = "Old shopping screenshots";
+    public static final String OLD_RECEIPTS = "Small receipts past any return window";
+    public static final String FORWARDS = "Memes and forwards from chats";
     /** Deletions the user picked while browsing pictures (recorded as Review.CHOSEN + PICKED). */
     public static final String PICKED = "Pictures you picked to delete";
 
@@ -77,14 +83,27 @@ public final class Techniques {
             "Delete them in your gallery or file manager.");
         put(OTP_SHOTS, "Screenshots of one-time passwords and login codes. A code stops working within minutes.",
             "Delete them in your gallery (Screenshots).");
-        put(OLD_PAYMENTS, "Screenshots of UPI and bank payment confirmations older than 3 months. Your bank statement and the payment app keep the record.",
+        put(OLD_PAYMENTS, "Payment confirmations that are no longer needed: small payments (under ₹2,000) after about 4 months, larger ones after about 22 months, failed ones after about 3 weeks. "
+            + "Payments for rent, fees, EMIs, insurance or tax, payments of ₹10,000 or more, pending ones, and any whose amount could not be read are never suggested. Your bank statement and the payment app keep the record.",
             "Check each one, then delete it in your gallery.");
-        put(EXPIRED_TICKETS, "Train, flight, bus and movie tickets whose date has passed.",
+        put(EXPIRED_TICKETS, "Train, flight, bus and movie tickets whose date passed about two weeks ago. Cancelled tickets are kept until the refund has had time to arrive.",
             "Check each one (some are needed for refunds or expense claims), then delete it.");
-        put(GREETINGS, "Good-morning, festival and other greeting images received in chats more than a week ago.",
+        put(GREETINGS, "Good-morning, festival and other greeting images received in chats more than about 11 days ago.",
             "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
         put(ACCIDENTAL, "Very dark, covered or badly shaken shots, usually taken by accident.",
             "Look at each one; delete it in your gallery if nothing is in it.");
+        put(EXPIRED_OFFERS, "Screenshots of coupons, promo codes, vouchers and offers whose validity date has passed (or, with no date, saved more than about 11 weeks ago).",
+            "Check each one, then delete it in your gallery.");
+        put(ORDER_UPDATES, "Order tracking, delivery, cab and food order screens from weeks ago. The app that sent them keeps the history.",
+            "Check each one (a return or complaint may still be open), then delete it.");
+        put(SHORT_LIVED, "Directions and weather (after a week or two), parking and queue slips, and appointments and reservations whose day passed about 10 days ago.",
+            "Delete them in your gallery (Screenshots).");
+        put(SHOPPING, "Product pages and offers you took screenshots of more than about 3 months ago. Prices and stock have changed since.",
+            "Delete them in your gallery (Screenshots).");
+        put(OLD_RECEIPTS, "Receipts for small purchases (under ₹1,000) older than about 10 months, with no warranty on them. Large purchases and anything with a warranty are always kept.",
+            "Check each one, then delete it.");
+        put(FORWARDS, "Memes, jokes and forwarded posts received in chats more than about 7 weeks ago.",
+            "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
         put(BURSTS, "Photos taken within minutes of each other that look almost identical. The better one is kept: eyes open, faces visible, sharper, better lit.",
             "Look at each one; delete the extras in your gallery if you agree.");
         put(BLURRY, "Photos much softer than the rest of your photos. Some may be intentional (motion, low light, close-ups).",
