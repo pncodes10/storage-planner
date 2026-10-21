@@ -129,6 +129,24 @@ public final class OverviewScreen extends Screen {
         LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-1, -2); sl.topMargin = dp(8);
         content.addView(search, sl);
 
+        java.util.List<com.storageplanner.core.FileItem> gone = Session.pictures.get(Session.NOT_NEEDED);
+        if (gone != null && !gone.isEmpty()) {
+            long gb = 0; for (com.storageplanner.core.FileItem f : gone) gb += f.size;
+            LinearLayout t = new LinearLayout(a);
+            t.setOrientation(LinearLayout.VERTICAL);
+            t.setBackground(Ui.round(Ui.surface, dp(12)));
+            t.setPadding(dp(12), dp(10), dp(12), dp(10));
+            t.setMinimumHeight(dp(64));
+            t.addView(Ui.text(a, "Not needed any more", 16, Ui.text, true));
+            t.addView(Ui.text(a, gone.size() + " · " + com.storageplanner.core.Report.size(gb), 14, Ui.text, false));
+            t.addView(Ui.text(a, "Checked by what each picture shows: expired coupons, past trips, old codes, delivered orders, forwards. Tap to review.", 13, Ui.text2, false));
+            t.setContentDescription("Not needed any more, " + gone.size() + " pictures, " + com.storageplanner.core.Report.size(gb)
+                    + ". Pictures whose content is no longer useful. Double tap to review.");
+            t.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(PicturesScreen.category(a, Session.NOT_NEEDED)); } });
+            LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(-1, -2); gl.topMargin = dp(8);
+            content.addView(t, gl);
+        }
+
         LinearLayout grid = new LinearLayout(a);
         grid.setOrientation(LinearLayout.VERTICAL);
         LinearLayout row = null; int col = 0;

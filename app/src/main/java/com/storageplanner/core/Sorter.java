@@ -121,7 +121,7 @@ final class Sorter {
             }
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, v, f.faces);
             f.category = c.category; f.catDate = c.date; f.textPending = false;
-            String t = TextRules.clean(words);
+            String t = TextRules.withAmounts(TextRules.clean(words), words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
     }

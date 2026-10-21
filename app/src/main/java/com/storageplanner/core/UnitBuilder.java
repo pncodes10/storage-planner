@@ -30,6 +30,8 @@ public final class UnitBuilder {
 
     public final List<Unit> units = new ArrayList<Unit>();
     public final Detections det = new Detections();
+    /** Whether each sorted picture will be needed again (by path). */
+    public final Map<String, FutureNeed.Assessment> need = new HashMap<String, FutureNeed.Assessment>();
 
     public UnitBuilder(Scanner.Result r, Estimates est, int sdk) {
         long now = r.now;
@@ -139,20 +141,12 @@ public final class UnitBuilder {
             String burstOf = det.burstExtraOf.get(f.rel);
             if (burstOf != null) u.add(new Option("delete", Techniques.BURSTS, s, Option.R4, true, burstWhy(f, byRel.get(burstOf))));
             if (det.blurry.contains(f.rel)) u.add(new Option("delete", Techniques.BLURRY, s, Option.R4, true, "Much softer than your other photos"));
-            // picture categories (1.6)
+            // pictures: suggested only when what they show is no longer needed (FutureNeed, 1.7)
             if (f.category != null) {
-                String c = f.category;
-                if (c.equals(PhotoCategory.OTP) && age > 1)
-                    u.add(new Option("delete", Techniques.OTP_SHOTS, s, Option.R4, true, "Screenshot of a one-time code, " + Math.round(age) + " days old"));
-                else if (c.equals(PhotoCategory.PAYMENT) && age > 90)
-                    u.add(new Option("delete", Techniques.OLD_PAYMENTS, s, Option.R4, true, "Payment confirmation from " + Math.round(age) + " days ago"));
-                else if (c.equals(PhotoCategory.TICKET) && (f.catDate > 0 ? now - f.catDate > 7 * DAY : age > 180))
-                    u.add(new Option("delete", Techniques.EXPIRED_TICKETS, s, Option.R4, true,
-                            f.catDate > 0 ? "Ticket for " + Report.day(f.catDate) + ", which has passed" : "Ticket saved " + Math.round(age) + " days ago"));
-                else if (c.equals(PhotoCategory.GREETING) && age > 7 && (a.startsWith("wa_") || a.equals("telegram_media")))
-                    u.add(new Option("delete", Techniques.GREETINGS, s, Option.R4, true, "Greeting image received " + Math.round(age) + " days ago"));
-                else if (c.equals(PhotoCategory.ACCIDENTAL))
-                    u.add(new Option("delete", Techniques.ACCIDENTAL, s, Option.R4, true, "Almost nothing visible in this shot"));
+                FutureNeed.Assessment fn = FutureNeed.assess(f, now);
+                need.put(f.rel, fn);
+                if (fn.verdict == FutureNeed.NOT_NEEDED && fn.technique != null)
+                    u.add(new Option("delete", fn.technique, s, Option.R4, true, fn.why));
             }
             if (a.equals("download") && age > OLD_DOWNLOAD_DAYS && s >= OLD_DOWNLOAD_MIN && u.options.isEmpty())
                 u.add(new Option("delete", Techniques.OLD_DOWNLOADS, s, Option.R4, true, "Download untouched for " + Math.round(age) + " days"));

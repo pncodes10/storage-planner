@@ -52,6 +52,22 @@ public final class TextRules {
         return b.toString().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
     }
 
+    static final Pattern MONEY_WORD = Pattern.compile("[^\\d\\s]?\\d{1,3}(,\\d{2,3})+(\\.\\d{1,2})?|[^\\d\\s]?\\d+\\.\\d{2}");
+
+    /**
+     * clean() plus the amounts it dropped: big bold amounts on payment screens are often read with low
+     * confidence, and the reader has no rupee sign, so "₹1,093" may come out as "71,093". Read that way an
+     * amount can only look larger than it is, never smaller, so FutureNeed may rely on it as an upper bound.
+     */
+    public static String withAmounts(String clean, Words w) {
+        StringBuilder b = new StringBuilder(clean);
+        for (int i = 0; i < w.text.size(); i++) {
+            String t = w.text.get(i).trim();
+            if (w.conf.get(i) < 45 && w.conf.get(i) >= 10 && MONEY_WORD.matcher(t).matches()) b.append(b.length() == 0 ? "" : " ").append(t.toLowerCase(Locale.ROOT));
+        }
+        return b.toString();
+    }
+
     // ------------------------------------------------------------------ evidence
     static final String[] OTP = {"otp", "one time password", "one-time password", "verification code", "security code", "login code",
             "passcode", "do not share", "don't share", "never share", "valid for", "expires in"};

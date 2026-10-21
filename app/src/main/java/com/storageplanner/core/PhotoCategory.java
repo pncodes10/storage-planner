@@ -89,7 +89,7 @@ public final class PhotoCategory {
         if (code != null) { r.category = QR; r.why = "Contains a code"; return r; }
         if (sig == null) { r.category = shot ? SCREENSHOT : PHOTO; return r; }
         if (shot) { r.category = SCREENSHOT; return r; }
-        if (accidental(sig)) { r.category = ACCIDENTAL; r.why = sig.darkFrac > 0.6 ? "Almost completely dark" : "Very blurred, no detail"; return r; }
+        if (accidental(sig) || isCamera(f) && blackFrame(sig)) { r.category = ACCIDENTAL; r.why = sig.darkFrac > 0.6 ? "Almost completely dark" : "Very blurred, no detail"; return r; }
         if (text != null && text.goodWords >= 25) { r.category = DOCUMENT; r.why = text.goodWords + " words"; return r; }
         if (sig.flat >= 0.35 && !isCamera(f) && !sig.wordy() && (text == null || text.goodWords < 5)) { r.category = GRAPHIC; return r; }
         if (sig.flat >= 0.35 && !isCamera(f)) { r.category = DOCUMENT; r.why = "Mostly text"; return r; }
@@ -104,6 +104,14 @@ public final class PhotoCategory {
         if (s.contrast < 16) return true;                                  // nothing in the picture
         if (s.meanLuma < 25 && s.contrast < 30) return true;               // dark
         return s.sharp >= 0 && s.sharp < 0.12 && s.meanLuma > 25;          // shaken: no sharp detail anywhere
+    }
+
+    /**
+     * A camera frame that is black from edge to edge (lens covered, in a pocket). JPEG squeezes it into a few
+     * levels, so it looks "flat" like a screen and accidental() leaves it alone; from the camera it can only be this.
+     */
+    public static boolean blackFrame(ImageSignals.S s) {
+        return s.darkFrac > 0.97 && s.meanLuma < 15 && s.contrast < 6 && s.textBlobs < 5;
     }
 
     public static boolean isScreenshot(FileItem f) {

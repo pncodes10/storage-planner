@@ -156,7 +156,10 @@ Not judged: smiles, head turns that keep both eyes visible, and composition.
 The overview has a **Your pictures** section. It shows every category with its count and size, plus a
 **search box** for the text found in pictures (try a shop name, "pnr" or "invoice").
 
-| Category | How it is recognised | Suggested for deletion? |
+Since 1.7 the last column is decided by what each picture shows, not by its category alone (see
+[Will you need it again?](#will-you-need-it-again-new-in-17)).
+
+| Category | How it is recognised | Suggested for deletion? (1.6) |
 |---|---|---|
 | People | Android's on-device face detector | No |
 | Photos without faces | Camera photos with no faces and no text | No |
@@ -232,6 +235,70 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 - **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
 - **The app's own reader page** (`tools/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
 
+## Will you need it again? (new in 1.7)
+
+Every sorted picture now gets a verdict from what it shows (`FutureNeed`):
+- **Keep:** likely needed again.
+- **Your call:** may not be needed. Never suggested.
+- **Not needed any more:** suggested for deletion (still needs your confirmation).
+
+The details page shows the verdict, the reasons and, for things that expire, when the picture will stop
+being needed ("Not needed after about 12 Dec 2026"). **Your pictures** starts with a **Not needed any more**
+tile that opens all of them in the usual grid, with Select, Approve deletion, Keep and Undo.
+
+**What it reads in a picture:**
+
+| Kind | Useful until | Example reason |
+|---|---|---|
+| One-time code | About a day and a half | "A one-time code stops working within minutes" |
+| Coupon or offer | A few days after its expiry date (about 11 weeks after saving if none is printed) | "Expired on 30 Aug 2026, 45 days ago" |
+| Ticket or pass | About two weeks after the trip or show (about 7 months after saving if no date is read); cancelled ones about 3 months | "Trip or show was on 12 Aug 2026" |
+| Delivery or order update | About six weeks after delivery | "Delivery or order update: \"delivered on\", \"order #\"" |
+| Ride or food order status; map; weather; parking or queue slip | About 4 weeks; 2 weeks; 5 days; 6 days | |
+| Appointment or reservation | About 10 days after its date | |
+| Shopping page | About 3 months | |
+| Payment | Under ₹2,000: about 4 months. ₹2,000 to ₹10,000: about 22 months. Failed: about 3 weeks. Pending or refund: about 3½ months | "Small payment (about ₹250)" |
+| Payment for rent, fees, EMI, insurance or tax; ₹10,000 or more | **Always kept** | "Payment for \"house rent\": proof of payment" |
+| Payment whose amount could not be read | **Never suggested** (it may be a large one) | |
+| Small receipt (under ₹1,000) | About 10 months | |
+| Greeting from a chat; meme or forward | About 11 days; about 7 weeks | |
+| Warranty card or receipt with a serial number / IMEI, prescription, lab report, insurance, certificate, contract, salary slip, Wi-Fi or bank details, ID documents, bills | **Always kept** | "Medical record: \"prescription\", \"patient\"" |
+| Photos, people, chats, documents, other screenshots | **Never suggested** (old screenshots become "your call") | |
+
+**What else counts:**
+- **Faces.** A greeting or forward with people in it is at most "your call".
+- **A folder you named yourself**, like `Pictures/Important` or `Pictures/Tax 2025`. Anything in it is kept.
+- **Text not read yet.** Not judged until the text is read.
+
+**New recommendations:**
+- Expired coupons and offers.
+- Old delivery, ride and food order updates.
+- Short-lived screenshots: maps, weather, tokens.
+- Old shopping screenshots.
+- Small receipts past any return window.
+- Memes and forwards from chats.
+
+They replace 1.6's fixed rules for one-time codes, payments, tickets, greetings and accidental shots.
+
+**Reading improvements:**
+- The big bold amount on payment screens is often read with low confidence. Those amounts are now kept.
+- The reader has no rupee sign and may read "₹1,093" as "71,093". That can only make an amount look
+  larger, so it is used as an upper bound.
+- Completely black camera frames (lens covered) are now "Accidental shots".
+
+**Tests on pictures** (`FutureNeedCorpusTest`; how they were made is in `tools/futureneed/README.md`):
+- A test phone with 368 pictures, rendered and read with the app's own text reader.
+- The rules were tuned on one set. The numbers below come from a fresh set made after the rules stopped
+  changing:
+
+| | Not needed and suggested | Still needed but suggested |
+|---|---|---|
+| 1.7 | **132 of 144 (91.7%)** | **0 of 224** |
+| 1.6 rules on the same pictures | 33 of 144 (22.9%) | 31 of 224 (large and rent payments, cancelled tickets awaiting refund, pictures in "Important") |
+
+What is still missed is mostly payments whose amount can't be read reliably. They are left as "your call".
+`FutureNeedTest` checks 56 hand-written cases (each kind, dates, amounts, folders and the safety floors).
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -283,6 +350,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **ImageFeatures:** perceptual hash and sharpness.
   - **PhotoQuality / EyeState:** which near-identical shot is better (faces, eyes, focus, light).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
+  - **FutureNeed:** whether each picture will be needed again (1.7).
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
   - **UnitBuilder:** options.
@@ -296,8 +364,9 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **MainActivity:** the UI, back stack and its restore after process death.
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), picture-category (CategoryTest, TextRulesTest) and reader-bridge (OcrBridgeTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), picture-category (CategoryTest, TextRulesTest), future-need (FutureNeedTest, FutureNeedCorpusTest) and reader-bridge (OcrBridgeTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
+- `tools/futureneed/`: the labelled test phone for FutureNeed (build.py, ocr.py) and its results.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`: pinned hashes of the text-reader files (checked by the audit).
 - `tools/`:

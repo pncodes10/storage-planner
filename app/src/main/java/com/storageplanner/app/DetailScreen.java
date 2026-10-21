@@ -105,6 +105,14 @@ public final class DetailScreen extends Screen {
             if (f.code != null) fact(facts, "Code", f.code);
             if (f.catDate > 0) fact(facts, "Date in the picture", Report.day(f.catDate));
             if (f.faces > 0) fact(facts, "Faces", String.valueOf(f.faces));
+            com.storageplanner.core.FutureNeed.Assessment fn = Session.ub == null ? null : Session.ub.need.get(f.rel);
+            if (fn != null) {
+                StringBuilder w = new StringBuilder(com.storageplanner.core.FutureNeed.verdictLabel(fn.verdict));
+                w.append(" (").append(com.storageplanner.core.FutureNeed.label(fn.kind)).append(")");
+                for (String r : fn.reasons) w.append("\n• ").append(r);
+                if (fn.deletableFrom > Session.result.now) w.append("\n• Not needed after about ").append(Report.day(fn.deletableFrom));
+                fact(facts, "Needed later?", w.toString());
+            }
             if (f.text != null) fact(facts, "Text read", f.text.length() > 300 ? f.text.substring(0, 300) + "…" : f.text);
         }
         fact(facts, "Full path", f.abs);
