@@ -16,6 +16,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Toast;
 
+import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.ResultStore;
 import com.storageplanner.core.Techniques;

@@ -1,5 +1,17 @@
 package com.storageplanner.core;
 
+import com.storageplanner.tools.Pixels;
+import com.storageplanner.tools.category.PhotoCategory;
+import com.storageplanner.tools.codes.Codes;
+import com.storageplanner.tools.exposure.Exposure;
+import com.storageplanner.tools.eyes.EyeState;
+import com.storageplanner.tools.faces.Faces;
+import com.storageplanner.tools.layout.ImageSignals;
+import com.storageplanner.tools.ocr.TextRules;
+import com.storageplanner.tools.quality.PhotoQuality;
+import com.storageplanner.tools.sharpness.Sharpness;
+import com.storageplanner.tools.similarity.PerceptualHash;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -38,7 +50,7 @@ public final class Lab {
         int[] px = pf.argb(path, edge, d);
         if (px == null) { o.line("  ! could not decode the picture at " + edge + " px"); return null; }
         Img m = new Img();
-        m.px = px; m.l = Sorter.luma(px); m.w = d[2]; m.h = d[3]; m.ow = d[0]; m.oh = d[1];
+        m.px = px; m.l = Pixels.luma(px); m.w = d[2]; m.h = d[3]; m.ow = d[0]; m.oh = d[1];
         m.ms = (System.nanoTime() - t0) / 1000000;
         o.line(f("  decoded %d x %d (original %d x %d, upright) in %d ms", m.w, m.h, m.ow, m.oh, m.ms));
         return m;
@@ -210,7 +222,7 @@ public final class Lab {
         Img k = load(pf, p.path, Sorter.EDGE, o);
         if (k != null) {
             o.line(f("  blur score (used for 'possibly blurry' and when shots were not measured): %.1f   [90th percentile Laplacian variance, 1024 px]",
-                    ImageFeatures.sharpness(k.l, k.w, k.h)));
+                    Sharpness.of(k.l, k.w, k.h)));
             o.line("  'possibly blurry' needs a blur score below " + UnitBuilder.BLUR_REL + " x the median of all your camera photos");
         }
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
@@ -294,7 +306,7 @@ public final class Lab {
             o.line(" " + pics.get(i).name);
             Img m = load(pf, pics.get(i).path, Sorter.EDGE, o);
             if (m == null) return;
-            h[i] = ImageFeatures.phash(m.l, m.w, m.h);
+            h[i] = PerceptualHash.phash(m.l, m.w, m.h);
             dims[i] = new int[]{m.ow, m.oh};
             o.line(f("  perceptual hash %016x", h[i]));
         }
@@ -302,7 +314,7 @@ public final class Lab {
                 + " of 63 bits (WhatsApp copy of a camera photo: <= " + UnitBuilder.SENT_MATCH_BITS + " bits, same shape)");
         for (int i = 0; i < pics.size(); i++)
             for (int j = i + 1; j < pics.size(); j++) {
-                int bits = ImageFeatures.hamming(h[i], h[j]);
+                int bits = PerceptualHash.hamming(h[i], h[j]);
                 long dt = Math.abs(pics.get(i).mtime - pics.get(j).mtime);
                 boolean size = dims[i][0] == dims[j][0] && dims[i][1] == dims[j][1], time = dt <= UnitBuilder.BURST_WINDOW_MS, look = bits <= UnitBuilder.NEAR_DUP_BITS;
                 o.line(f("  %s ~ %s: %d bits apart (%s), %s apart in time (%s), size %s -> %s", cut(pics.get(i).name, 22), cut(pics.get(j).name, 22), bits,
@@ -343,7 +355,7 @@ public final class Lab {
                 s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.textHeight, 100 * s.bigText));
         o.line("  code: " + (f.code == null ? "none" : f.code) + "; faces counted: " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces)));
         boolean read = PhotoCategory.worthReading(f, s);
-        o.line("  accidental shot? " + PhotoCategory.accidental(s) + "; worth reading the text? " + read);
+        o.line("  accidental shot? " + Exposure.accidental(s) + "; worth reading the text? " + read);
         TextRules.Verdict v = null;
         if (read) v = readAndJudge(pf, f, s, prep.aspect, now, o);
         PhotoCategory.Result r = PhotoCategory.classify(f, s, f.code, v, f.faces);

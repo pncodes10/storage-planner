@@ -3,6 +3,9 @@ package com.storageplanner.test;
 import com.storageplanner.core.AppItem;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Platform;
+import com.storageplanner.tools.faces.FaceNet;
+import com.storageplanner.tools.faces.Faces;
+import com.storageplanner.tools.ocr.TextRules;
 
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -105,16 +108,16 @@ public final class JvmPlatform implements Platform {
         } catch (Exception e) { return null; }
     }
 
-    private static com.storageplanner.core.FaceNet net;
+    private static com.storageplanner.tools.faces.FaceNet net;
     private static boolean netTried;
 
     /** The app's face detector (YuNet, from app/src/main/assets/faces/yunet.bin or -Dfacemodel=...); null if missing. */
-    static synchronized com.storageplanner.core.FaceNet net() {
+    static synchronized com.storageplanner.tools.faces.FaceNet net() {
         if (!netTried) {
             netTried = true;
             File m = new File(System.getProperty("facemodel", "app/src/main/assets/faces/yunet.bin"));
             if (!m.exists()) m = new File(System.getProperty("user.dir"), "../app/src/main/assets/faces/yunet.bin");
-            try { if (m.exists()) net = com.storageplanner.core.FaceNet.load(Files.readAllBytes(m.toPath())); } catch (Exception e) { net = null; }
+            try { if (m.exists()) net = com.storageplanner.tools.faces.FaceNet.load(Files.readAllBytes(m.toPath())); } catch (Exception e) { net = null; }
         }
         return net;
     }
@@ -124,7 +127,7 @@ public final class JvmPlatform implements Platform {
      * the "<photo>.faces" sidecars are used instead (see otherFaces).
      */
     public float[] faces(String path, int[] argb, int w, int h) {
-        if (!"sidecar".equals(System.getProperty("faces")) && net() != null) return com.storageplanner.core.Faces.detect(net(), argb, w, h);
+        if (!"sidecar".equals(System.getProperty("faces")) && net() != null) return com.storageplanner.tools.faces.Faces.detect(net(), argb, w, h);
         return otherFaces(path, argb, w, h);
     }
 
@@ -147,15 +150,15 @@ public final class JvmPlatform implements Platform {
             }
             float[] out = new float[fs.size() * 4];
             for (int i = 0; i < fs.size(); i++) System.arraycopy(fs.get(i), 0, out, i * 4, 4);
-            return com.storageplanner.core.Faces.fromMidpoints(out);
+            return com.storageplanner.tools.faces.Faces.fromMidpoints(out);
         } catch (Exception e) { return new float[0]; }
     }
 
     /** Stand-in for the phone's text reader: the words recorded from the same Tesseract build ("<picture>.ocr.json"). */
-    public com.storageplanner.core.TextRules.Words readText(String path, int[] argb, int w, int h) {
+    public com.storageplanner.tools.ocr.TextRules.Words readText(String path, int[] argb, int w, int h) {
         File small = new File(path + ".ocr360.json"), side = Math.max(w, h) <= 360 && small.exists() ? small : new File(path + ".ocr.json");   // small second look at chat images
         if (!side.exists()) return null;
-        try { return CategoryTest.words(new String(Files.readAllBytes(side.toPath()), StandardCharsets.UTF_8)); } catch (Exception e) { return null; }
+        try { return words(new String(Files.readAllBytes(side.toPath()), StandardCharsets.UTF_8)); } catch (Exception e) { return null; }
     }
 
     public boolean imageSize(String path, int[] dims) {
@@ -213,5 +216,28 @@ public final class JvmPlatform implements Platform {
             }
             return p.waitFor() == 0 ? sb.toString() : null;
         } catch (Exception e) { return null; }
+    }
+
+    /** The "words" array of an .ocr.json file: [["text", conf], ...]. */
+    public static TextRules.Words words(String json) {
+        TextRules.Words w = new TextRules.Words();
+        int i = json.indexOf("\"words\"");
+        if (i < 0) return w;
+        Matcher m = Pattern.compile("\\[\"((?:[^\"\\\\]|\\\\.)*)\", (-?\\d+)\\]").matcher(json.substring(i));
+        while (m.find()) w.add(unescape(m.group(1)), Integer.parseInt(m.group(2)));
+        return w;
+    }
+
+    static String unescape(String s) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' && i + 1 < s.length()) {
+                char d = s.charAt(++i);
+                if (d == 'u' && i + 4 < s.length()) { b.append((char) Integer.parseInt(s.substring(i + 1, i + 5), 16)); i += 4; }
+                else if (d == 'n') b.append('\n'); else b.append(d);
+            } else b.append(c);
+        }
+        return b.toString();
     }
 }

@@ -1,5 +1,7 @@
 package com.storageplanner.core;
 
+import com.storageplanner.tools.quality.PhotoQuality;
+
 /** One file on shared storage plus everything the analyzer learned about it. */
 public final class FileItem {
     public final String rel;      // path relative to the storage root, '/' separated

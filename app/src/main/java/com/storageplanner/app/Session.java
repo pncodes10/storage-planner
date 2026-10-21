@@ -3,16 +3,17 @@ package com.storageplanner.app;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
 import com.storageplanner.core.AppItem;
 import com.storageplanner.core.Categories;
 import com.storageplanner.core.Estimates;
 import com.storageplanner.core.FileItem;
-import com.storageplanner.core.FutureNeed;
 import com.storageplanner.core.Option;
 import com.storageplanner.core.Planner;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Review;
 import com.storageplanner.core.Scanner;
+import com.storageplanner.core.Techniques;
 import com.storageplanner.core.Unit;
 import com.storageplanner.core.UnitBuilder;
 

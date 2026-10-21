@@ -1,5 +1,7 @@
 package com.storageplanner.core;
 
+import com.storageplanner.tools.ocr.TextRules;
+
 import java.util.List;
 
 /** Everything the core needs from the device. Android and the desktop test harness implement it. */

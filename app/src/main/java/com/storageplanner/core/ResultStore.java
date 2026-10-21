@@ -1,5 +1,7 @@
 package com.storageplanner.core;
 
+import com.storageplanner.tools.quality.PhotoQuality;
+
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;

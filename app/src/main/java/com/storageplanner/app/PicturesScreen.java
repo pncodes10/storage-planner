@@ -15,8 +15,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
-import com.storageplanner.core.FutureNeed;
-import com.storageplanner.core.PhotoCategory;
+import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
+import com.storageplanner.tools.category.PhotoCategory;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Unit;
 

@@ -3,9 +3,12 @@ package com.storageplanner.app;
 import android.content.Context;
 
 import com.storageplanner.core.Estimates;
+import com.storageplanner.core.FileItem;
 import com.storageplanner.core.ResultStore;
 import com.storageplanner.core.Scanner;
 import com.storageplanner.core.UnitBuilder;
+import com.storageplanner.platform.android.AndroidPlatform;
+import com.storageplanner.platform.android.Calibrator;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;

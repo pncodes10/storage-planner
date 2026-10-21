@@ -233,7 +233,7 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 - **No wrong deletion suggestions on the test phone.** No everyday photo was put in a deletable category, and no greeting, OTP, payment or ticket was wrongly assigned.
 - **Little extra reading.** Only 8 of 78 everyday photos were sent to the text reader.
 - **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
-- **The app's own reader page** (`tools/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
+- **The app's own reader page** (`scripts/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
 
 ## Will you need it again? (new in 1.9)
 
@@ -286,7 +286,7 @@ They replace 1.6's fixed rules for one-time codes, payments, tickets, greetings 
   larger, so it is used as an upper bound.
 - Completely black camera frames (lens covered) are now "Accidental shots".
 
-**Tests on pictures** (`FutureNeedCorpusTest`; how they were made is in `tools/futureneed/README.md`):
+**Tests on pictures** (`FutureNeedCorpusTest`; how they were made is in `testdata/futureneed/README.md`):
 - A test phone with 368 pictures, rendered and read with the app's own text reader.
 - The rules were tuned on one set. The numbers below come from a fresh set made after the rules stopped
   changing:
@@ -394,7 +394,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 
 **Android Studio:** open this folder, let it sync (AGP 8.5, JDK 17), then **Build → Build APK(s)**. The project has no dependencies beyond the Android framework.
 
-**Without Android Studio:** `tools/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
+**Without Android Studio:** `scripts/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
 
 ## Layout
 
@@ -408,7 +408,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
   - **FutureNeed:** whether each picture will be needed again (1.9).
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
-- `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
+- `app/src/main/assets/faces/`: YuNet's weights converted by `scripts/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
   - **UnitBuilder:** options.
   - **Planner:** tiered planner.
@@ -423,10 +423,10 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
 - `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), future-need (FutureNeedTest, FutureNeedCorpusTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
-- `tools/futureneed/`: the labelled test phone for FutureNeed (build.py, ocr.py) and its results.
-- `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
+- `testdata/futureneed/`: the labelled test phone for FutureNeed (build.py, ocr.py) and its results.
+- `scripts/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
-- `tools/facemodel/`: converts YuNet for the app, and records OpenCV's answers for FaceNetTest.
+- `scripts/facemodel/`: converts YuNet for the app, and records OpenCV's answers for FaceNetTest.
 - `tools/`:
   - **apkbuild.py:** packager and v2 signer.
   - **strip_methodparams.py:** strips an attribute old D8 can't read.

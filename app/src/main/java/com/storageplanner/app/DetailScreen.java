@@ -11,10 +11,12 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Option;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Unit;
+import com.storageplanner.tools.category.PhotoCategory;
 
 import java.util.HashMap;
 import java.util.List;
@@ -101,14 +103,14 @@ public final class DetailScreen extends Screen {
         else if (f.bitrate > 0) fact(facts, "Audio", (f.bitrate / 1000) + " kbps");
         if (f.apkPackage != null) fact(facts, "Installer for", f.apkPackage);
         if (f.category != null) {
-            fact(facts, "Picture category", com.storageplanner.core.PhotoCategory.label(f.category) + (f.textPending ? " (text not read yet)" : ""));
+            fact(facts, "Picture category", com.storageplanner.tools.category.PhotoCategory.label(f.category) + (f.textPending ? " (text not read yet)" : ""));
             if (f.code != null) fact(facts, "Code", f.code);
             if (f.catDate > 0) fact(facts, "Date in the picture", Report.day(f.catDate));
             if (f.faces > 0) fact(facts, "Faces", String.valueOf(f.faces));
-            com.storageplanner.core.FutureNeed.Assessment fn = Session.ub == null ? null : Session.ub.need.get(f.rel);
+            com.storageplanner.algorithms.v2_futureneed.FutureNeed.Assessment fn = Session.ub == null ? null : Session.ub.need.get(f.rel);
             if (fn != null) {
-                StringBuilder w = new StringBuilder(com.storageplanner.core.FutureNeed.verdictLabel(fn.verdict));
-                w.append(" (").append(com.storageplanner.core.FutureNeed.label(fn.kind)).append(")");
+                StringBuilder w = new StringBuilder(com.storageplanner.algorithms.v2_futureneed.FutureNeed.verdictLabel(fn.verdict));
+                w.append(" (").append(com.storageplanner.algorithms.v2_futureneed.FutureNeed.label(fn.kind)).append(")");
                 for (String r : fn.reasons) w.append("\n• ").append(r);
                 if (fn.deletableFrom > Session.result.now) w.append("\n• Not needed after about ").append(Report.day(fn.deletableFrom));
                 fact(facts, "Needed later?", w.toString());

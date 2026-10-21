@@ -14,7 +14,7 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
-import com.storageplanner.core.PhotoQuality;
+import com.storageplanner.tools.quality.PhotoQuality;
 
 import java.util.ArrayList;
 import java.util.List;

@@ -1,5 +1,10 @@
 package com.storageplanner.core;
 
+import com.storageplanner.algorithms.v2_futureneed.FutureNeed;
+import com.storageplanner.tools.category.PhotoCategory;
+import com.storageplanner.tools.quality.PhotoQuality;
+import com.storageplanner.tools.similarity.PerceptualHash;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -107,7 +112,7 @@ public final class UnitBuilder {
             double ar = (double) s.width / s.height;
             for (FileItem c : cam) {
                 if (c.height == 0 || det.burstExtraOf.containsKey(c.rel) || det.blurry.contains(c.rel)) continue;
-                if (Math.abs((double) c.width / c.height - ar) < 0.02 && ImageFeatures.hamming(c.phash, s.phash) <= SENT_MATCH_BITS) {
+                if (Math.abs((double) c.width / c.height - ar) < 0.02 && PerceptualHash.hamming(c.phash, s.phash) <= SENT_MATCH_BITS) {
                     det.sentCopyOf.put(s.rel, c.rel); break;
                 }
             }
@@ -202,7 +207,7 @@ public final class UnitBuilder {
             FileItem a = cam.get(i);
             for (int j = i + 1; j < cam.size() && cam.get(j).mtime - a.mtime <= BURST_WINDOW_MS; j++) {
                 FileItem b = cam.get(j);
-                if (a.width == b.width && a.height == b.height && ImageFeatures.hamming(a.phash, b.phash) <= NEAR_DUP_BITS)
+                if (a.width == b.width && a.height == b.height && PerceptualHash.hamming(a.phash, b.phash) <= NEAR_DUP_BITS)
                     parent[find(parent, i)] = find(parent, j);
             }
         }
