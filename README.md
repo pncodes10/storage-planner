@@ -163,7 +163,7 @@ Since 1.9 the last column is decided by what each picture shows, not by its cate
 |---|---|---|
 | People | The face detector (YuNet, on the phone); 31 of 31 test photos with people | No |
 | Photos without faces | Camera photos with no faces and no text | No |
-| QR codes & barcodes | The code is decoded (ZXing). The card says what it is for: "UPI payment code for …", "Wi-Fi network …", "Link to …" | No |
+| QR codes & barcodes | The code is decoded (ZXing). The card says what it is for: "UPI payment code for …", "Wi-Fi network …", "Link to …" | No (since 1.9: yes after about 3 weeks, except Wi-Fi codes) |
 | Receipts | Text: totals, cash, change, GST lines, many prices; a tall, narrow shape | No (browse and search) |
 | Bills & invoices | Text: invoice, bill to, due date, GSTIN, amount due; a page shape | No (browse and search) |
 | Documents & text | Mostly text (pages, notes, printouts) | No |
@@ -257,13 +257,14 @@ tile that opens all of them in the usual grid, with Select, Approve deletion, Ke
 | Ride or food order status; map; weather; parking or queue slip | About 4 weeks; 2 weeks; 5 days; 6 days | |
 | Appointment or reservation | About 10 days after its date | |
 | Shopping page | About 3 months | |
+| QR code or barcode (payment, link, anything but Wi-Fi) | About 3 weeks: a code is used once | "A QR code is used once (UPI payment code for …)" |
 | Sale or shop ad ("Buy 1 Get 1", "Sale is live"), not a photo you took | About 2 weeks (until its end date, if it prints one) | "Sale or shop ad: \"buy 1 get\", \"sale is live\"" |
 | Payment | Under ₹2,000: about 4 months. ₹2,000 to ₹10,000: about 22 months. Failed: about 3 weeks. Pending or refund: about 3½ months | "Small payment (about ₹250)" |
 | Payment for rent, fees, EMI, insurance or tax; ₹10,000 or more | **Always kept** | "Payment for \"house rent\": proof of payment" |
 | Payment whose amount could not be read | **Never suggested** (it may be a large one) | |
 | Small receipt (under ₹1,000) | About 10 months | |
 | Greeting from a chat; meme or forward | About 11 days; about 7 weeks | |
-| Warranty card or receipt with a serial number / IMEI, prescription, lab report, insurance, certificate, contract, salary slip, Wi-Fi or bank details, ID documents, bills | **Always kept** | "Medical record: \"prescription\", \"patient\"" |
+| Warranty card or receipt with a serial number / IMEI, prescription, lab report, insurance, certificate, contract, salary slip, Wi-Fi or bank details (Wi-Fi QR codes too), ID documents, bills | **Always kept** | "Medical record: \"prescription\", \"patient\"" |
 | Photos, people, chats, documents, other screenshots | **Never suggested** (old screenshots become "your call") | |
 
 **What else counts:**
@@ -279,6 +280,7 @@ tile that opens all of them in the usual grid, with Select, Approve deletion, Ke
 - Old shopping screenshots.
 - Small receipts past any return window.
 - Memes and forwards from chats.
+- QR codes you have already used.
 
 They replace 1.6's fixed rules for one-time codes, payments, tickets, greetings and accidental shots.
 

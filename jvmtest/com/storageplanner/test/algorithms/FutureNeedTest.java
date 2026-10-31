@@ -109,6 +109,16 @@ public final class FutureNeedTest {
         expect("ad with an end date still ahead", pic(WA, "wa_image", PhotoCategory.GRAPHIC, "Mega sale is live, flat 50% off. Offer ends 30 Nov 2026. Shop now", 20), K, "coupon");
         FileItem adFaces = pic(WA, "wa_image", PhotoCategory.PEOPLE, LOGGED, 40); adFaces.faces = 2;
         expect("ad with people in it", adFaces, K, "people");
+        // QR codes are used once (a shop's payment code from IMG-20261024-WA0000 in the Algorithm Lab); Wi-Fi codes hold a password
+        FileItem qr = pic(WA, "wa_image", PhotoCategory.QR, "scan & pay upi id: yb9koi7v3h0z231802", 7);
+        qr.code = "UPI payment code for Verified Merchant";
+        expect("shop's UPI QR a week old", qr, K, "qr");
+        FileItem qrOld = pic(WA, "wa_image", PhotoCategory.QR, "scan & pay", 30); qrOld.code = "UPI payment code for Verified Merchant";
+        expect("shop's UPI QR a month old", qrOld, D, "qr");
+        FileItem link = pic("DCIM/Camera/IMG_10.jpg", "camera", PhotoCategory.QR, null, 60); link.code = "Link to example.com";
+        expect("link QR photographed 2 months ago", link, D, "qr");
+        FileItem wifiQr = pic(SHOT, "screenshot", PhotoCategory.QR, null, 900); wifiQr.code = "Wi-Fi network Airtel_Ravi";
+        expect("Wi-Fi QR kept", wifiQr, K, "credential");
         // amounts and dates
         checks++; if (FutureNeed.amount("biscuits 64,44 paneer 51.02") != 51.02) { fails++; System.out.println("FAIL decimal comma taken as thousands"); }
         checks++; if (FutureNeed.total("cash 600.00 change 64.50 total 535.50 thank you") != 535.5) { fails++; System.out.println("FAIL receipt total"); }

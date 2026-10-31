@@ -60,7 +60,6 @@ public final class FutureNeed implements DeletionAlgorithm {
         life("receipt", "Receipt", 0.8, 0.8, F, F, null);
         life("document", "Document", 0.8, 0.8, F, F, null);
         life("chat", "Chat screenshot", 0.7, 0.7, F, F, null);
-        life("qr", "QR code or barcode", 0.7, 0.7, F, F, null);
         life("graphic", "Image", 0.6, 0.6, F, F, null);
         life("invitation", "Invitation", 0.8, 0.35, 7, 30, null);
         life("screenshot", "Screenshot", 0.6, 0.35, 365, 180, null);
@@ -69,6 +68,7 @@ public final class FutureNeed implements DeletionAlgorithm {
         // content with an end of usefulness
         life("otp", "One-time code", 0.9, 0.02, 1, 0.25, Techniques.OTP_SHOTS);
         life("coupon", "Coupon or offer", 0.8, 0.05, 0, 2, Techniques.EXPIRED_OFFERS);
+        life("qr", "QR code or barcode", 0.7, 0.03, 7, 7, Techniques.OLD_QR_CODES);       // used once: pay, open, scan
         life("coupon_nodate", "Coupon or offer", 0.8, 0.05, 45, 15, Techniques.EXPIRED_OFFERS);
         life("promo", "Sale or shop ad", 0.6, 0.03, 7, 5, Techniques.EXPIRED_OFFERS);
         life("delivery", "Delivery or order update", 0.8, 0.05, 30, 7, Techniques.ORDER_UPDATES);
@@ -306,7 +306,11 @@ public final class FutureNeed implements DeletionAlgorithm {
                 else { kind = "receipt"; if (amt >= 1000) a.reasons.add("Purchase of about ₹" + Math.round(amt) + ": may be needed for returns or warranty"); }
             } else if (c.equals(PhotoCategory.BILL)) kind = "bill";
             else if (c.equals(PhotoCategory.CHAT)) kind = "chat";
-            else if (c.equals(PhotoCategory.QR)) kind = f.code != null && f.code.toLowerCase(Locale.ROOT).startsWith("wi-fi") ? "credential" : "qr";
+            else if (c.equals(PhotoCategory.QR)) {
+                boolean wifi = f.code != null && f.code.toLowerCase(Locale.ROOT).startsWith("wi-fi");   // the only copy of a password
+                kind = wifi ? "credential" : "qr";
+                a.reasons.add(wifi ? "Wi-Fi QR code: it holds the password" : "A QR code is used once" + (f.code == null ? "" : " (" + f.code + ")"));
+            }
             else if (c.equals(PhotoCategory.GREETING)) {
                 kind = chatImage ? "greeting" : "greeting_photo";
                 a.reasons.add(chatImage ? "Greeting forwarded in a chat" : "Greeting picture not from a chat");

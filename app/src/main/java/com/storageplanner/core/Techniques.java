@@ -37,6 +37,7 @@ public final class Techniques {
     public static final String SHOPPING = "Old shopping screenshots";
     public static final String OLD_RECEIPTS = "Small receipts past any return window";
     public static final String FORWARDS = "Memes and forwards from chats";
+    public static final String OLD_QR_CODES = "QR codes you have already used";
     /** Deletions the user picked while browsing pictures (recorded as Review.CHOSEN + PICKED). */
     public static final String PICKED = "Pictures you picked to delete";
 
@@ -103,6 +104,9 @@ public final class Techniques {
             "Delete them in your gallery (Screenshots).");
         put(OLD_RECEIPTS, "Receipts for small purchases (under ₹1,000) older than about 10 months, with no warranty on them. Large purchases and anything with a warranty are always kept.",
             "Check each one, then delete it.");
+        put(OLD_QR_CODES, "Pictures of QR codes and barcodes (payment, links, anything else) saved or received about 3 weeks ago or more. "
+            + "A code is used once; scan it again from the shop or the sender if you need it. Wi-Fi codes are kept, because they hold the password.",
+            "Check each one, then delete it in your gallery.");
         put(FORWARDS, "Memes, jokes and forwarded posts received in chats more than about 7 weeks ago.",
             "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
         put(BURSTS, "Photos taken within minutes of each other that look almost identical. The better one is kept: eyes open, faces visible, sharper, better lit.",
