@@ -257,6 +257,7 @@ tile that opens all of them in the usual grid, with Select, Approve deletion, Ke
 | Ride or food order status; map; weather; parking or queue slip | About 4 weeks; 2 weeks; 5 days; 6 days | |
 | Appointment or reservation | About 10 days after its date | |
 | Shopping page | About 3 months | |
+| Sale or shop ad ("Buy 1 Get 1", "Sale is live"), not a photo you took | About 2 weeks (until its end date, if it prints one) | "Sale or shop ad: \"buy 1 get\", \"sale is live\"" |
 | Payment | Under ₹2,000: about 4 months. ₹2,000 to ₹10,000: about 22 months. Failed: about 3 weeks. Pending or refund: about 3½ months | "Small payment (about ₹250)" |
 | Payment for rent, fees, EMI, insurance or tax; ₹10,000 or more | **Always kept** | "Payment for \"house rent\": proof of payment" |
 | Payment whose amount could not be read | **Never suggested** (it may be a large one) | |
@@ -266,7 +267,8 @@ tile that opens all of them in the usual grid, with Select, Approve deletion, Ke
 | Photos, people, chats, documents, other screenshots | **Never suggested** (old screenshots become "your call") | |
 
 **What else counts:**
-- **Faces.** A greeting or forward with people in it is at most "your call".
+- **Faces.** A greeting or forward with people in it is at most "your call". Since 1.9, faces are also counted on
+  pictures that have text (a family photo with a caption, an ID card); pictures sorted earlier get this check once.
 - **A folder you named yourself**, like `Pictures/Important` or `Pictures/Tax 2025`. Anything in it is kept.
 - **Text not read yet.** Not judged until the text is read.
 
@@ -323,7 +325,7 @@ building in another photo.
 **Debug this choice in the Algorithm Lab** opens the Lab with every copy of that group already loaded.
 
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
-   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
+   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download. While it is on camera, a picture whose name says WhatsApp (`IMG-…-WA0007.jpg`) or Screenshot is treated as one (1.9).
 2. **Run on the selected picture:**
 
 | Button | What it shows |
@@ -334,7 +336,7 @@ building in another photo.
 | Eyes open or closed | For each face: the eyes-open probability, each eye at the 7 positions tried, how much it counts in the score, and the eye patches the model looked at |
 | Sharpness / blur | The focus number used to compare shots, the blur score used for "possibly blurry", and each face's focus |
 | Lighting | Brightness, blown-out and black share, and each penalty that makes up the lighting score |
-| Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
+| Category and will it be needed | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category; then what every deletion algorithm version decides (keep / your call / not needed), with its reasons and when it stops being needed (1.9) |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
 

@@ -92,7 +92,8 @@ public final class Techniques {
             "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
         put(ACCIDENTAL, "Very dark, covered or badly shaken shots, usually taken by accident.",
             "Look at each one; delete it in your gallery if nothing is in it.");
-        put(EXPIRED_OFFERS, "Screenshots of coupons, promo codes, vouchers and offers whose validity date has passed (or, with no date, saved more than about 11 weeks ago).",
+        put(EXPIRED_OFFERS, "Screenshots of coupons, promo codes, vouchers and offers whose validity date has passed (or, with no date, saved more than about 11 weeks ago), "
+            + "and sale ads (\"Buy 1 Get 1\", \"Sale is live\") received or saved more than about two weeks ago.",
             "Check each one, then delete it in your gallery.");
         put(ORDER_UPDATES, "Order tracking, delivery, cab and food order screens from weeks ago. The app that sent them keeps the history.",
             "Check each one (a return or complaint may still be open), then delete it.");

@@ -138,7 +138,7 @@ public final class LabScreen extends Screen {
         addRun("Eyes open or closed", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.eyes(pf(), pic(), o)); } });
         addRun("Sharpness / blur", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.sharpness(pf(), pic(), o)); } });
         addRun("Lighting", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.lighting(pf(), pic(), o)); } });
-        addRun("Picture category", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.category(pf(), pic(), System.currentTimeMillis(), o)); } });
+        addRun("Category and will it be needed", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.category(pf(), pic(), System.currentTimeMillis(), o)); } });
         addRun("QR code / barcode", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.codes(pf(), pic(), o); } });
         addRun("Read text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.text(pf(), pic(), System.currentTimeMillis(), o); } });
         Ui.add(root, Ui.heading(a, "Run on all picked pictures", 17), 14);
@@ -349,8 +349,9 @@ public final class LabScreen extends Screen {
         } finally { in.close(); out.close(); }
         long taken = exifTime(dst);
         Lab.Pic p = new Lab.Pic(dst.getAbsolutePath(), name, size >= 0 ? size : dst.length(), modified > 0 ? modified : taken > 0 ? taken : dst.lastModified());
-        p.area = AREAS[area];
-        LabLog.line(a, String.format(Locale.US, "picked %s -> %s (%d bytes, modified %d, EXIF taken %d)", name, dst.getName(), p.size, modified, taken));
+        p.area = Lab.guessArea(name, AREAS[area]);
+        LabLog.line(a, String.format(Locale.US, "picked %s -> %s (%d bytes, modified %d, EXIF taken %d)%s", name, dst.getName(), p.size, modified, taken,
+                p.area.equals(AREAS[area]) ? "" : ", treated as " + p.area + " (from its name)"));
         return p;
     }
 

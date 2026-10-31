@@ -98,6 +98,17 @@ public final class FutureNeedTest {
         expect("consultation booking is not a medical record", pic(SHOT, "screenshot", null, "Consultation scheduled Dr. Priya Sharma (General Physician) Apollo Clinic Date: 30-Sep-2026 Time: 9:30 am Cancel appointment", 40), D, "appointment");
         expect("short meme caption on a chat image", pic(WA, "wa_image", PhotoCategory.DOCUMENT, "me explaining to my wife funny but true", 90), D, "forward");
         expect("short caption on a camera photo is not a forward", pic("DCIM/Camera/IMG_8.jpg", "camera", PhotoCategory.DOCUMENT, "funny but true", 400), K, "document");
+        // sale ads: exactly what the reader found on IMG-20261031-WA0007 in the Algorithm Lab, then variants
+        String LOGGED = "BUY 1GET | Sale is live";
+        expect("sale ad from the Lab log, received 3 weeks ago", pic(WA, "wa_image", PhotoCategory.PHOTO, LOGGED, 21), D, "promo");
+        expect("same ad, received yesterday", pic(WA, "wa_image", PhotoCategory.PHOTO, LOGGED, 1), K, "promo");
+        expect("same ad as a screenshot", pic(SHOT, "screenshot", PhotoCategory.SCREENSHOT, LOGGED, 30), D, "promo");
+        expect("same words on a photo you took: kept", pic("DCIM/Camera/IMG_9.jpg", "camera", PhotoCategory.PHOTO, LOGGED, 300), K, "photo");
+        expect("buy one get one free", pic(WA, "wa_image", PhotoCategory.GRAPHIC, "Buy One Get One FREE on all pizzas. Order now", 40), D, "promo");
+        expect("flash sale", pic(WA, "wa_image", PhotoCategory.GRAPHIC, "Flash sale upto 70% off shop now", 40), D, "promo");
+        expect("ad with an end date still ahead", pic(WA, "wa_image", PhotoCategory.GRAPHIC, "Mega sale is live, flat 50% off. Offer ends 30 Nov 2026. Shop now", 20), K, "coupon");
+        FileItem adFaces = pic(WA, "wa_image", PhotoCategory.PEOPLE, LOGGED, 40); adFaces.faces = 2;
+        expect("ad with people in it", adFaces, K, "people");
         // amounts and dates
         checks++; if (FutureNeed.amount("biscuits 64,44 paneer 51.02") != 51.02) { fails++; System.out.println("FAIL decimal comma taken as thousands"); }
         checks++; if (FutureNeed.total("cash 600.00 change 64.50 total 535.50 thank you") != 535.5) { fails++; System.out.println("FAIL receipt total"); }

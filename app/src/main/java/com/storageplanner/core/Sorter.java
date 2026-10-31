@@ -48,7 +48,8 @@ final class Sorter {
         if (code == null && (s.flat >= 0.1 || s.paper >= 0.2)) code = Codes.read(l, w, h, true);
         f.code = code == null ? null : Codes.describe(code[0], code[1]);
         f.faces = -1;
-        if (!PhotoCategory.worthReading(f, s) && !PhotoCategory.isScreenshot(f) && !Exposure.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);
+        // faces also on pictures with text (a family photo with a caption, an ID card): "has people in it" keeps a picture
+        if (!PhotoCategory.isScreenshot(f) && !Exposure.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);
         Prep p = new Prep();
         p.s = s; p.aspect = dims[0] / (double) Math.max(1, dims[1]);
         return p;
@@ -68,6 +69,15 @@ final class Sorter {
             FileItem p = Scanner.same(f, opt.previous);
             if (p != null && p.category != null && !p.textPending) {          // unchanged and fully sorted last time
                 f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces;
+                if (f.faces < 0 && !PhotoCategory.isScreenshot(f) && !PhotoCategory.ACCIDENTAL.equals(f.category)) {
+                    // sorted before 1.9, when pictures with text skipped the face check: count faces once now
+                    int[] px;
+                    try { px = pf.argb(f.abs, EDGE, dims); } catch (Throwable t) { px = null; }
+                    if (px != null) {
+                        f.faces = faces(pf, f.abs, px, dims[2], dims[3]);
+                        if (f.faces > 0 && PhotoCategory.PHOTO.equals(f.category)) f.category = PhotoCategory.PEOPLE;
+                    }
+                }
                 continue;
             }
             Prep m = measured == null ? null : measured.get(f);

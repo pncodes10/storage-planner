@@ -70,6 +70,7 @@ public final class FutureNeed implements DeletionAlgorithm {
         life("otp", "One-time code", 0.9, 0.02, 1, 0.25, Techniques.OTP_SHOTS);
         life("coupon", "Coupon or offer", 0.8, 0.05, 0, 2, Techniques.EXPIRED_OFFERS);
         life("coupon_nodate", "Coupon or offer", 0.8, 0.05, 45, 15, Techniques.EXPIRED_OFFERS);
+        life("promo", "Sale or shop ad", 0.6, 0.03, 7, 5, Techniques.EXPIRED_OFFERS);
         life("delivery", "Delivery or order update", 0.8, 0.05, 30, 7, Techniques.ORDER_UPDATES);
         life("ride", "Ride or food order status", 0.7, 0.05, 14, 7, Techniques.ORDER_UPDATES);
         life("navigation", "Map or directions", 0.6, 0.05, 7, 5, Techniques.SHORT_LIVED);
@@ -124,6 +125,12 @@ public final class FutureNeed implements DeletionAlgorithm {
     };
 
     static final Topic[] SHORT_LIVED = {
+        // ads and sale forwards: no code to use, just "the sale is on"
+        new Topic("promo", 3, new String[]{"buy 1 get", "buy one get one", "bogo", "sale is live", "sale live", "sale is on", "flash sale", "mega sale",
+                "big sale", "end of season sale", "clearance sale", "festive sale", "limited offer", "limited time offer", "limited period offer",
+                "shop now", "order now", "grab now", "grab it now", "hurry", "today only", "starting at", "starting from", "new arrivals", "grand opening"},
+                new String[]{"sale", "offer", "offers", "off", "discount", "deal", "deals", "free", "collection", "store", "shop", "visit", "now",
+                        "only", "live", "stock", "price", "mrp"}),
         new Topic("coupon", 3, new String[]{"coupon", "promo code", "promocode", "coupon code", "use code", "voucher", "scratch card", "cashback",
                 "redeem", "offer valid", "valid till", "valid until", "valid upto", "valid up to", "expires on", "flat off", "% off", "apply code"},
                 new String[]{"offer", "off", "discount", "save", "deal", "code", "t&c", "terms", "min order", "minimum order", "applicable", "reward",
@@ -181,6 +188,9 @@ public final class FutureNeed implements DeletionAlgorithm {
     }
 
     static boolean any(String t, String... keys) { for (String k : keys) if (has(t, k)) return true; return false; }
+
+    /** "Buy 1 Get 1" as the reader sees it: "buy 1get", "buy1 get", "buy l get", "buy one get". */
+    static final Pattern BUY_GET = Pattern.compile("buy\\s*(?:1|one|l|i)\\s*get\\s*");
 
     // ------------------------------------------------------------------ amounts and dates
     // OCR often reads the rupee sign as %, z, = or ?; amounts are only taken with a currency mark, grouping or paise
@@ -264,7 +274,7 @@ public final class FutureNeed implements DeletionAlgorithm {
     public static Decision assess(PictureFacts f, long now) {
         Decision a = new Decision();
         a.algorithm = "v2_futureneed";
-        String t = f.text == null ? "" : f.text;
+        String t = f.text == null ? "" : BUY_GET.matcher(f.text).replaceAll("buy 1 get ");
         boolean chatImage = f.chatImage;
         String c = f.category == null ? PhotoCategory.PHOTO : f.category;
         long anchor = f.savedAt;
@@ -308,13 +318,17 @@ public final class FutureNeed implements DeletionAlgorithm {
             int best = 0; String bestKind = null; String bestWhy = null;
             for (Topic tp : SHORT_LIVED) {
                 if (tp.kind.equals("forward") && !(chatImage || f.screenshot)) continue;
+                if (tp.kind.equals("promo") && f.camera) continue;        // a photo you took of a sale board may be a memory
                 StringBuilder w = new StringBuilder();
                 int p = points(t, tp, w, false);
                 int needP = tp.kind.equals("forward") && chatImage && t.length() < 80 ? 2 : tp.need;   // a caption on a picture says little
                 if (p >= needP && p > best) { best = p; bestKind = tp.kind; bestWhy = w.toString(); }
             }
             if (bestKind != null) { kind = bestKind; a.reasons.add(label(kind) + ": " + bestWhy); }
-            if ("coupon".equals(kind)) {
+            if ("promo".equals(kind)) {
+                long exp = find(EXPIRY, t, f.savedAt);
+                if (exp > 0) { kind = "coupon"; a.usefulUntil = exp; anchor = exp; }    // an ad that says when it ends lasts until then
+            } else if ("coupon".equals(kind)) {
                 long exp = find(EXPIRY, t, f.savedAt);
                 if (exp > 0) { a.usefulUntil = exp; anchor = exp; } else kind = "coupon_nodate";
             } else if ("delivery".equals(kind)) {

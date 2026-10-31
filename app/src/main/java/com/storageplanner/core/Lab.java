@@ -1,5 +1,9 @@
 package com.storageplanner.core;
 
+import com.storageplanner.algorithms.Decision;
+import com.storageplanner.algorithms.DeletionAlgorithm;
+import com.storageplanner.algorithms.Registry;
+import com.storageplanner.facts.PictureFacts;
 import com.storageplanner.tools.Pixels;
 import com.storageplanner.tools.category.PhotoCategory;
 import com.storageplanner.tools.codes.Codes;
@@ -338,6 +342,18 @@ public final class Lab {
         if (!any) o.line("  no two pictures are byte-for-byte identical");
     }
 
+    /**
+     * How to treat a picked picture, from its name, while "Treat as" is left on camera: WhatsApp's names
+     * (IMG-20261031-WA0007.jpg) and screenshot names say where it came from. Any other choice is kept.
+     */
+    public static String guessArea(String name, String chosen) {
+        if (!"camera".equals(chosen) || name == null) return chosen;
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.matches(".*-wa\\d{3,}.*") || n.contains("whatsapp")) return "wa_image";
+        if (n.contains("screenshot")) return "screenshot";
+        return chosen;
+    }
+
     // ------------------------------------------------------------------ sorting, codes, text
     public static Shown category(Platform pf, Pic p, long now, Out o) {
         o.line("PICTURE CATEGORY — " + p.name + " (treated as " + p.area + ")");
@@ -360,7 +376,24 @@ public final class Lab {
         if (read) v = readAndJudge(pf, f, s, prep.aspect, now, o);
         PhotoCategory.Result r = PhotoCategory.classify(f, s, f.code, v, f.faces);
         o.line("  => " + PhotoCategory.label(r.category) + (r.why.isEmpty() ? "" : "  (" + r.why + ")") + (r.date > 0 ? "; date " + Report.day(r.date) : ""));
+        f.category = r.category; f.catDate = r.date;
+        needed(f, now, o);
         return sh;
+    }
+
+    /** What every deletion algorithm decides about the picture (the app uses Registry.current()), with its reasons. */
+    static void needed(FileItem f, long now, Out o) {
+        o.line("  WILL IT BE NEEDED? (saved " + Math.round(f.ageDays(now)) + " days ago)");
+        PictureFacts facts = PictureFacts.of(f);
+        for (DeletionAlgorithm alg : Registry.ALL) {
+            Decision d = alg.decide(facts, now);
+            boolean used = alg.id().equals(Registry.current().id());
+            o.line("  " + alg.id() + (used ? " (the app uses this)" : "") + ": " + Decision.verdictLabel(d.verdict).toUpperCase(Locale.ROOT)
+                    + (d.kindLabel.isEmpty() ? "" : " — " + d.kindLabel) + f(", need %.2f", d.need));
+            for (String why : d.reasons) o.line("      • " + why);
+            if (d.deletableFrom > now) o.line("      • not needed after about " + Report.day(d.deletableFrom));
+            if (d.technique != null && d.verdict == Decision.NOT_NEEDED) o.line("      • suggested under \"" + d.technique + "\"");
+        }
     }
 
     static TextRules.Verdict readAndJudge(Platform pf, FileItem f, ImageSignals.S s, double aspect, long now, Out o) {
@@ -377,6 +410,7 @@ public final class Lab {
         o.line("  words (confidence): " + b);
         boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
         TextRules.Verdict v = TextRules.classify(w, aspect, s.colorful >= 15 && s.flat < 0.5, PhotoCategory.isScreenshot(f), chat, now);
+        f.text = TextRules.withAmounts(TextRules.clean(w), w);
         o.line("  text says: " + (v.kind == null ? "nothing specific" : PhotoCategory.label(v.kind)) + (v.why.isEmpty() ? "" : " — evidence " + v.why));
         return v;
     }
