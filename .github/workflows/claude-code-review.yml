@@ -1,0 +1,62 @@
+name: Claude Code Review
+
+# Claude reviews every pull request when it is opened, updated or marked ready, and posts
+# inline comments on the lines it has findings for, plus one summary comment.
+# Needs the Claude GitHub App on the repository and the secret ANTHROPIC_API_KEY (see README, "Code review").
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            Review this pull request. Read the diff with `gh pr diff`, and read the surrounding code
+            before judging a change. Report only real problems: bugs, wrong results, crashes, broken
+            Android behaviour, security or privacy issues, and missing tests for changed behaviour.
+            Skip style preferences and anything the diff does not touch.
+
+            This project's rules (see README.md, "Layout" and "Permissions"):
+            - The app only reads. It must never delete, rename or move user files, and must never get the
+              INTERNET permission or any code that talks to the network (scripts/audit_apk.py checks this).
+            - Tools (app/src/main/java/com/storageplanner/tools/) only measure and decide nothing.
+              Algorithms (algorithms/) read only facts/PictureFacts: never pixels, files or Android.
+              core/ is pure Java with no Android imports.
+            - Deletion suggestions must stay safe: an algorithm change that could suggest deleting a picture
+              someone still needs (ID documents, records, large or rent payments, photos of people) is a
+              blocking finding. Uncertain cases belong in "your call", never in "not needed".
+            - Java 8 source level, no new dependencies.
+            - A change to a tool or an algorithm needs tests under jvmtest/ (tools/, algorithms/, bench/),
+              and the README's numbers must match what the tests print.
+
+            Put each finding as an inline comment on the line it is about
+            (mcp__github_inline_comment__create_inline_comment), saying what goes wrong and when.
+            Then post one short summary comment with `gh pr comment`: the findings ranked by severity,
+            or that you found nothing blocking.
+
+          claude_args: |
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
