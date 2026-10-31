@@ -15,7 +15,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
-import com.storageplanner.core.PhotoCategory;
+import com.storageplanner.algorithms.Decision;
+import com.storageplanner.tools.category.PhotoCategory;
 import com.storageplanner.core.Report;
 import com.storageplanner.core.Unit;
 
@@ -53,7 +54,10 @@ public final class PicturesScreen extends Screen {
     static PicturesScreen category(MainActivity a, String c) { return new PicturesScreen(a, c, null); }
     static PicturesScreen search(MainActivity a, String q) { return new PicturesScreen(a, null, q); }
 
-    public String title() { return category != null ? PhotoCategory.label(category) : "Pictures with “" + query + "”"; }
+    public String title() {
+        if (Session.NOT_NEEDED.equals(category)) return "Not needed any more";
+        return category != null ? PhotoCategory.label(category) : "Pictures with “" + query + "”";
+    }
 
     @Override public String descriptor() { return category != null ? "pics:" + category : "search:" + query; }
 
@@ -61,7 +65,10 @@ public final class PicturesScreen extends Screen {
         LinearLayout root = new LinearLayout(a);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(12), dp(10), dp(12), dp(10));
-        String d = category != null ? PhotoCategory.describe(category) : "Pictures whose text, code or file name contains “" + query + "”.";
+        String d = Session.NOT_NEEDED.equals(category)
+                ? "Pictures whose content is no longer useful: expired coupons, past trips, old one-time codes, delivered orders, small old payments, forwards. "
+                  + "Records, ID documents and photos of people are never here. Open one to see why."
+                : category != null ? PhotoCategory.describe(category) : "Pictures whose text, code or file name contains “" + query + "”.";
         root.addView(Ui.text(a, d, 14, Ui.text2, false), new LinearLayout.LayoutParams(-1, -2));
         summary = Ui.text(a, "", 15, Ui.text, true);
         summary.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
@@ -271,7 +278,8 @@ public final class PicturesScreen extends Screen {
             f = file;
             Thumbs.load(iv, f, dp(140));
             String date = f.catDate > 0 ? Report.day(f.catDate) : Ui.date(f.mtime);
-            caption.setText(f.code != null ? f.code : date + " · " + Report.size(f.size));
+            Decision fn = Session.NOT_NEEDED.equals(category) && Session.ub != null ? Session.ub.need.get(f.rel) : null;
+            caption.setText(fn != null ? fn.kindLabel : f.code != null ? f.code : date + " · " + Report.size(f.size));
             String st = Session.pictureState(f);
             if ("deleted".equals(st)) { state.setText("✕ approved"); state.setBackground(Ui.round(0xE6B3261E, dp(6))); state.setVisibility(View.VISIBLE); }
             else if ("kept".equals(st)) { state.setText("✓ kept"); state.setBackground(Ui.round(0xE61E6B2E, dp(6))); state.setVisibility(View.VISIBLE); }
@@ -280,7 +288,7 @@ public final class PicturesScreen extends Screen {
             tick.setVisibility(selecting ? View.VISIBLE : View.GONE);
             tick.setChecked(picked.contains(f.rel));
             String spoken = PhotoCategory.label(f.category) + ", " + f.name() + ", " + date + ", " + Report.size(f.size)
-                    + (f.code != null ? ", " + f.code : "")
+                    + (f.code != null ? ", " + f.code : "") + (fn != null ? ", not needed: " + fn.why : "")
                     + ("deleted".equals(st) ? ", approved for deletion" : "kept".equals(st) ? ", kept by you" : "planned".equals(st) ? ", in the plan" : "")
                     + (selecting ? (picked.contains(f.rel) ? ", picked" : ", not picked") : "");
             root.setContentDescription(spoken);

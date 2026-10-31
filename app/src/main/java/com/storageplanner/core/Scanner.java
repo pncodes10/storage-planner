@@ -1,5 +1,11 @@
 package com.storageplanner.core;
 
+import com.storageplanner.tools.Pixels;
+import com.storageplanner.tools.category.PhotoCategory;
+import com.storageplanner.tools.quality.PhotoQuality;
+import com.storageplanner.tools.sharpness.Sharpness;
+import com.storageplanner.tools.similarity.PerceptualHash;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -159,15 +165,15 @@ public final class Scanner {
                 int[] px;
                 try { px = pf.argb(f.abs, Sorter.EDGE, dims); } catch (Throwable t) { px = null; }
                 if (px == null) continue;
-                l = Sorter.luma(px);
+                l = Pixels.luma(px);
                 measured.put(f, Sorter.measure(pf, f, px, dims));
             } else {
                 try { l = pf.luma(f.abs, dims); } catch (Throwable t) { l = null; }
                 if (l == null) continue;
             }
             f.width = dims[0]; f.height = dims[1];
-            f.phash = ImageFeatures.phash(l, dims[2], dims[3]); f.hasPhash = true;
-            f.sharp = ImageFeatures.sharpness(l, dims[2], dims[3]);
+            f.phash = PerceptualHash.phash(l, dims[2], dims[3]); f.hasPhash = true;
+            f.sharp = Sharpness.of(l, dims[2], dims[3]);
         }
         // ---- near-identical shots: measure which one is better (eyes open, faces, sharpness, light)
         List<FileItem> group = new ArrayList<FileItem>();

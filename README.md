@@ -156,11 +156,14 @@ Not judged: smiles, head turns that keep both eyes visible, and composition.
 The overview has a **Your pictures** section. It shows every category with its count and size, plus a
 **search box** for the text found in pictures (try a shop name, "pnr" or "invoice").
 
-| Category | How it is recognised | Suggested for deletion? |
+Since 1.9 the last column is decided by what each picture shows, not by its category alone (see
+[Will you need it again?](#will-you-need-it-again-new-in-19)).
+
+| Category | How it is recognised | Suggested for deletion? (1.6) |
 |---|---|---|
 | People | The face detector (YuNet, on the phone); 31 of 31 test photos with people | No |
 | Photos without faces | Camera photos with no faces and no text | No |
-| QR codes & barcodes | The code is decoded (ZXing). The card says what it is for: "UPI payment code for …", "Wi-Fi network …", "Link to …" | No |
+| QR codes & barcodes | The code is decoded (ZXing). The card says what it is for: "UPI payment code for …", "Wi-Fi network …", "Link to …" | No (since 1.9: yes after about 3 weeks, except Wi-Fi codes) |
 | Receipts | Text: totals, cash, change, GST lines, many prices; a tall, narrow shape | No (browse and search) |
 | Bills & invoices | Text: invoice, bill to, due date, GSTIN, amount due; a page shape | No (browse and search) |
 | Documents & text | Mostly text (pages, notes, printouts) | No |
@@ -230,7 +233,75 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 - **No wrong deletion suggestions on the test phone.** No everyday photo was put in a deletable category, and no greeting, OTP, payment or ticket was wrongly assigned.
 - **Little extra reading.** Only 8 of 78 everyday photos were sent to the text reader.
 - **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
-- **The app's own reader page** (`tools/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
+- **The app's own reader page** (`scripts/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
+
+## Will you need it again? (new in 1.9)
+
+Every sorted picture now gets a verdict from what it shows (`FutureNeed`):
+- **Keep:** likely needed again.
+- **Your call:** may not be needed. Never suggested.
+- **Not needed any more:** suggested for deletion (still needs your confirmation).
+
+The details page shows the verdict, the reasons and, for things that expire, when the picture will stop
+being needed ("Not needed after about 12 Dec 2026"). **Your pictures** starts with a **Not needed any more**
+tile that opens all of them in the usual grid, with Select, Approve deletion, Keep and Undo.
+
+**What it reads in a picture:**
+
+| Kind | Useful until | Example reason |
+|---|---|---|
+| One-time code | About a day and a half | "A one-time code stops working within minutes" |
+| Coupon or offer | A few days after its expiry date (about 11 weeks after saving if none is printed) | "Expired on 30 Aug 2026, 45 days ago" |
+| Ticket or pass | About two weeks after the trip or show (about 7 months after saving if no date is read); cancelled ones about 3 months | "Trip or show was on 12 Aug 2026" |
+| Delivery or order update | About six weeks after delivery | "Delivery or order update: \"delivered on\", \"order #\"" |
+| Ride or food order status; map; weather; parking or queue slip | About 4 weeks; 2 weeks; 5 days; 6 days | |
+| Appointment or reservation | About 10 days after its date | |
+| Shopping page | About 3 months | |
+| QR code or barcode (payment, link, anything but Wi-Fi) | About 3 weeks: a code is used once | "A QR code is used once (UPI payment code for …)" |
+| Sale or shop ad ("Buy 1 Get 1", "Sale is live"), not a photo you took | About 2 weeks (until its end date, if it prints one) | "Sale or shop ad: \"buy 1 get\", \"sale is live\"" |
+| Payment | Under ₹2,000: about 4 months. ₹2,000 to ₹10,000: about 22 months. Failed: about 3 weeks. Pending or refund: about 3½ months | "Small payment (about ₹250)" |
+| Payment for rent, fees, EMI, insurance or tax; ₹10,000 or more | **Always kept** | "Payment for \"house rent\": proof of payment" |
+| Payment whose amount could not be read | **Never suggested** (it may be a large one) | |
+| Small receipt (under ₹1,000) | About 10 months | |
+| Greeting from a chat; meme or forward | About 11 days; about 7 weeks | |
+| Warranty card or receipt with a serial number / IMEI, prescription, lab report, insurance, certificate, contract, salary slip, Wi-Fi or bank details (Wi-Fi QR codes too), ID documents, bills | **Always kept** | "Medical record: \"prescription\", \"patient\"" |
+| Photos, people, chats, documents, other screenshots | **Never suggested** (old screenshots become "your call") | |
+
+**What else counts:**
+- **Faces.** A greeting or forward with people in it is at most "your call". Since 1.9, faces are also counted on
+  pictures that have text (a family photo with a caption, an ID card); pictures sorted earlier get this check once.
+- **A folder you named yourself**, like `Pictures/Important` or `Pictures/Tax 2025`. Anything in it is kept.
+- **Text not read yet.** Not judged until the text is read.
+
+**New recommendations:**
+- Expired coupons and offers.
+- Old delivery, ride and food order updates.
+- Short-lived screenshots: maps, weather, tokens.
+- Old shopping screenshots.
+- Small receipts past any return window.
+- Memes and forwards from chats.
+- QR codes you have already used.
+
+They replace 1.6's fixed rules for one-time codes, payments, tickets, greetings and accidental shots.
+
+**Reading improvements:**
+- The big bold amount on payment screens is often read with low confidence. Those amounts are now kept.
+- The reader has no rupee sign and may read "₹1,093" as "71,093". That can only make an amount look
+  larger, so it is used as an upper bound.
+- Completely black camera frames (lens covered) are now "Accidental shots".
+
+**Tests on pictures** (`AlgorithmBench`; how they were made is in `testdata/futureneed/README.md`):
+- A test phone with 368 pictures, rendered and read with the app's own text reader.
+- The rules were tuned on one set. The numbers below come from a fresh set made after the rules stopped
+  changing:
+
+| | Not needed and suggested | Still needed but suggested |
+|---|---|---|
+| 1.9 | **132 of 144 (91.7%)** | **0 of 224** |
+| 1.6 rules on the same pictures | 33 of 144 (22.9%) | 31 of 224 (large and rent payments, cancelled tickets awaiting refund, pictures in "Important") |
+
+What is still missed is mostly payments whose amount can't be read reliably. They are left as "your call".
+`FutureNeedTest` checks 56 hand-written cases (each kind, dates, amounts, folders and the safety floors).
 
 ## Face detector replaced (new in 1.8)
 
@@ -256,7 +327,7 @@ building in another photo.
 **Debug this choice in the Algorithm Lab** opens the Lab with every copy of that group already loaded.
 
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
-   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
+   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download. While it is on camera, a picture whose name says WhatsApp (`IMG-…-WA0007.jpg`) or Screenshot is treated as one (1.9).
 2. **Run on the selected picture:**
 
 | Button | What it shows |
@@ -267,7 +338,7 @@ building in another photo.
 | Eyes open or closed | For each face: the eyes-open probability, each eye at the 7 positions tried, how much it counts in the score, and the eye patches the model looked at |
 | Sharpness / blur | The focus number used to compare shots, the blur score used for "possibly blurry", and each face's focus |
 | Lighting | Brightness, blown-out and black share, and each penalty that makes up the lighting score |
-| Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
+| Category and will it be needed | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category; then what every deletion algorithm version decides (keep / your call / not needed), with its reasons and when it stops being needed (1.9) |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
 
@@ -327,42 +398,87 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 
 **Android Studio:** open this folder, let it sync (AGP 8.5, JDK 17), then **Build → Build APK(s)**. The project has no dependencies beyond the Android framework.
 
-**Without Android Studio:** `tools/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
+**Without Android Studio:** `scripts/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
 
 ## Layout
 
-- `app/src/main/java/com/storageplanner/core/`: the algorithm in pure Java, with no Android imports.
-  - **Scanner:** walk, duplicate check, media features.
-  - **Classifier:** path rules.
-  - **ImageFeatures:** perceptual hash and sharpness.
-  - **PhotoQuality / EyeState:** which near-identical shot is better (faces, eyes, focus, light).
-  - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
-  - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
-  - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
+The code is split into **tools that measure**, **algorithms that decide**, and the pipeline and app around them.
+Tools never decide anything; algorithms never touch pixels, files or Android. They meet in `facts/PictureFacts`,
+so any algorithm version can be swapped in and compared on the same pictures.
+
+```
+app/src/main/java/com/storageplanner/
+├── tools/               detectors: look at a picture, report facts (versions listed in tools/Tools.java)
+│   ├── faces/           FaceDetector (interface), FaceNet + Faces: YuNet in plain Java (1.8)
+│   ├── eyes/            EyeState: eyes open or closed, a small CNN (1.5)
+│   ├── ocr/             TextReader (interface), TextRules: what kind of text it is, dates, amounts
+│   ├── codes/           Codes: QR codes and barcodes (wraps ZXing)
+│   ├── layout/          ImageSignals: text rows, paper, flat screen areas, colour, darkness
+│   ├── sharpness/       Sharpness: focus of the sharpest parts
+│   ├── similarity/      PerceptualHash: near-identical pictures
+│   ├── exposure/        Exposure: dark, covered, featureless or shaken shots
+│   ├── quality/         PhotoQuality: which near-identical shot is better (faces, eyes, focus, light)
+│   ├── category/        PhotoCategory: the picture's category from all of the above
+│   └── Pixels           down-scaling and luma, shared by the tools
+├── facts/               PictureFacts: everything the tools found about one picture, plus its file details
+├── algorithms/          deciders: PictureFacts -> Decision (keep / your call / not needed, with reasons)
+│   ├── DeletionAlgorithm, Decision, Registry (every version; which one the app uses)
+│   ├── v1_rules/        RulesV1: 1.6's fixed rules per category, kept as the baseline
+│   └── v2_futureneed/   FutureNeed: useful life of what the picture shows (1.9); the app uses this
+├── core/                the pipeline, pure Java, no Android imports
+│   ├── Scanner, Classifier, Sorter: walk, path rules, duplicate check, running the tools
+│   ├── UnitBuilder, Planner, Review: options, tiered plan, your decisions
+│   ├── Report, ResultStore: output; saved results (versioned binary, with checksum)
+│   ├── Lab: the Algorithm Lab's step-by-step runs (1.7)
+│   └── Platform: what the core needs from the device (implements FaceDetector and TextReader)
+├── platform/android/    AndroidPlatform (files, system stats, faces), OcrEngine (offline text reader in a WebView),
+│                        Calibrator + Ssim (on-device compression measurement)
+└── app/                 the Android screens and service: Setup, Overview, List, Detail, Deck (swipe cards), Compare,
+                         Viewer, Pictures, Lab; MainActivity, Session, AnalysisService/Runner/State, ResultFiles
+```
+
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
-- `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
+- `app/src/main/assets/faces/`: YuNet's weights converted by `scripts/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
-  - **UnitBuilder:** options.
-  - **Planner:** tiered planner.
-  - **Report:** output.
-  - **ResultStore:** versioned binary format for saved results (with checksum).
-- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; LabScreen and LabLog are the Algorithm Lab; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
-  - **AndroidPlatform:** reads files and system stats.
-  - **Calibrator:** on-device measurement.
-  - **Ssim:** matches scikit-image to 1e-14.
-  - **MainActivity:** the UI, back stack and its restore after process death.
-  - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
-  - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
-- `tools/eyemodel/`: how the eye model was trained and checked.
-- `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
-- `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
-- `tools/facemodel/`: converts YuNet for the app, and records OpenCV's answers for FaceNetTest.
-- `tools/`:
-  - **apkbuild.py:** packager and v2 signer.
-  - **strip_methodparams.py:** strips an attribute old D8 can't read.
-  - **audit_apk.py:** independent APK audit.
-  - **build_offline.sh:** the offline build.
+- `jvmtest/com/storageplanner/test/`: runs the unchanged code on a desktop. `JvmPlatform` stands in for Android
+  (faces with the same YuNet code, words recorded from the app's own text reader); `TestMain` runs the study's
+  virtual phone.
+  - `tools/`: one test per tool: TextRulesTest, EyeStateTest, PhotoQualityTest, FaceNetTest (against OpenCV),
+    CategoryTest, OcrBridgeTest, LabTest.
+  - `algorithms/`: hand-written cases per version: RulesV1Test, FutureNeedTest.
+  - `bench/`: **AlgorithmBench** runs every algorithm version on the same labelled test phone and prints one
+    comparison table (caught, wrongly suggested, your call, per kind of picture).
+  - `core/`: PlannerTest, ReviewTest, DecisionTest, GroupDecisionTest, ResultStoreTest, ClassifierTest.
+- `testdata/`: recipes for the test pictures (the pictures themselves are not included):
+  - `futureneed/`: the labelled test phone for the deletion algorithms (build.py, ocr.py) and its results;
+  - `categories/`: the picture-category corpus.
+- `scripts/`:
+  - **build_offline.sh:** the offline build; **apkbuild.py:** packager and v2 signer; **strip_methodparams.py:** strips an attribute old D8 can't read.
+  - **audit_apk.py:** independent APK audit; **ocr_assets.sha256**, **face_assets.sha256:** pinned hashes it checks.
+  - **test_ocr_page.py:** runs the app's offline text-reader page in Chromium the way the app serves it.
+  - **eyemodel/:** how the eye model was trained and checked; **facemodel/:** converts YuNet for the app and records OpenCV's answers for FaceNetTest.
+
+**Adding an algorithm version:** write `algorithms/v3_<name>/` implementing `DeletionAlgorithm` (read only
+`PictureFacts`), add it to `Registry.ALL`, add hand-written cases under `jvmtest/.../algorithms/`, and run
+`AlgorithmBench` on the test phones. Change `Registry.current()` only when it beats the current version without
+any wrong suggestion.
+
+## Code review
+
+Every pull request is reviewed by Claude (`.github/workflows/claude-code-review.yml`, using
+`anthropics/claude-code-action`). It posts inline comments on the lines it has findings for and one summary
+comment, checked against this project's rules: read-only, no network, tools measure and algorithms decide, and
+deletion suggestions stay safe. It runs again on every push to the pull request; drafts are skipped.
+
+One-time setup by a repository admin:
+1. Install the Claude GitHub App on the repository: https://github.com/apps/claude
+2. Add the repository secret `ANTHROPIC_API_KEY` (Settings → Secrets and variables → Actions → New repository
+   secret) with a key from console.anthropic.com.
+   To use a Claude Pro or Max subscription instead, run `claude setup-token` and store the token as
+   `CLAUDE_CODE_OAUTH_TOKEN`, then replace `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` with
+   `claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}` in the workflow.
+
+Pull requests from forks get no secrets, so they are not reviewed.
 
 ## Known limits
 

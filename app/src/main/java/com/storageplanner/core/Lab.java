@@ -1,5 +1,21 @@
 package com.storageplanner.core;
 
+import com.storageplanner.algorithms.Decision;
+import com.storageplanner.algorithms.DeletionAlgorithm;
+import com.storageplanner.algorithms.Registry;
+import com.storageplanner.facts.PictureFacts;
+import com.storageplanner.tools.Pixels;
+import com.storageplanner.tools.category.PhotoCategory;
+import com.storageplanner.tools.codes.Codes;
+import com.storageplanner.tools.exposure.Exposure;
+import com.storageplanner.tools.eyes.EyeState;
+import com.storageplanner.tools.faces.Faces;
+import com.storageplanner.tools.layout.ImageSignals;
+import com.storageplanner.tools.ocr.TextRules;
+import com.storageplanner.tools.quality.PhotoQuality;
+import com.storageplanner.tools.sharpness.Sharpness;
+import com.storageplanner.tools.similarity.PerceptualHash;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -38,7 +54,7 @@ public final class Lab {
         int[] px = pf.argb(path, edge, d);
         if (px == null) { o.line("  ! could not decode the picture at " + edge + " px"); return null; }
         Img m = new Img();
-        m.px = px; m.l = Sorter.luma(px); m.w = d[2]; m.h = d[3]; m.ow = d[0]; m.oh = d[1];
+        m.px = px; m.l = Pixels.luma(px); m.w = d[2]; m.h = d[3]; m.ow = d[0]; m.oh = d[1];
         m.ms = (System.nanoTime() - t0) / 1000000;
         o.line(f("  decoded %d x %d (original %d x %d, upright) in %d ms", m.w, m.h, m.ow, m.oh, m.ms));
         return m;
@@ -210,7 +226,7 @@ public final class Lab {
         Img k = load(pf, p.path, Sorter.EDGE, o);
         if (k != null) {
             o.line(f("  blur score (used for 'possibly blurry' and when shots were not measured): %.1f   [90th percentile Laplacian variance, 1024 px]",
-                    ImageFeatures.sharpness(k.l, k.w, k.h)));
+                    Sharpness.of(k.l, k.w, k.h)));
             o.line("  'possibly blurry' needs a blur score below " + UnitBuilder.BLUR_REL + " x the median of all your camera photos");
         }
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
@@ -294,7 +310,7 @@ public final class Lab {
             o.line(" " + pics.get(i).name);
             Img m = load(pf, pics.get(i).path, Sorter.EDGE, o);
             if (m == null) return;
-            h[i] = ImageFeatures.phash(m.l, m.w, m.h);
+            h[i] = PerceptualHash.phash(m.l, m.w, m.h);
             dims[i] = new int[]{m.ow, m.oh};
             o.line(f("  perceptual hash %016x", h[i]));
         }
@@ -302,7 +318,7 @@ public final class Lab {
                 + " of 63 bits (WhatsApp copy of a camera photo: <= " + UnitBuilder.SENT_MATCH_BITS + " bits, same shape)");
         for (int i = 0; i < pics.size(); i++)
             for (int j = i + 1; j < pics.size(); j++) {
-                int bits = ImageFeatures.hamming(h[i], h[j]);
+                int bits = PerceptualHash.hamming(h[i], h[j]);
                 long dt = Math.abs(pics.get(i).mtime - pics.get(j).mtime);
                 boolean size = dims[i][0] == dims[j][0] && dims[i][1] == dims[j][1], time = dt <= UnitBuilder.BURST_WINDOW_MS, look = bits <= UnitBuilder.NEAR_DUP_BITS;
                 o.line(f("  %s ~ %s: %d bits apart (%s), %s apart in time (%s), size %s -> %s", cut(pics.get(i).name, 22), cut(pics.get(j).name, 22), bits,
@@ -326,6 +342,18 @@ public final class Lab {
         if (!any) o.line("  no two pictures are byte-for-byte identical");
     }
 
+    /**
+     * How to treat a picked picture, from its name, while "Treat as" is left on camera: WhatsApp's names
+     * (IMG-20261031-WA0007.jpg) and screenshot names say where it came from. Any other choice is kept.
+     */
+    public static String guessArea(String name, String chosen) {
+        if (!"camera".equals(chosen) || name == null) return chosen;
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.matches(".*-wa\\d{3,}.*") || n.contains("whatsapp")) return "wa_image";
+        if (n.contains("screenshot")) return "screenshot";
+        return chosen;
+    }
+
     // ------------------------------------------------------------------ sorting, codes, text
     public static Shown category(Platform pf, Pic p, long now, Out o) {
         o.line("PICTURE CATEGORY — " + p.name + " (treated as " + p.area + ")");
@@ -343,12 +371,29 @@ public final class Lab {
                 s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.textHeight, 100 * s.bigText));
         o.line("  code: " + (f.code == null ? "none" : f.code) + "; faces counted: " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces)));
         boolean read = PhotoCategory.worthReading(f, s);
-        o.line("  accidental shot? " + PhotoCategory.accidental(s) + "; worth reading the text? " + read);
+        o.line("  accidental shot? " + Exposure.accidental(s) + "; worth reading the text? " + read);
         TextRules.Verdict v = null;
         if (read) v = readAndJudge(pf, f, s, prep.aspect, now, o);
         PhotoCategory.Result r = PhotoCategory.classify(f, s, f.code, v, f.faces);
         o.line("  => " + PhotoCategory.label(r.category) + (r.why.isEmpty() ? "" : "  (" + r.why + ")") + (r.date > 0 ? "; date " + Report.day(r.date) : ""));
+        f.category = r.category; f.catDate = r.date;
+        needed(f, now, o);
         return sh;
+    }
+
+    /** What every deletion algorithm decides about the picture (the app uses Registry.current()), with its reasons. */
+    static void needed(FileItem f, long now, Out o) {
+        o.line("  WILL IT BE NEEDED? (saved " + Math.round(f.ageDays(now)) + " days ago)");
+        PictureFacts facts = PictureFacts.of(f);
+        for (DeletionAlgorithm alg : Registry.ALL) {
+            Decision d = alg.decide(facts, now);
+            boolean used = alg.id().equals(Registry.current().id());
+            o.line("  " + alg.id() + (used ? " (the app uses this)" : "") + ": " + Decision.verdictLabel(d.verdict).toUpperCase(Locale.ROOT)
+                    + (d.kindLabel.isEmpty() ? "" : " — " + d.kindLabel) + f(", need %.2f", d.need));
+            for (String why : d.reasons) o.line("      • " + why);
+            if (d.deletableFrom > now) o.line("      • not needed after about " + Report.day(d.deletableFrom));
+            if (d.technique != null && d.verdict == Decision.NOT_NEEDED) o.line("      • suggested under \"" + d.technique + "\"");
+        }
     }
 
     static TextRules.Verdict readAndJudge(Platform pf, FileItem f, ImageSignals.S s, double aspect, long now, Out o) {
@@ -365,6 +410,7 @@ public final class Lab {
         o.line("  words (confidence): " + b);
         boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
         TextRules.Verdict v = TextRules.classify(w, aspect, s.colorful >= 15 && s.flat < 0.5, PhotoCategory.isScreenshot(f), chat, now);
+        f.text = TextRules.withAmounts(TextRules.clean(w), w);
         o.line("  text says: " + (v.kind == null ? "nothing specific" : PhotoCategory.label(v.kind)) + (v.why.isEmpty() ? "" : " — evidence " + v.why));
         return v;
     }

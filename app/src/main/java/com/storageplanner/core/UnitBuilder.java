@@ -1,5 +1,13 @@
 package com.storageplanner.core;
 
+import com.storageplanner.algorithms.Decision;
+import com.storageplanner.algorithms.DeletionAlgorithm;
+import com.storageplanner.algorithms.Registry;
+import com.storageplanner.facts.PictureFacts;
+import com.storageplanner.tools.category.PhotoCategory;
+import com.storageplanner.tools.quality.PhotoQuality;
+import com.storageplanner.tools.similarity.PerceptualHash;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -30,8 +38,15 @@ public final class UnitBuilder {
 
     public final List<Unit> units = new ArrayList<Unit>();
     public final Detections det = new Detections();
+    /** Whether each sorted picture will be needed again (by path), as the deletion algorithm decided. */
+    public final Map<String, Decision> need = new HashMap<String, Decision>();
+    /** The deletion algorithm that decided about pictures (Registry.current() unless chosen). */
+    public final DeletionAlgorithm algorithm;
 
-    public UnitBuilder(Scanner.Result r, Estimates est, int sdk) {
+    public UnitBuilder(Scanner.Result r, Estimates est, int sdk) { this(r, est, sdk, Registry.current()); }
+
+    public UnitBuilder(Scanner.Result r, Estimates est, int sdk, DeletionAlgorithm algorithm) {
+        this.algorithm = algorithm;
         long now = r.now;
         Map<String, FileItem> byRel = new HashMap<String, FileItem>();
         for (FileItem f : r.files) byRel.put(f.rel, f);
@@ -105,7 +120,7 @@ public final class UnitBuilder {
             double ar = (double) s.width / s.height;
             for (FileItem c : cam) {
                 if (c.height == 0 || det.burstExtraOf.containsKey(c.rel) || det.blurry.contains(c.rel)) continue;
-                if (Math.abs((double) c.width / c.height - ar) < 0.02 && ImageFeatures.hamming(c.phash, s.phash) <= SENT_MATCH_BITS) {
+                if (Math.abs((double) c.width / c.height - ar) < 0.02 && PerceptualHash.hamming(c.phash, s.phash) <= SENT_MATCH_BITS) {
                     det.sentCopyOf.put(s.rel, c.rel); break;
                 }
             }
@@ -139,20 +154,12 @@ public final class UnitBuilder {
             String burstOf = det.burstExtraOf.get(f.rel);
             if (burstOf != null) u.add(new Option("delete", Techniques.BURSTS, s, Option.R4, true, burstWhy(f, byRel.get(burstOf))));
             if (det.blurry.contains(f.rel)) u.add(new Option("delete", Techniques.BLURRY, s, Option.R4, true, "Much softer than your other photos"));
-            // picture categories (1.6)
+            // pictures: suggested only when the deletion algorithm finds what they show no longer needed (1.9)
             if (f.category != null) {
-                String c = f.category;
-                if (c.equals(PhotoCategory.OTP) && age > 1)
-                    u.add(new Option("delete", Techniques.OTP_SHOTS, s, Option.R4, true, "Screenshot of a one-time code, " + Math.round(age) + " days old"));
-                else if (c.equals(PhotoCategory.PAYMENT) && age > 90)
-                    u.add(new Option("delete", Techniques.OLD_PAYMENTS, s, Option.R4, true, "Payment confirmation from " + Math.round(age) + " days ago"));
-                else if (c.equals(PhotoCategory.TICKET) && (f.catDate > 0 ? now - f.catDate > 7 * DAY : age > 180))
-                    u.add(new Option("delete", Techniques.EXPIRED_TICKETS, s, Option.R4, true,
-                            f.catDate > 0 ? "Ticket for " + Report.day(f.catDate) + ", which has passed" : "Ticket saved " + Math.round(age) + " days ago"));
-                else if (c.equals(PhotoCategory.GREETING) && age > 7 && (a.startsWith("wa_") || a.equals("telegram_media")))
-                    u.add(new Option("delete", Techniques.GREETINGS, s, Option.R4, true, "Greeting image received " + Math.round(age) + " days ago"));
-                else if (c.equals(PhotoCategory.ACCIDENTAL))
-                    u.add(new Option("delete", Techniques.ACCIDENTAL, s, Option.R4, true, "Almost nothing visible in this shot"));
+                Decision fn = algorithm.decide(PictureFacts.of(f), now);
+                need.put(f.rel, fn);
+                if (fn.verdict == Decision.NOT_NEEDED && fn.technique != null)
+                    u.add(new Option("delete", fn.technique, s, Option.R4, true, fn.why));
             }
             if (a.equals("download") && age > OLD_DOWNLOAD_DAYS && s >= OLD_DOWNLOAD_MIN && u.options.isEmpty())
                 u.add(new Option("delete", Techniques.OLD_DOWNLOADS, s, Option.R4, true, "Download untouched for " + Math.round(age) + " days"));
@@ -208,7 +215,7 @@ public final class UnitBuilder {
             FileItem a = cam.get(i);
             for (int j = i + 1; j < cam.size() && cam.get(j).mtime - a.mtime <= BURST_WINDOW_MS; j++) {
                 FileItem b = cam.get(j);
-                if (a.width == b.width && a.height == b.height && ImageFeatures.hamming(a.phash, b.phash) <= NEAR_DUP_BITS)
+                if (a.width == b.width && a.height == b.height && PerceptualHash.hamming(a.phash, b.phash) <= NEAR_DUP_BITS)
                     parent[find(parent, i)] = find(parent, j);
             }
         }
