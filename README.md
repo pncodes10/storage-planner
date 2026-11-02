@@ -1,6 +1,6 @@
 # Storage Planner
 
-An Android app that scans your phone and builds a plan to reach a storage target (by default 70 GB on a 128 GB phone), using the lowest-risk steps first. It runs the same algorithm as the 128 → 70 GB study. It only **reads**: nothing is deleted or changed, and it has no internet permission.
+An Android app that scans your phone and builds a plan to reach a storage target (by default 70 GB on a 128 GB phone), using the lowest-risk steps first. It runs the same algorithm as the 128 → 70 GB study. The analysis only **reads**: nothing is deleted or changed. The one exception is image compression, which runs only when you start it and keeps your originals until you confirm (see [Compress images](#compress-images-new)). It has no internet permission.
 
 ## Install
 
@@ -77,7 +77,30 @@ What you can do:
 
 TalkBack users get Keep / Accept / View actions on each card. Decisions are remembered across scans; see them under "You approved N items" and "You chose to keep N items" on the overview.
 
-Accepting doesn't delete anything. Storage Planner stays read-only: act on approved items with Open with, Show in folder, or an app's settings.
+Accepting doesn't delete anything: act on approved items with Open with, Show in folder, or an app's settings. (Image compression is the only thing the app does to files itself, and only when you start it.)
+
+## Compress images (new)
+
+Three recommendations can now be carried out by the app itself: **Re-encode photos**, **Re-encode chat images** and **Lossless WebP screenshots**. Open one and tap **Compress … now**. The next screen explains what will happen before anything starts.
+
+| Recommendation | Becomes | Check before the copy is kept |
+|---|---|---|
+| Photos (camera JPEGs) | HEIC, next to the original (`IMG_1.jpg` → `IMG_1.heic`) | Looks identical: SSIM(Y) ≥ 0.98 and PSNR(Y) ≥ 38 dB, the study's guard, plus no colour shift. Must save at least 10%. |
+| Chat images (WhatsApp JPEGs) | HEIC, next to the original | Same as photos. |
+| Screenshots (PNG) | Lossless WebP (`.png` → `.webp`) | Must decode to exactly the same pixels. Must save at least 10%. |
+
+How it works:
+
+- **Which files.** Every item in the recommendation, except items you kept and items the plan removes another way (for example, deletes as a duplicate). Items that already have a compressed copy are skipped.
+- **Quality search.** For each photo, the lowest HEIC quality is found on four 512 px regions, encoded together as one 2×2 mosaic. The full image is then encoded and checked again on four other regions of the real file. If those fail, the quality goes up in steps of 3.
+- **Metadata.** The pixels are turned upright from the EXIF orientation, and the EXIF block (date taken, camera, location) is copied into the HEIC with its orientation set to upright. The copy also gets the original's file date.
+- **Safe writing.** The copy is written to a hidden work file in the same folder, checked, then renamed. Anything that fails, or saves less than 10%, is thrown away, and its original is left as it is. The reason is shown in the summary and in the Lab log.
+- **Background.** It runs as a foreground service with progress and a **Stop** button in the notification, like the analysis. Analysis and compression never run at the same time.
+- **Originals.** Nothing is deleted while compressing. Afterwards, **Move N originals to trash** sends them to Android's trash (Android 11+): Android asks you to confirm, and you can restore them for 30 days. On Android 9 and 10 there is no trash, so the app asks once more and then deletes them for good. **Keep both** stops offering it. The waiting originals are remembered across restarts and shown on the overview. Only originals whose compressed copy still exists are offered.
+- **Requirements.** HEIC needs Android 9 or later and an HEVC encoder the phone lets apps use. Screenshots work on every supported version.
+- **Things to know.** WhatsApp doesn't know about the new copies, so once the originals are gone, those images show as missing inside chats; your gallery shows the copies. Backup apps such as Google Photos will upload the new copies. Tap **Analyse** again afterwards to update the plan.
+
+HEIC is written with the framework only: 512×512 HEVC tiles from `MediaCodec`, stored as a HEIF image grid by `MediaMuxer` (`HeifEncoder`). This is the same layout AndroidX HeifWriter uses when a phone has no dedicated HEIC encoder.
 
 ## Choose which copies to delete (new in 1.5)
 
@@ -298,8 +321,8 @@ The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the 
 
 The app also contains one private, read-only file provider. It isn't exported, and it only hands one file at a time to an app you pick under Open with or Share, through a temporary read grant.
 
-- **All files access** (`MANAGE_EXTERNAL_STORAGE`; `READ_EXTERNAL_STORAGE` up to Android 12): read photos, videos, downloads and WhatsApp media. Read only.
-- **`WRITE_EXTERNAL_STORAGE`** (Android 8-10 only): save the report to Download.
+- **All files access** (`MANAGE_EXTERNAL_STORAGE`; `READ_EXTERNAL_STORAGE` up to Android 12): read photos, videos, downloads and WhatsApp media. The analysis only reads. Compression writes a copy next to each original, and originals go to the trash only after you confirm in Android's dialog.
+- **`WRITE_EXTERNAL_STORAGE`** (Android 8-10 only): save the report to Download, write compressed copies, and delete originals you confirmed.
 - **Usage access** (`PACKAGE_USAGE_STATS`, optional) and **`QUERY_ALL_PACKAGES`**: app sizes, caches and last-used dates for every installed app.
 - **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** (new in 1.2): run the analysis as a foreground service of type *dataSync* (local file processing) so it is not stopped when you switch apps.
 - **`POST_NOTIFICATIONS`** (new in 1.2, asked on Android 13+): show the progress and "plan is ready" notifications. Optional.
@@ -339,6 +362,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
   - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
+  - **Compression / Exif:** which files a compression recommendation covers and where copies go; copying a JPEG's EXIF into the copy.
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
@@ -352,8 +376,11 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **Ssim:** matches scikit-image to 1e-14.
   - **MainActivity:** the UI, back stack and its restore after process death.
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
+  - **CompressScreen / CompressionService / CompressionState:** image compression: the screen, the foreground service and its live progress.
+  - **ImageCompressor / HeifEncoder:** one image's quality search, checks and safe write; the framework-only HEIC writer.
+  - **Originals:** originals waiting for the trash (remembered), and their MediaStore entries for the trash request.
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
@@ -375,4 +402,5 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - The first scan with sorting on takes noticeably longer. Estimated from desktop timings, not measured on a phone: about a quarter of a second per picture, plus one to three seconds for each picture whose text is read.
   - Only English letters are read, so Hindi and other scripts are not.
   - Greeting images are often missed.
+- **Image compression has not run on a phone.** It compiles against API 34 and its rules are tested on a desktop, but the HEIC writer depends on each phone's HEVC encoder. Check the first few copies in your gallery before trashing many originals. Expect a few seconds per photo.
 - **Cache clearing is manual.** Android doesn't let one app clear another app's cache, so you do it from each app's settings page.

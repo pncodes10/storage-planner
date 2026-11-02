@@ -129,6 +129,14 @@ public final class ListScreen extends Screen {
                     + (inPlan < total ? "  ·  all " + total + ": " + Report.size(totB) : ""), 15, Ui.text, true), 12);
             if (tier >= Option.R4)
                 Ui.add(header, Ui.text(a, "Each of these deletes something unique. Open an item to look at it before you decide.", 14, Ui.tier[4], true), 6);
+            if (com.storageplanner.core.Compression.isCompression(key)) {
+                Button comp = Ui.button(a, "Compress " + com.storageplanner.core.Compression.noun(key, 2) + " now", true);
+                comp.setContentDescription("Compress these " + com.storageplanner.core.Compression.noun(key, 2)
+                        + " with Storage Planner. You see what happens before anything starts, and originals are kept until you move them to the trash.");
+                comp.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new CompressScreen(a, key)); } });
+                LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(-1, -2); pl.topMargin = dp(12);
+                header.addView(comp, pl);
+            }
             final int undecided = Session.undecided(key).size();
             if (undecided > 0) {
                 Button cards = Ui.button(a, "Review " + undecided + " with swipe cards", true);
@@ -163,7 +171,7 @@ public final class ListScreen extends Screen {
             for (Row r : rows) { Option o = r.chosen(); if (o != null) total += o.saved; }
             Ui.add(header, Ui.heading(a, key, 21), 0);
             Ui.add(header, Ui.text(a, rows.size() + (rows.size() == 1 ? " item, " : " items, ") + Report.size(total) + ". You accepted the planned action for these.", 15, Ui.text, true), 6);
-            Ui.add(header, Ui.text(a, "Storage Planner never deletes anything. Open an item to act on it yourself: view it, open it with another app, "
+            Ui.add(header, Ui.text(a, "Storage Planner does not delete these for you. Open an item to act on it yourself: view it, open it with another app, "
                     + "show it in your file manager, or open the app's settings. Undo removes the approval.", 14, Ui.text2, false), 6);
         } else {
             Ui.add(header, Ui.heading(a, key, 21), 0);

@@ -50,17 +50,19 @@ launchers = [attr(c, "name") for c in acts
 check("single exported launcher activity", [attr(c, "name") for c in acts] == ["com.storageplanner.app.MainActivity"]
       and launchers == ["com.storageplanner.app.MainActivity"] and a.get_activities() == ["com.storageplanner.app.MainActivity"],
       str(a.get_activities()))
-fgs = attr(svcs[0], "foregroundServiceType") if len(svcs) == 1 else None
+# the analysis, and (new) image compression the user starts
+SERVICES = ["com.storageplanner.app.AnalysisService", "com.storageplanner.app.CompressionService"]
+fgs = [attr(c, "foregroundServiceType") for c in svcs]
 provs = [c for c in app_el if c.tag == "provider"]
-check("exactly one non-exported dataSync service, no receivers",
-      [attr(c, "name") for c in svcs] == ["com.storageplanner.app.AnalysisService"]
-      and a.get_services() == ["com.storageplanner.app.AnalysisService"]
-      and attr(svcs[0], "exported") in ("false", "0")
-      and not svcs[0].findall("intent-filter")                        # nothing else can address it implicitly
-      and fgs is not None and fgs.lower() in ("datasync", "1", "0x1", "0x00000001")
+check("exactly the analysis and compression services: non-exported, dataSync; no receivers",
+      sorted(attr(c, "name") for c in svcs) == SERVICES
+      and sorted(a.get_services()) == SERVICES
+      and all(attr(c, "exported") in ("false", "0") for c in svcs)
+      and not any(c.findall("intent-filter") for c in svcs)           # nothing else can address them implicitly
+      and all(f is not None and f.lower() in ("datasync", "1", "0x1", "0x00000001") for f in fgs)
       and not a.get_receivers()
       and sorted(set(t for t, _ in comps)) == ["activity", "provider", "service"],
-      f"services {[attr(c, 'name') for c in svcs]} exported={attr(svcs[0], 'exported') if svcs else None} "
+      f"services {[attr(c, 'name') for c in svcs]} exported={[attr(c, 'exported') for c in svcs]} "
       f"foregroundServiceType={fgs}; receivers {a.get_receivers()}")
 # 1.3: one private, read-only file provider for "Open with" / "Share" (per-URI grants only)
 check("exactly one private file provider (not exported, per-URI read grants, no permission-less paths)",
@@ -114,13 +116,16 @@ check("dex contains exactly the compiled classes", not extra and set(compiled) <
       f"{len(dex_classes)} classes; extra: {extra}")
 
 refs = set()
-for m in (em for c in d.get_classes() for em in c.get_methods()):
-    code = m.get_code()
-    if not code: continue
-    for ins in code.get_bc().get_instructions():
-        if ins.get_name().startswith("invoke"):
-            s = ins.get_output().split(",")[-1].strip()
-            refs.add(s)
+callers = {}                    # external reference -> classes that call it
+for c in d.get_classes():
+    for m in c.get_methods():
+        code = m.get_code()
+        if not code: continue
+        for ins in code.get_bc().get_instructions():
+            if ins.get_name().startswith("invoke"):
+                s = ins.get_output().split(",")[-1].strip()
+                refs.add(s)
+                callers.setdefault(s, set()).add(c.get_name().split("$")[0].rstrip(";") + ";")
 ext = sorted(r for r in refs if not r.startswith("Lcom/storageplanner/"))
 BAD = {
     "network": r"Ljava/net/|Ljavax/net/|okhttp|HttpURLConnection|Landroid/net/http|Landroid/net/wifi|WebView;->loadUrl\(Ljava/lang/String;Ljava/util/Map|WebView;->postUrl|WebView;->loadDataWithBaseURL",
@@ -136,11 +141,26 @@ web_users = sorted(set(c.get_name() for c in d.get_classes() for m in c.get_meth
                        for ins in m.get_code().get_bc().get_instructions() if ins.get_name().startswith("invoke") and "Landroid/webkit/WebView;" in ins.get_output()
                        and "getCurrentWebViewPackage" not in ins.get_output()))   # reading the WebView version for the Lab log is allowed
 check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/app/OcrEngine") for n in web_users), ", ".join(web_users))
+# Image compression (new) is the only code that removes or renames files: ImageCompressor deletes its own work
+# files and renames a checked copy into place; MainActivity deletes originals the user confirmed (Android 8-10,
+# no trash there). Anywhere else is a failure.
+ALLOWED = {"deletes / renames files": {
+    "Ljava/io/File;->delete()Z": {"Lcom/storageplanner/app/ImageCompressor;", "Lcom/storageplanner/app/MainActivity;"},
+    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": {"Lcom/storageplanner/app/ImageCompressor;"},
+}}
 for k, pat in BAD.items():
-    hits = [r for r in ext if re.search(pat, r)]
-    check(f"no code that {k}", not hits, "; ".join(hits[:5]))
+    allowed = ALLOWED.get(k, {})
+    hits = [r for r in ext if re.search(pat, r)
+            and not (r in allowed and callers.get(r, set()) <= allowed[r])]
+    check(f"no code that {k}" + (" (except image compression)" if allowed else ""), not hits,
+          "; ".join(r + " from " + ", ".join(sorted(callers.get(r, ()))) for r in hits[:5]))
+trash = sorted(r for r in ext if "MediaStore;->createTrashRequest" in r or "MediaStore;->createDeleteRequest" in r)
+trash_callers = set().union(*[callers[r] for r in trash]) if trash else set()
+check("originals go to the trash only through Android's confirmation, from MainActivity",
+      all("createTrashRequest" in r for r in trash) and trash_callers <= {"Lcom/storageplanner/app/MainActivity;"},
+      "; ".join(trash) + " from " + ", ".join(sorted(trash_callers)))
 writes = [r for r in ext if re.search(r"FileOutputStream;-><init>|RandomAccessFile;-><init>", r)]
-report["file writes (expected: report export only)"] = {"pass": True, "detail": "; ".join(writes)}
+report["file writes (expected: report export, compressed copies)"] = {"pass": True, "detail": "; ".join(writes)}
 report["external API calls"] = {"pass": True, "detail": f"{len(ext)} distinct"}
 json.dump({"ok": ok, "checks": report, "external_api": ext}, open(os.path.splitext(apk_path)[0] + ".audit.json", "w"), indent=1)
 for k, v in report.items(): print(("PASS " if v["pass"] else "FAIL ") + k + (": " + v["detail"] if v["detail"] else ""))

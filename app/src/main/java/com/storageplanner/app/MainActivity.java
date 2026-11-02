@@ -46,6 +46,10 @@ public final class MainActivity extends Activity {
     private ArrayList<String> pendingStack;
     private boolean awaitingLoad;
 
+    private final Runnable compressListener = new Runnable() {
+        public void run() { if (!stack.isEmpty()) top().refresh(); }
+    };
+
     private final AnalysisState.Listener listener = new AnalysisState.Listener() {
         public void onProgress(String stage, int done, int total) { setup.progress(stage, done, total); }
         public void onFinished(String msg, boolean ok) {
@@ -64,6 +68,7 @@ public final class MainActivity extends Activity {
         setup = new SetupScreen(this);
         push(setup);
         ArrayList<String> saved = b != null ? b.getStringArrayList(KEY_STACK) : null;
+        trashing = b != null ? b.getStringArrayList(KEY_TRASHING) : null;
         if (ResultFiles.consumeInterrupted(this)) {
             AnalysisState.message = AnalysisState.INTERRUPTED;
             saved = new ArrayList<String>();             // stay on the setup screen; older results stay one tap away
@@ -83,6 +88,8 @@ public final class MainActivity extends Activity {
         super.onResume();
         current = this;
         AnalysisState.listener = listener;
+        CompressionState.listener = compressListener;
+        CompressionService.clearResultNotification(this);
         if (AnalysisState.pendingOverview && !AnalysisState.running && Session.hasResults()) {
             AnalysisState.pendingOverview = false;       // finished while we were away
             setup.refresh();
@@ -93,12 +100,14 @@ public final class MainActivity extends Activity {
 
     @Override protected void onPause() {
         if (AnalysisState.listener == listener) AnalysisState.listener = null;
+        if (CompressionState.listener == compressListener) CompressionState.listener = null;
         if (!stack.isEmpty()) top().onHide();             // stop audio/video when the app goes to the background
         super.onPause();
     }
 
     @Override protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
+        if (trashing != null) out.putStringArrayList(KEY_TRASHING, trashing);
         if (awaitingLoad) {
             if (pendingStack != null) out.putStringArrayList(KEY_STACK, pendingStack);
             return;
@@ -114,6 +123,7 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         if (current == this) current = null;
         if (AnalysisState.listener == listener) AnalysisState.listener = null;
+        if (CompressionState.listener == compressListener) CompressionState.listener = null;
         super.onDestroy();
     }
 
@@ -177,6 +187,10 @@ public final class MainActivity extends Activity {
             return f != null ? new ViewerScreen(this, f) : null;
         }
         if (d.equals("lab")) return new LabScreen(this);
+        if (d.startsWith("compress:")) {
+            String t = d.substring(9);
+            return t.equals("*") ? new CompressScreen(this, null) : com.storageplanner.core.Compression.isCompression(t) ? new CompressScreen(this, t) : null;
+        }
         if (d.startsWith("pics:")) return Session.pictures.containsKey(d.substring(5)) ? PicturesScreen.category(this, d.substring(5)) : null;
         if (d.startsWith("search:")) return PicturesScreen.search(this, d.substring(7));
         if (d.startsWith("compare:")) {
@@ -295,6 +309,7 @@ public final class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ analysis (runs in AnalysisService)
     void startAnalysis(final double targetGb, final boolean measure) {
+        if (CompressionState.running) { toast("Wait until compression has finished, or stop it first."); return; }
         if (!AnalysisState.begin()) return;
         // the scan runs whether or not this is granted; it only decides whether the notification shows
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
@@ -332,6 +347,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_TRASH) { trashResult(res == RESULT_OK); return; }
         if (req != REQ_PICK || res != RESULT_OK || data == null) return;
         java.util.List<android.net.Uri> uris = new ArrayList<android.net.Uri>();
         if (data.getClipData() != null)
@@ -341,6 +357,94 @@ public final class MainActivity extends Activity {
         if (s == null && !stack.isEmpty() && top() instanceof LabScreen) s = (LabScreen) top();   // the app was restarted meanwhile
         picking = null;
         if (s != null) s.picked(uris);
+    }
+
+    // ------------------------------------------------------------------ compression (runs in CompressionService)
+    static final int TRASH_BATCH = 500;
+    private static final int REQ_TRASH = 4712;
+    private static final String KEY_TRASHING = "trashing";
+    /** Originals in the trash request Android is showing; restored after the activity is recreated. */
+    private ArrayList<String> trashing;
+
+    void startCompression(final String technique, List<com.storageplanner.core.FileItem> files) {
+        if (AnalysisState.running) { toast("Wait until the analysis has finished."); return; }
+        if (files.isEmpty() || !CompressionState.begin(technique, files)) return;
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+            requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 2);
+        try {
+            startForegroundService(new Intent(this, CompressionService.class).setAction(CompressionService.ACTION_START));
+        } catch (Throwable t) {
+            // the system refused the service: run in this process (stops if Android kills the app)
+            final android.content.Context app = getApplicationContext();
+            final List<com.storageplanner.core.FileItem> q = new ArrayList<com.storageplanner.core.FileItem>(files);
+            new Thread(new Runnable() { public void run() { CompressionService.run(app, technique, q, null); } }, "compress").start();
+        }
+        if (!stack.isEmpty()) top().refresh();
+    }
+
+    void stopCompression() {
+        CompressionState.cancelled = true;
+        try { startService(new Intent(this, CompressionService.class).setAction(CompressionService.ACTION_CANCEL)); } catch (Throwable ignored) {}
+        if (!stack.isEmpty()) top().refresh();
+    }
+
+    /**
+     * Removes originals whose checked copy exists. Android 11+: one system trash request (the user confirms
+     * in Android's own dialog and can restore for 30 days). Android 8-10 has no trash: confirm, then delete.
+     */
+    void trashOriginals(List<Originals.Pair> pairs) {
+        final ArrayList<String> paths = new ArrayList<String>();
+        for (Originals.Pair p : pairs)
+            if (new File(p.copy).isFile() && new File(p.copy).length() > 0 && new File(p.original).isFile()) paths.add(p.original);
+        if (paths.isEmpty()) { if (!stack.isEmpty()) top().refresh(); return; }
+        if (Build.VERSION.SDK_INT >= 30) {
+            java.util.Map<String, Uri> uris = Originals.mediaUris(this, paths);
+            if (uris.isEmpty()) { toast("Android's media index does not list these originals. Delete them with your file manager."); return; }
+            try {
+                android.app.PendingIntent pi = android.provider.MediaStore.createTrashRequest(getContentResolver(), new ArrayList<Uri>(uris.values()), true);
+                trashing = new ArrayList<String>(uris.keySet());
+                startIntentSenderForResult(pi.getIntentSender(), REQ_TRASH, null, 0, 0, 0);
+                if (uris.size() < paths.size())
+                    toast((paths.size() - uris.size()) + " originals are not in Android's media index and stay on the phone.");
+            } catch (Throwable t) {
+                trashing = null;
+                toast("Could not ask Android to move the originals: " + t.getMessage());
+            }
+            return;
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Delete " + paths.size() + (paths.size() == 1 ? " original?" : " originals?"))
+                .setMessage("Each has a checked, compressed copy next to it. This version of Android has no trash, so they cannot be restored.")
+                .setPositiveButton("Delete", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) { deleteOriginals(paths); }
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void deleteOriginals(List<String> paths) {
+        java.util.Set<String> gone = new java.util.HashSet<String>();
+        for (String p : paths) if (new File(p).delete()) gone.add(p);
+        if (!gone.isEmpty()) {
+            Originals.forget(this, gone);
+            try { android.media.MediaScannerConnection.scanFile(this, gone.toArray(new String[0]), null, null); } catch (Throwable ignored) {}
+        }
+        toast(gone.size() == paths.size() ? "Deleted " + gone.size() + (gone.size() == 1 ? " original." : " originals.")
+                : "Deleted " + gone.size() + " of " + paths.size() + ". The rest could not be deleted.");
+        if (!stack.isEmpty()) top().refresh();
+    }
+
+    private void trashResult(boolean ok) {
+        ArrayList<String> paths = trashing;
+        trashing = null;
+        if (paths != null && ok) {
+            Originals.forget(this, new java.util.HashSet<String>(paths));
+            toast("Moved " + paths.size() + (paths.size() == 1 ? " original" : " originals")
+                    + " to the trash. Empty the trash in your gallery to free the space now.");
+        } else if (paths != null) {
+            toast("Nothing was moved. The originals and the compressed copies are both on your phone.");
+        }
+        if (!stack.isEmpty()) top().refresh();
     }
 
     // ------------------------------------------------------------------ report
