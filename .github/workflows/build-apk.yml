@@ -1,0 +1,108 @@
+name: Build APK
+
+# Builds the installable APK on every push and pull request (and on demand from the Actions tab),
+# with the same offline script as the released APKs (tools/build_offline.sh), using the Android SDK
+# that comes with GitHub's Ubuntu runners. Download it from the run's "Artifacts" section.
+#
+# Signing: so a new APK installs as an update over the one on your phone, add these repository secrets
+# (Settings > Secrets and variables > Actions) from the keystore folder the released APK was built with:
+#   SIGNING_KEY_PEM       contents of key.pem
+#   SIGNING_CERT_DER_B64  cert.der as base64 (base64 -w0 cert.der)
+# Without them each run signs with a new throw-away key: the APK works, but you must uninstall the
+# app first (which forgets your Keep decisions), and every later build needs that again.
+
+on:
+  push:
+    paths: ["app/**", "tools/**", "jvmtest/**", ".github/workflows/build-apk.yml"]
+  pull_request:
+    paths: ["app/**", "tools/**", "jvmtest/**", ".github/workflows/build-apk.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python packages (signer, audit)
+        run: pip install cryptography androguard apksigtool loguru
+
+      - name: Core tests (image compression rules)
+        run: |
+          mkdir -p "$RUNNER_TEMP/jvm"
+          javac -encoding UTF-8 -nowarn -d "$RUNNER_TEMP/jvm" \
+            $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
+            jvmtest/com/storageplanner/test/CompressionTest.java
+          java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.CompressionTest
+
+      - name: Android SDK parts
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-34" "platforms;android-29" "build-tools;34.0.0" > /dev/null
+          TC="$RUNNER_TEMP/toolchain"; mkdir -p "$TC"
+          ln -s "$SDK/platforms/android-34/android.jar" "$TC/android-34.jar"
+          ln -s "$SDK/platforms/android-29/android.jar" "$TC/android-29.jar"
+          ln -s "$SDK/build-tools/34.0.0/lib/d8.jar" "$TC/r8.jar"          # d8.jar is the R8 jar (contains D8)
+          ln -s "$SDK/build-tools/34.0.0/aapt2" "$TC/aapt2"
+          ln -s "$JAVA_HOME" "$TC/java17"
+          echo "TOOLCHAIN=$TC" >> "$GITHUB_ENV"
+
+      - name: Signing key
+        env:
+          KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+          CERT_B64: ${{ secrets.SIGNING_CERT_DER_B64 }}
+        run: |
+          KS="$RUNNER_TEMP/keystore"; mkdir -p "$KS"; chmod 700 "$KS"
+          if [ -n "$KEY_PEM" ] && [ -n "$CERT_B64" ]; then
+            printf '%s\n' "$KEY_PEM" > "$KS/key.pem"
+            printf '%s' "$CERT_B64" | base64 -d > "$KS/cert.der"
+            echo "SIGNED=release key (installs as an update)" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No SIGNING_KEY_PEM / SIGNING_CERT_DER_B64 secrets: signed with a throw-away key. Uninstall the app before installing this APK."
+            echo "SIGNED=throw-away key (uninstall the app first)" >> "$GITHUB_ENV"
+          fi
+          echo "KEYSTORE_DIR=$KS" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          VC=$(sed -n "s/.*versionCode \([0-9]*\).*/\1/p" app/build.gradle)
+          VN=$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" app/build.gradle)
+          SHA=$(git rev-parse --short HEAD)
+          export VERSION_CODE="$VC" VERSION_NAME="$VN-$SHA"
+          bash tools/build_offline.sh
+          NAME="StoragePlanner-$VN-$SHA.apk"
+          cp build/offline/StoragePlanner.apk "build/offline/$NAME"
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+          {
+            echo "### $NAME"
+            echo "- version $VN-$SHA (code $VC)"
+            echo "- signed with: $SIGNED"
+            echo "- size: $(du -h "build/offline/$NAME" | cut -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: build/offline/${{ env.APK_NAME }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Audit the APK
+        run: python3 tools/audit_apk.py "build/offline/$APK_NAME" build/offline/classes

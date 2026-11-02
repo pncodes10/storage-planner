@@ -357,6 +357,8 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 
 **Android Studio:** open this folder, let it sync (AGP 8.5, JDK 17), then **Build → Build APK(s)**. The project has no dependencies beyond the Android framework.
 
+**On GitHub (no setup):** the **Build APK** workflow (`.github/workflows/build-apk.yml`) runs `tools/build_offline.sh` on every push and pull request, and on demand from the Actions tab. It runs the image-compression tests first and the APK audit after. Download the APK from the run's **Artifacts**. To make it install as an update over your current app, add the signing key the released APK was built with as two repository secrets: `SIGNING_KEY_PEM` (contents of `key.pem`) and `SIGNING_CERT_DER_B64` (`base64 -w0 cert.der`). Without them, each run uses a throw-away key, so you must uninstall the app first, which forgets your Keep decisions.
+
 **Without Android Studio:** `tools/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
 
 ## Layout
