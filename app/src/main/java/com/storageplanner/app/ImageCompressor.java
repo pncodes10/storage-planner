@@ -11,6 +11,8 @@ import android.os.Build;
 import com.storageplanner.core.Compression;
 import com.storageplanner.core.Exif;
 import com.storageplanner.core.FileItem;
+import com.storageplanner.core.Report;
+import com.storageplanner.core.WebpMeta;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -18,15 +20,21 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Compresses one image next to the original, never touching the original:
  * <ul>
- * <li>Photos and chat images become HEIC at the lowest quality that still passes the study's
- *     "looks identical" guard (SSIM(Y) >= 0.98 and PSNR(Y) >= 38 dB, as in {@link Calibrator}), plus a
- *     check that colours did not shift. EXIF (date taken, camera, location) is carried over.</li>
+ * <li>Photos and chat images: every way of saving that works on this phone (each HEIC encoder, and
+ *     Android's WebP encoder) finds the lowest quality that still passes the study's "looks identical"
+ *     guard (SSIM(Y) >= 0.98 and PSNR(Y) >= 38 dB, as in {@link Calibrator}) plus a colour check, on four
+ *     512 px regions. The way with the smallest result is encoded in full and checked again on four other
+ *     regions; if it fails, the next way is tried. EXIF (date taken, camera, location) is carried over.</li>
  * <li>Screenshots become lossless WebP, and the copy must decode to exactly the same pixels.</li>
  * </ul>
  * The copy is written to a work file, checked, and only then renamed to its final name. Every step's
@@ -39,23 +47,36 @@ final class ImageCompressor {
     static final long MAX_PIXELS = 25_000_000L;
     /** A copy that saves less than this is not worth replacing the original with. */
     static final double MIN_SAVING = 0.10;
-    static final int Q_LOW = 30, Q_HIGH = 95;
+    static final int Q_LOW = 30, Q_HIGH = 95, WEBP_LOW = 50, WEBP_HIGH = 99;
     /** Largest average shift of red, green or blue (0..255) allowed in a checked region. */
     static final double MAX_COLOR_SHIFT = 3.0;
 
+    /** One full-size copy that was made and checked. */
+    static final class Attempt {
+        String key, label, ext;
+        String path;          // Lab: where this copy was kept (null if not kept)
+        int quality;
+        long bytes;
+        Score score;
+        String note;          // why a real run would not keep it (null = it passes)
+    }
+
     static final class Outcome {
         boolean ok;
-        String output;       // path of the compressed copy
+        String output;        // path of the compressed copy
+        String key, format;   // the way that made it, e.g. "webp" / "WebP (Android's encoder)"
         long before, after, ms;
         int quality = -1;
         /** Worst checked region of the kept copy (-1 = not measured). */
         double ssim = -1, psnr = -1, shift = -1;
         boolean identicalPixels;   // lossless copies
-        String skipped;      // why nothing was written (ok == false)
+        String skipped;       // why nothing was written (ok == false)
         /** Lab only: the copy was kept for comparison, but a real run would have thrown it away for this reason. */
         String wouldSkip;
         /** Every quality tried and its scores. */
         final List<String> trace = new ArrayList<String>();
+        /** Every full-size copy made (Lab: one per way of saving). */
+        final List<Attempt> attempts = new ArrayList<Attempt>();
 
         Outcome fail(String why) { ok = false; skipped = why; return this; }
     }
@@ -79,128 +100,199 @@ final class ImageCompressor {
 
     /** Whether this phone can carry out the recommendation at all. */
     static boolean available(String technique) {
-        return Compression.lossless(technique) || HeifEncoder.supported();
+        return Compression.lossless(technique) || Build.VERSION.SDK_INT >= 28;
     }
 
     static String unavailableReason(String technique) {
         if (available(technique)) return null;
-        return Build.VERSION.SDK_INT < 28 ? "Saving HEIC needs Android 9 or later."
-                : "This phone has no HEVC encoder that apps can use, so it cannot save HEIC.";
+        return "Compressing photos needs Android 9 or later (to save HEIC, and to keep a photo's details in WebP).";
     }
 
     /**
      * A real run: the copy goes next to the original, and only if it passes every check.
-     * @param hint quality that worked for the previous file of this kind, tried first (-1 = none)
-     * @param work folder for temporary test encodes (app cache)
+     * @param hints quality that worked for the previous file, per way of saving (updated here)
+     * @param work  folder for temporary test encodes (app cache)
      */
-    static Outcome compress(FileItem f, String technique, int hint, File work) {
+    static Outcome compress(FileItem f, String technique, Map<String, Integer> hints, File work) {
         File src = new File(f.abs);
         if (!src.isFile()) return new Outcome().fail("no longer on the phone");
         if (src.length() != f.size || Math.abs(src.lastModified() - f.mtime) > 2000) return new Outcome().fail("changed since the analysis");
-        String out = Compression.outputPath(f.abs, technique);
-        if (new File(out).exists()) return new Outcome().fail("a file named " + new File(out).getName() + " already exists");
+        String base = Compression.base(f.abs);
+        for (String ext : Compression.extensions(technique))
+            if (new File(base + "." + ext).exists()) return new Outcome().fail("a compressed copy (" + new File(base + "." + ext).getName() + ") already exists");
         if ((long) f.width * f.height > MAX_PIXELS) return new Outcome().fail("too large to process safely");
-        return write(src, technique, out, hint, work, false);
+        Outcome o = write(src, technique, base, hints, work, false);
+        if (o.ok && o.quality >= 0 && o.key != null) hints.put(o.key, o.quality);
+        return o;
     }
 
     /**
-     * Algorithm Lab: compress any picture to {@code out}. The copy is kept even when a real run would throw
-     * it away (then {@link Outcome#wouldSkip} says why), so it can be compared with the original.
+     * Algorithm Lab: compress any picture to {@code base} + "-" + way + extension, once per way of saving,
+     * keeping every copy (even ones a real run would throw away; {@link Attempt#note} says why) so they can be
+     * compared. {@link Outcome#output} is the one a real run would choose.
      */
-    static Outcome compressForLab(File src, String technique, String out, File work) {
-        return write(src, technique, out, -1, work, true);
+    static Outcome compressForLab(File src, String technique, String base, File work) {
+        return write(src, technique, base, new HashMap<String, Integer>(), work, true);
     }
 
-    private static Outcome write(File src, String technique, String out, int hint, File work, boolean keep) {
+    private static Outcome write(File src, String technique, String base, Map<String, Integer> hints, File work, boolean keep) {
         long t0 = System.nanoTime();
         Outcome o = new Outcome();
-        File tmp = new File(Compression.tempPath(out));
+        List<File> temps = new ArrayList<File>();
         try {
-            if (Compression.lossless(technique)) lossless(src, tmp, keep, o); else lossy(src, tmp, hint, work, keep, o);
-            if (!o.ok) return o;
-            if (!tmp.renameTo(new File(out))) return o.fail("could not write the copy (" + new File(out).getParent() + ")");
-            new File(out).setLastModified(src.lastModified());     // keeps its place in date-sorted views
-            o.output = out;
+            if (Compression.lossless(technique)) {
+                String out = keep ? base + "-lossless.webp" : base + ".webp";
+                File tmp = new File(Compression.tempPath(out)); temps.add(tmp);
+                lossless(src, tmp, keep, o);
+                if (!o.ok) return o;
+                if (!tmp.renameTo(new File(out))) return o.fail("could not write the copy (" + new File(out).getParent() + ")");
+                o.output = out; o.key = "lossless"; o.format = "lossless WebP";
+            } else {
+                lossy(src, base, hints, work, keep, o, temps);
+                if (!o.ok) return o;
+            }
+            new File(o.output).setLastModified(src.lastModified());   // keeps its place in date-sorted views
             return o;
         } catch (OutOfMemoryError e) {
             return o.fail("not enough memory");
         } catch (Throwable t) {
             return o.fail("could not be compressed (" + t.getClass().getSimpleName() + (t.getMessage() != null ? ": " + t.getMessage() : "") + ")");
         } finally {
-            if (tmp.exists()) tmp.delete();
+            for (File t : temps) if (t.exists()) t.delete();
             o.ms = (System.nanoTime() - t0) / 1_000_000;
         }
     }
 
-    // ------------------------------------------------------------------ photos and chat images -> HEIC
-    private static void lossy(File src, File tmp, int hint, File work, boolean keep, Outcome o) throws IOException {
-        o.trace.add("encoder: " + encoderCheck(work));
-        if (!HeifEncoder.supported()) { o.fail("no way of saving HEIC worked on this phone"); return; }
+    // ------------------------------------------------------------------ photos and chat images -> HEIC or WebP
+    /** A way of saving under consideration for one picture. */
+    private static final class Cand {
+        final Method m; int best = -1; long mosaicBytes;
+        Cand(Method m) { this.m = m; }
+    }
+
+    private static void lossy(File src, String base, Map<String, Integer> hints, File work, boolean keep, Outcome o, List<File> temps) throws IOException {
+        List<Method> methods = methods(work);
+        o.trace.add("ways of saving: " + checked);
         byte[] exif = Exif.fromJpeg(head(src, 256 * 1024));
         int orientation = exif != null ? Exif.orientation(exif) : 1;
+        List<Cand> cands = new ArrayList<Cand>();
+        for (Method m : methods) {
+            if (!m.works) continue;
+            String why = exif != null && !m.exifOk ? "it would lose the photo's details (EXIF)"
+                    : !m.regionOk ? "Android's region decoder reads its files wrongly, so galleries may show them wrong when zoomed" : null;
+            if (why != null) { o.trace.add(m.label + ": not used in a real run, " + why); if (!keep) continue; }
+            cands.add(new Cand(m));
+        }
+        if (cands.isEmpty()) { o.fail("no way of saving worked on this phone"); return; }
         Bitmap img = upright(decode(src, 1), orientation);
         if (exif != null && orientation != 1) exif = Exif.withOrientation(exif, 1);   // the pixels are upright now
         o.trace.add(String.format(Locale.US, "%d x %d px, EXIF %s, orientation %d", img.getWidth(), img.getHeight(),
                 exif != null ? "copied (" + exif.length + " bytes)" : "none", orientation));
         o.before = src.length();
+        Rect[] rs = Calibrator.crops(img.getWidth(), img.getHeight(), 0.25, 0.75);
+        int c = rs[0].width();
+        Bitmap mosaic = Bitmap.createBitmap(2 * c, 2 * c, Bitmap.Config.ARGB_8888);
         try {
-            int best = searchQuality(img, hint, work, o);
-            if (best < 0) {
-                if (!keep) { o.fail("no quality setting looked identical"); return; }
-                o.wouldSkip = "no quality setting looked identical";
-                best = Q_HIGH;
+            Canvas cv = new Canvas(mosaic);
+            for (int k = 0; k < 4; k++) cv.drawBitmap(img, rs[k], new Rect((k % 2) * c, (k / 2) * c, (k % 2 + 1) * c, (k / 2 + 1) * c), null);
+
+            // 1) every way: lowest quality that passes on the four regions, and how big that is
+            List<Cand> ranked = new ArrayList<Cand>();
+            for (Cand cd : cands) {
+                search(cd, mosaic, c, hints.get(cd.m.key), work, o);
+                if (cd.best >= 0) ranked.add(cd);
+                else o.trace.add(cd.m.label + ": no quality looked identical");
             }
+            if (ranked.isEmpty()) { o.fail("no quality setting looked identical"); return; }
+            Collections.sort(ranked, new Comparator<Cand>() { public int compare(Cand x, Cand y) { return Long.compare(x.mosaicBytes, y.mosaicBytes); } });
+
+            // 2) full size, smallest first; a real run keeps the first that passes and saves enough
             Rect[] verify = Calibrator.crops(img.getWidth(), img.getHeight(), 0.4, 0.6);   // other regions than the search
             long limit = (long) (src.length() * (1 - MIN_SAVING));
-            for (int q = best; q <= Q_HIGH; q += 3) {
-                HeifEncoder.encode(img, q, exif, tmp.getPath());
-                boolean small = tmp.length() <= limit;
-                if (!small && !keep) { o.fail("would save less than " + Math.round(MIN_SAVING * 100) + "%"); return; }
-                Score s = verifyFile(img, tmp, verify, o);
-                o.trace.add(String.format(Locale.US, "full image at quality %d: %s, %s", q, com.storageplanner.core.Report.size(tmp.length()), s));
-                o.quality = q; o.after = tmp.length(); o.ssim = s.ssim; o.psnr = s.psnr; o.shift = s.shift;
-                if (!small) {
-                    if (o.wouldSkip == null) o.wouldSkip = "saves less than " + Math.round(MIN_SAVING * 100) + "%";
-                    o.ok = true; return;
+            Attempt chosen = null;
+            for (Cand cd : ranked) {
+                String out = keep ? base + "-" + cd.m.key + "." + cd.m.ext : base + "." + cd.m.ext;
+                File tmp = new File(Compression.tempPath(out)); temps.add(tmp);
+                Attempt a = null;
+                for (int q = cd.best; q <= cd.m.hi; q += 3) {
+                    encodeTo(cd.m, img, q, exif, tmp);
+                    a = new Attempt();
+                    a.key = cd.m.key; a.label = cd.m.label; a.ext = cd.m.ext; a.quality = q; a.bytes = tmp.length();
+                    if (a.bytes > limit) {
+                        a.note = "saves less than " + Math.round(MIN_SAVING * 100) + "%";
+                        if (keep) a.score = verifyFile(img, tmp, verify, o);
+                        o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes),
+                                a.score != null ? a.score + ", " + a.note : a.note));
+                        break;
+                    }
+                    a.score = verifyFile(img, tmp, verify, o);
+                    o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes), a.score));
+                    if (a.score.pass) break;
+                    a.note = "did not look identical at full size";
                 }
-                if (s.pass) { o.ok = true; return; }
+                if (a == null) continue;
+                o.attempts.add(a);
+                if (keep && tmp.renameTo(new File(out))) { a.path = out; new File(out).setLastModified(src.lastModified()); }
+                if (a.note == null && (chosen == null || a.bytes < chosen.bytes)) {
+                    chosen = a;
+                    if (!keep) {
+                        if (!tmp.renameTo(new File(out))) { o.fail("could not write the copy (" + new File(out).getParent() + ")"); return; }
+                        a.path = out;
+                        break;
+                    }
+                }
             }
-            if (!keep) { o.fail("did not look identical at full size"); return; }
-            if (o.wouldSkip == null) o.wouldSkip = "did not look identical at full size";
-            o.ok = true;                                           // Lab: keep the last try to look at
+            if (chosen == null) {
+                Attempt best = null;
+                for (Attempt a : o.attempts) if (a.path != null && (best == null || a.bytes < best.bytes)) best = a;
+                String why = "did not look identical at full size";
+                for (Attempt a : o.attempts) if (a.note != null && a.note.startsWith("saves")) why = "would save less than " + Math.round(MIN_SAVING * 100) + "%";
+                if (!keep || best == null) { o.fail(why); return; }
+                o.wouldSkip = best.note;                           // Lab: show the smallest anyway
+                chosen = best;
+            }
+            o.output = chosen.path; o.key = chosen.key; o.format = chosen.label; o.quality = chosen.quality; o.after = chosen.bytes;
+            if (chosen.score != null) { o.ssim = chosen.score.ssim; o.psnr = chosen.score.psnr; o.shift = chosen.score.shift; }
+            o.ok = true;
         } finally {
+            mosaic.recycle();
             img.recycle();
         }
     }
 
     /**
-     * Lowest quality at which four 512 px regions all pass the guard. The regions are encoded together
-     * as one 2x2 mosaic (four tiles, one encode per step). Binary search, starting at the hint.
+     * Lowest quality at which the four regions all pass, encoded together as one 2x2 mosaic (one encode per
+     * step). Binary search, starting at the quality that worked for the previous picture.
      */
-    private static int searchQuality(Bitmap img, int hint, File work, Outcome o) throws IOException {
-        Rect[] rs = Calibrator.crops(img.getWidth(), img.getHeight(), 0.25, 0.75);
-        int c = rs[0].width();
-        Bitmap mosaic = Bitmap.createBitmap(2 * c, 2 * c, Bitmap.Config.ARGB_8888);
-        Canvas cv = new Canvas(mosaic);
-        for (int k = 0; k < 4; k++) cv.drawBitmap(img, rs[k], new Rect((k % 2) * c, (k / 2) * c, (k % 2 + 1) * c, (k / 2 + 1) * c), null);
+    private static void search(Cand cd, Bitmap mosaic, int c, Integer hint, File work, Outcome o) throws IOException {
         work.mkdirs();
-        File test = new File(work, "search.heic");
+        File test = new File(work, "search." + cd.m.ext);
         try {
-            int lo = Q_LOW, hi = Q_HIGH, best = -1;
-            boolean first = hint >= Q_LOW && hint <= Q_HIGH;
+            int lo = cd.m.lo, hi = cd.m.hi;
+            boolean first = hint != null && hint >= lo && hint <= hi;
             while (lo <= hi) {
                 int q = first ? hint : (lo + hi) / 2;
                 first = false;
-                HeifEncoder.encode(mosaic, q, null, test.getPath());
+                encodeTo(cd.m, mosaic, q, null, test);
                 Score s = mosaicScore(mosaic, test, c);
-                o.trace.add(String.format(Locale.US, "search quality %d: %s", q, s));
-                if (s.pass) { best = q; hi = q - 1; } else lo = q + 1;
+                o.trace.add(String.format(Locale.US, "%s, regions at quality %d: %s, %s", cd.m.label, q, Report.size(test.length()), s));
+                if (s.pass) { cd.best = q; cd.mosaicBytes = test.length(); hi = q - 1; } else lo = q + 1;
             }
-            return best;
         } finally {
-            mosaic.recycle();
             test.delete();
         }
+    }
+
+    /** One encode with a way of saving. WebP gets the EXIF block added (Android's WebP encoder writes none). */
+    private static void encodeTo(Method m, Bitmap bm, int q, byte[] exif, File out) throws IOException {
+        if (m.way != null) { HeifEncoder.encode(m.way, bm, q, m.exifOk ? exif : null, out.getPath()); return; }
+        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        if (!bm.compress(Calibrator.lossy(), q, bos)) throw new IOException("the WebP encoder failed");
+        byte[] d = bos.toByteArray();
+        if (exif != null && m.exifOk) d = WebpMeta.withExif(d, exif, bm.getWidth(), bm.getHeight());
+        FileOutputStream f = new FileOutputStream(out);
+        try { f.write(d); f.getFD().sync(); } finally { f.close(); }
+        if (out.length() != d.length) throw new IOException("the copy was not written completely");
     }
 
     private static Score mosaicScore(Bitmap mosaic, File enc, int c) {
@@ -243,7 +335,7 @@ final class ImageCompressor {
                 if (dec == null) throw new IOException("no region decoder for this file");
             } else {
                 whole = BitmapFactory.decodeFile(enc.getPath(), argb());
-                if (whole == null) throw new IOException("the HEIC copy could not be opened");
+                if (whole == null) throw new IOException("the copy could not be opened");
             }
             int w = dec != null ? dec.getWidth() : whole.getWidth(), h = dec != null ? dec.getHeight() : whole.getHeight();
             if (w != img.getWidth() || h != img.getHeight()) return Score.failed();
@@ -251,7 +343,7 @@ final class ImageCompressor {
             for (Rect r : regions) {
                 Bitmap a = Bitmap.createBitmap(img, r.left, r.top, r.width(), r.height());
                 Bitmap b = dec != null ? dec.decodeRegion(r, argb()) : Bitmap.createBitmap(whole, r.left, r.top, r.width(), r.height());
-                if (b == null) { a.recycle(); throw new IOException("a region of the HEIC copy could not be opened"); }
+                if (b == null) { a.recycle(); throw new IOException("a region of the copy could not be opened"); }
                 worst.worst(score(a, b));
                 a.recycle(); b.recycle();
             }
@@ -262,56 +354,99 @@ final class ImageCompressor {
         }
     }
 
-    // ------------------------------------------------------------------ which way of encoding works on this phone
+    // ------------------------------------------------------------------ which ways of saving work on this phone
+    /** A way of saving a photo: one HEIC encoder ({@link #way}) or Android's WebP encoder (way == null). */
+    static final class Method {
+        final String key, label, ext;
+        final HeifEncoder.Way way;
+        final int lo, hi;
+        boolean works, exifOk, regionOk = true;
+        String result = "";
+        Method(String key, String label, String ext, HeifEncoder.Way way, int lo, int hi) {
+            this.key = key; this.label = label; this.ext = ext; this.way = way; this.lo = lo; this.hi = hi;
+        }
+    }
+
     static final String CHECK_MAKE = "StoragePlanner check";
+    private static List<Method> methods;
     private static String checked;
 
+    /** The ways of saving, tested once per run (see {@link #encoderCheck}). */
+    static synchronized List<Method> methods(File work) { encoderCheck(work); return methods; }
+
     /**
-     * Once per run: encodes a test picture (1100x700, so the grid has partial tiles, with gradients and sharp
-     * edges) each possible way and keeps the first that comes back right, preferring ways that keep EXIF:
-     * HEIC encoder with EXIF, HEVC tiles with EXIF, HEIC encoder, HEVC tiles. Catches encoders whose output
-     * decodes wrongly and phones that store EXIF as picture data or drop it.
+     * Once per run: encodes a test picture (1100x700, so grids have partial tiles, with gradients and edges that
+     * do not line up with tiles) with every HEIC encoder and with WebP, and records for each whether the picture
+     * comes back right, whether the EXIF can be read back (and doesn't break the picture), and whether Android's
+     * region decoder (used by galleries to zoom) reads the file correctly.
      */
     static synchronized String encoderCheck(File work) {
         if (checked != null) return checked;
-        if (!HeifEncoder.supported()) return checked = "none";
+        methods = new ArrayList<Method>();
+        if (Build.VERSION.SDK_INT >= 28) {
+            for (HeifEncoder.Way w : HeifEncoder.ways()) methods.add(new Method(w.key, w.label(), "heic", w, Q_LOW, Q_HIGH));
+            methods.add(new Method("webp", "WebP (Android's encoder)", "webp", null, WEBP_LOW, WEBP_HIGH));
+        }
         work.mkdirs();
-        File f = new File(work, "check.heic");
         Bitmap t = testPattern(1100, 700);
         byte[] exif = Exif.minimal(CHECK_MAKE);
-        boolean[][] ways = {{true, true}, {false, true}, {true, false}, {false, false}};
         StringBuilder log = new StringBuilder();
-        boolean found = false;
         try {
-            for (boolean[] w : ways) {
-                if (w[0] ? !HeifEncoder.hasHeicEncoder() : !HeifEncoder.hasHevcEncoder()) continue;
-                String why = tryWay(t, w[0], w[1] ? exif : null, f);
-                log.append(log.length() > 0 ? "; " : "").append(w[0] ? "HEIC encoder" : "HEVC tiles").append(w[1] ? " + EXIF" : "")
-                   .append(why == null ? ": ok" : ": " + why);
-                if (why == null) { HeifEncoder.choose(w[0], w[1]); found = true; break; }
+            for (Method m : methods) {
+                File f = new File(work, "check." + m.ext);
+                try { check(m, t, exif, f); } finally { f.delete(); }
+                log.append(log.length() > 0 ? "; " : "").append(m.label).append(": ").append(m.result);
             }
         } finally {
             t.recycle();
-            f.delete();
         }
-        if (!found) HeifEncoder.markUnusable();
-        return checked = (found ? HeifEncoder.describe() : "no way of saving HEIC worked") + " [check: " + log + "]";
+        return checked = log.length() > 0 ? log.toString() : "none (needs Android 9)";
     }
 
-    /** Null if this way works, else why not. */
-    private static String tryWay(Bitmap t, boolean heic, byte[] exif, File f) {
+    private static void check(Method m, Bitmap t, byte[] exif, File f) {
+        m.exifOk = true;
+        String bad = pictureProblem(m, t, exif, f);
+        if (bad != null) {                                       // maybe the EXIF broke it: try without
+            m.exifOk = false;
+            String bad2 = pictureProblem(m, t, null, f);
+            if (bad2 != null) { m.works = false; m.result = "does not work (" + bad + ")"; return; }
+            m.works = true; m.result = "works, but storing EXIF breaks the picture (" + bad + "), so it would lose the photo's details";
+        } else {
+            m.works = true;
+            String make = null;
+            try { make = new android.media.ExifInterface(f.getPath()).getAttribute(android.media.ExifInterface.TAG_MAKE); } catch (Throwable ignored) {}
+            m.exifOk = make != null && CHECK_MAKE.equals(make.trim());
+            m.result = m.exifOk ? "works, EXIF kept" : "works, but EXIF is not kept (read back: " + make + ")";
+        }
+        // the copy as galleries read it when zooming: a region across a tile edge and a partial tile
+        BitmapRegionDecoder dec = null; Bitmap full = null, part = null, ref = null;
+        try {
+            Rect r = new Rect(400, 150, 1100, 700);
+            dec = newRegionDecoder(f.getPath());
+            full = BitmapFactory.decodeFile(f.getPath(), argb());
+            part = dec.decodeRegion(r, argb());
+            ref = Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height());
+            Score s = score(ref, part);
+            m.regionOk = s.psnr >= 40;
+            if (!m.regionOk) m.result += String.format(Locale.US, "; Android's region decoder reads it wrongly (PSNR %.1f dB against a full decode)", s.psnr);
+        } catch (Throwable e) {
+            m.result += "; no region decoding (" + e.getClass().getSimpleName() + ")";
+        } finally {
+            if (dec != null) dec.recycle();
+            for (Bitmap b : new Bitmap[]{full, part, ref}) if (b != null) b.recycle();
+        }
+    }
+
+    /** Null if a copy made this way decodes to the test picture, else what went wrong. */
+    private static String pictureProblem(Method m, Bitmap t, byte[] exif, File f) {
         Bitmap d = null;
         try {
-            HeifEncoder.encodeWith(heic, t, 90, exif, f.getPath());
+            encodeTo(m, t, 90, exif, f);
             d = BitmapFactory.decodeFile(f.getPath(), argb());
             if (d == null) return "the file could not be opened";
             if (d.getWidth() != t.getWidth() || d.getHeight() != t.getHeight()) return "came back " + d.getWidth() + "x" + d.getHeight();
             Score s = score(t, d);
             if (s.psnr < 30 || s.ssim < 0.9) return "the picture came back wrong, " + s;
-            if (exif != null) {
-                String make = new android.media.ExifInterface(f.getPath()).getAttribute(android.media.ExifInterface.TAG_MAKE);
-                if (make == null || !CHECK_MAKE.equals(make.trim())) return "EXIF was not stored (read back: " + make + ")";
-            }
             return null;
         } catch (Throwable e) {
             return e.getClass().getSimpleName() + (e.getMessage() != null ? ": " + e.getMessage() : "");

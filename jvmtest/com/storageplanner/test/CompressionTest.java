@@ -29,16 +29,18 @@ public final class CompressionTest {
         names();
         targets();
         exif();
+        webp();
         System.out.println("CompressionTest: " + (checks - fails) + " of " + checks + " checks passed");
         if (fails > 0) System.exit(1);
     }
 
     static void names() {
-        check("photo -> heic", Compression.outputPath("/s/DCIM/Camera/IMG_1.jpg", Techniques.PHOTOS).equals("/s/DCIM/Camera/IMG_1.heic"));
-        check("chat image -> heic", Compression.outputPath("/s/WhatsApp/IMG-2024-WA0001.jpeg", Techniques.CHAT_IMAGES).equals("/s/WhatsApp/IMG-2024-WA0001.heic"));
-        check("screenshot -> webp", Compression.outputPath("/s/Pictures/Screenshots/Screenshot_1.png", Techniques.SCREENSHOTS).equals("/s/Pictures/Screenshots/Screenshot_1.webp"));
-        check("dot in folder, none in name", Compression.outputPath("/s/my.photos/IMG", Techniques.PHOTOS).equals("/s/my.photos/IMG.heic"));
-        check("hidden file keeps its name", Compression.outputPath("/s/x/.jpg", Techniques.PHOTOS).equals("/s/x/.jpg.heic"));
+        check("photo -> heic", Compression.outputPath("/s/DCIM/Camera/IMG_1.jpg", "heic").equals("/s/DCIM/Camera/IMG_1.heic"));
+        check("chat image -> webp", Compression.outputPath("/s/WhatsApp/IMG-2024-WA0001.jpeg", "webp").equals("/s/WhatsApp/IMG-2024-WA0001.webp"));
+        check("dot in folder, none in name", Compression.base("/s/my.photos/IMG").equals("/s/my.photos/IMG"));
+        check("hidden file keeps its name", Compression.base("/s/x/.jpg").equals("/s/x/.jpg"));
+        check("photos may become HEIC or WebP", Arrays.equals(Compression.extensions(Techniques.PHOTOS), new String[]{"heic", "webp"}));
+        check("screenshots only lossless WebP", Arrays.equals(Compression.extensions(Techniques.SCREENSHOTS), new String[]{"webp"}));
         check("temp is hidden, same folder", Compression.tempPath("/s/DCIM/Camera/IMG_1.heic").equals("/s/DCIM/Camera/.sp-IMG_1.heic.tmp"));
         check("only image recommendations", Compression.isCompression(Techniques.PHOTOS) && Compression.isCompression(Techniques.CHAT_IMAGES)
                 && Compression.isCompression(Techniques.SCREENSHOTS) && !Compression.isCompression(Techniques.VIDEOS)
@@ -118,6 +120,35 @@ public final class CompressionTest {
         String tail = new String(mini, mini.length - 15, 14, java.nio.charset.StandardCharsets.US_ASCII);
         check("minimal block: maker name at its offset", tail.equals("StoragePlanner") && mini[mini.length - 1] == 0
                 && (mini[6 + 18] & 0xFF) == 38 && mini[6 + 14] == 15 && mini[6 + 10] == 0x0F && mini[6 + 11] == 0x01);
+    }
+
+    static int le32(byte[] b, int p) { return (b[p] & 255) | (b[p + 1] & 255) << 8 | (b[p + 2] & 255) << 16 | (b[p + 3] & 255) << 24; }
+
+    /** Simple WebP (RIFF, WEBP, one odd-sized "VP8 " chunk) gains VP8X + EXIF; an extended one keeps its chunks. */
+    static void webp() {
+        byte[] img = {1, 2, 3, 4, 5};                                    // odd size: padded
+        ByteArrayOutputStream s = new ByteArrayOutputStream();
+        w(s, "RIFF".getBytes()); u32(s, 4 + 8 + 6, true); w(s, "WEBP".getBytes());
+        w(s, "VP8 ".getBytes()); u32(s, 5, true); w(s, img); s.write(0);
+        byte[] simple = s.toByteArray();
+        byte[] exif = Exif.minimal("Cam");
+        byte[] out = com.storageplanner.core.WebpMeta.withExif(simple, exif, 1848, 4000);
+        check("webp: RIFF size", le32(out, 4) == out.length - 8);
+        check("webp: VP8X first, EXIF flag", new String(out, 12, 4).equals("VP8X") && le32(out, 16) == 10 && (out[20] & 0x08) != 0);
+        int cw = (out[24] & 255) | (out[25] & 255) << 8 | (out[26] & 255) << 16, ch = (out[27] & 255) | (out[28] & 255) << 8 | (out[29] & 255) << 16;
+        check("webp: canvas size", cw == 1847 && ch == 3999);
+        check("webp: image chunk kept, padded", new String(out, 30, 4).equals("VP8 ") && le32(out, 34) == 5 && out[38] == 1 && out[42] == 5 && out[43] == 0);
+        int e = 44;
+        check("webp: EXIF chunk holds the TIFF part", new String(out, e, 4).equals("EXIF") && le32(out, e + 4) == exif.length - 6
+                && out[e + 8] == 'I' && out[e + 9] == 'I');
+        check("webp: total length", out.length == e + 8 + (exif.length - 6) + ((exif.length - 6) & 1));
+        byte[] again = com.storageplanner.core.WebpMeta.withExif(out, Exif.minimal("Other"), 1848, 4000);
+        check("webp: second EXIF replaces the first", le32(again, 4) == again.length - 8
+                && new String(again).indexOf("Cam") < 0 && new String(again).indexOf("Other") > 0
+                && new String(again).indexOf("EXIF") == new String(again).lastIndexOf("EXIF"));
+        boolean threw = false;
+        try { com.storageplanner.core.WebpMeta.withExif("not webp at all".getBytes(), exif, 1, 1); } catch (IllegalArgumentException x) { threw = true; }
+        check("webp: rejects other files", threw);
     }
 
     static void w(ByteArrayOutputStream o, byte[] b) { o.write(b, 0, b.length); }

@@ -17,18 +17,20 @@ public final class Compression {
         return Techniques.PHOTOS.equals(technique) || Techniques.CHAT_IMAGES.equals(technique) || Techniques.SCREENSHOTS.equals(technique);
     }
 
-    /** Screenshots keep every pixel (lossless WebP); photos and chat images become HEIC that looks identical. */
+    /** Screenshots keep every pixel (lossless WebP); photos and chat images become HEIC or WebP that looks identical. */
     public static boolean lossless(String technique) { return Techniques.SCREENSHOTS.equals(technique); }
 
-    public static String extension(String technique) { return lossless(technique) ? "webp" : "heic"; }
+    /** Formats a copy can have: the app keeps whichever passes and is smallest (photos), or lossless WebP (screenshots). */
+    public static String[] extensions(String technique) { return lossless(technique) ? new String[]{"webp"} : new String[]{"heic", "webp"}; }
 
-    /** The compressed copy sits next to the original with the new extension: IMG_1.jpg -> IMG_1.heic. */
-    public static String outputPath(String path, String technique) {
+    /** The original's path without its extension: the copy is this plus ".heic" or ".webp" (IMG_1.jpg -> IMG_1.heic). */
+    public static String base(String path) {
         int slash = path.lastIndexOf('/');
         int dot = path.lastIndexOf('.');
-        String base = dot > slash + 1 ? path.substring(0, dot) : path;
-        return base + "." + extension(technique);
+        return dot > slash + 1 ? path.substring(0, dot) : path;
     }
+
+    public static String outputPath(String path, String ext) { return base(path) + "." + ext; }
 
     /** Work file the encoder writes before the copy is checked; renamed to the output path once it passes. */
     public static String tempPath(String outputPath) {

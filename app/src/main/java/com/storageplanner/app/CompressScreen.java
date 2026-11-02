@@ -58,7 +58,7 @@ public final class CompressScreen extends Screen {
     private List<FileItem> targets() {
         List<FileItem> out = new ArrayList<FileItem>();
         for (Unit u : Compression.targets(Session.candidates.get(key), key, Session.kept, Session.plan.chosen))
-            if (!new File(Compression.outputPath(u.file.abs, key)).exists() && new File(u.file.abs).isFile()) out.add(u.file);
+            if (!hasCopy(u.file.abs) && new File(u.file.abs).isFile()) out.add(u.file);
         return out;
     }
 
@@ -68,7 +68,7 @@ public final class CompressScreen extends Screen {
         Ui.add(content, Ui.heading(a, key, 21), 0);
         Ui.add(content, Ui.text(a, lossless
                 ? "Each screenshot is saved again as lossless WebP. The copy must have exactly the same pixels, or it is thrown away."
-                : "Each " + Compression.noun(key, 1) + " is saved again as HEIC at the lowest quality that still passes the "
+                : "Each " + Compression.noun(key, 1) + " is saved again as HEIC or WebP, whichever is smaller, at the lowest quality that still passes the "
                   + "\"looks identical\" check (SSIM 0.98 and PSNR 38 dB, as in the study), and colours must not shift. "
                   + "Date taken, camera and location are copied over. A copy that fails, or saves less than 10%, is thrown away.",
                 15, Ui.text, false), 8);
@@ -110,8 +110,13 @@ public final class CompressScreen extends Screen {
                 + " takes a few seconds.", 14, Ui.text2, false), 8);
     }
 
+    private boolean hasCopy(String path) {
+        for (String ext : Compression.extensions(key)) if (new File(Compression.outputPath(path, ext)).exists()) return true;
+        return false;
+    }
+
     private String example() {
-        return Compression.lossless(key) ? "Screenshot_1.png → Screenshot_1.webp" : "IMG_1.jpg → IMG_1.heic";
+        return Compression.lossless(key) ? "Screenshot_1.png → Screenshot_1.webp" : "IMG_1.jpg → IMG_1.heic or IMG_1.webp";
     }
 
     // ------------------------------------------------------------------ running

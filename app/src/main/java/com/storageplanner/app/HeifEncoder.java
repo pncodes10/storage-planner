@@ -13,6 +13,8 @@ import android.util.Range;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -23,9 +25,8 @@ import java.util.Locale;
  * <li><b>HEVC tiles</b> (any phone with an HEVC encoder): the picture is cut into 512x512 tiles here, each
  *     one an HEVC key frame.</li>
  * </ul>
- * Either way MediaMuxer stores the tiles as a HEIF image grid (MUXER_OUTPUT_HEIF, Android 9+). Which way
- * works, and whether the phone stores EXIF correctly, is decided by {@link ImageCompressor#encoderCheck}
- * on a test picture and set with {@link #choose}.
+ * Either way MediaMuxer stores the tiles as a HEIF image grid (MUXER_OUTPUT_HEIF, Android 9+). Every
+ * encoder found is one {@link Way}; {@link ImageCompressor#encoderCheck} tests each on a test picture.
  */
 final class HeifEncoder {
     private HeifEncoder() {}
@@ -38,33 +39,35 @@ final class HeifEncoder {
     /** MediaCodec.BUFFER_FLAG_MUXER_DATA (hidden in older SDKs): MediaMuxer stores the sample as the image's EXIF item. */
     private static final int MUXER_DATA_FLAG = 16;
 
-    private static boolean picked;
-    private static String hevcName, heicName;
-    private static boolean hevcCq;
-    private static int hevcQMin, hevcQMax, hevcMaxBitrate, heicQMin, heicQMax;
-    private static String survey = "";
-
-    /** Set by the encoder check. */
-    private static volatile boolean useHeic, exifOk = true, unusable;
-
-    /** Android 9+ with an HEVC or HEIC encoder that takes YUV frames (and the encoder check did not rule it out). */
-    static synchronized boolean supported() {
-        if (!picked) { picked = true; if (Build.VERSION.SDK_INT >= 28) pick(); }
-        return !unusable && (hevcName != null || heicName != null);
+    /** One way of writing HEIC: a dedicated HEIC encoder, or an HEVC encoder fed 512 px tiles. */
+    static final class Way {
+        final String codec, key;
+        final boolean heicEncoder, hardware, cq;
+        final int qMin, qMax, maxBitrate;
+        Way(String codec, String key, boolean heicEncoder, boolean hardware, boolean cq, int qMin, int qMax, int maxBitrate) {
+            this.codec = codec; this.key = key; this.heicEncoder = heicEncoder; this.hardware = hardware; this.cq = cq;
+            this.qMin = qMin; this.qMax = qMax; this.maxBitrate = maxBitrate;
+        }
+        String label() {
+            return "HEIC via " + codec + " (" + (heicEncoder ? "HEIC encoder" : "512 px tiles") + ", "
+                    + (cq ? "constant quality" : "variable bitrate") + (hardware ? "" : ", software") + ")";
+        }
     }
 
-    static synchronized boolean hasHeicEncoder() { supported(); return heicName != null; }
-    static synchronized boolean hasHevcEncoder() { supported(); return hevcName != null; }
+    private static List<Way> ways;
+    private static String survey = "";
 
-    /** Result of the encoder check: which way to encode and whether to store EXIF. */
-    static void choose(boolean heic, boolean exif) { useHeic = heic; exifOk = exif; }
-    static void markUnusable() { unusable = true; }
-    static boolean storesExif() { return exifOk; }
+    /** Every encoder that can write HEIC here (Android 9+, YUV input; HEVC encoders must take 512x512 frames). */
+    static synchronized List<Way> ways() {
+        if (ways == null) { ways = new ArrayList<Way>(); if (Build.VERSION.SDK_INT >= 28) pick(); }
+        return ways;
+    }
+
+    static boolean supported() { return !ways().isEmpty(); }
 
     private static void pick() {
         StringBuilder s = new StringBuilder();
         try {
-            boolean hevcHw = false, heicHw = false;
             for (MediaCodecInfo ci : new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()) {
                 if (!ci.isEncoder()) continue;
                 for (String t : ci.getSupportedTypes()) {
@@ -77,28 +80,28 @@ final class HeifEncoder {
                     boolean cq = ec != null && ec.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CQ);
                     boolean vbr = ec != null && ec.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
                     Range<Integer> qr = cq ? ec.getQualityRange() : null;
+                    if (qr != null && qr.getUpper() <= qr.getLower()) { cq = false; qr = null; }
                     MediaCodecInfo.VideoCapabilities vc = caps.getVideoCapabilities();
                     boolean hw = hardware(ci);
                     s.append(String.format(Locale.US, "    %s %s: %s, YUV input %s, modes%s%s%s, max %s%n", ci.getName(), isHeic ? "(HEIC)" : "(HEVC)",
                             hw ? "hardware" : "software", flexible ? "yes" : "no", cq ? " CQ" : "", vbr ? " VBR" : "",
                             qr != null ? " quality " + qr.getLower() + "-" + qr.getUpper() : "",
                             vc != null ? vc.getSupportedWidths().getUpper() + "x" + vc.getSupportedHeights().getUpper() : "?"));
-                    if (!flexible) continue;
-                    if (isHevc && vc != null && vc.isSizeSupported(TILE, TILE) && (hevcName == null || (hw && !hevcHw))) {
-                        hevcName = ci.getName(); hevcHw = hw; hevcCq = cq && qr.getUpper() > qr.getLower();
-                        if (hevcCq) { hevcQMin = qr.getLower(); hevcQMax = qr.getUpper(); }
-                        hevcMaxBitrate = vc.getBitrateRange().getUpper();
-                    }
-                    if (isHeic && cq && qr.getUpper() > qr.getLower() && (heicName == null || (hw && !heicHw))) {
-                        heicName = ci.getName(); heicHw = hw; heicQMin = qr.getLower(); heicQMax = qr.getUpper();
-                    }
+                    if (!flexible || (!cq && !vbr)) continue;
+                    if (isHevc && (vc == null || !vc.isSizeSupported(TILE, TILE))) continue;
+                    if (isHeic && !cq) continue;
+                    String key = isHeic ? "heic" : hw ? "tiles-hw" : "tiles-sw";
+                    int n = 1;
+                    for (Way w : ways) if (w.key.startsWith(key)) n++;
+                    ways.add(new Way(ci.getName(), n == 1 ? key : key + n, isHeic, hw, cq,
+                            qr != null ? qr.getLower() : 0, qr != null ? qr.getUpper() : 0,
+                            vc != null ? vc.getBitrateRange().getUpper() : 0));
                 }
             }
         } catch (Throwable t) {
             s.append("    (could not list encoders: ").append(t).append(")\n");
         }
         survey = s.toString();
-        useHeic = heicName != null;
     }
 
     private static boolean hardware(MediaCodecInfo ci) {
@@ -107,31 +110,16 @@ final class HeifEncoder {
         return !(n.startsWith("omx.google.") || n.startsWith("c2.android.") || n.contains(".sw."));
     }
 
-    /** For the log: the way in use. */
-    static String describe() {
-        if (!supported()) return "none";
-        return (useHeic ? heicName + " (HEIC encoder, constant quality " + heicQMin + "-" + heicQMax + ")"
-                : hevcName + " (512 px HEVC tiles, " + (hevcCq ? "constant quality " + hevcQMin + "-" + hevcQMax : "variable bitrate") + ")")
-                + (exifOk ? "" : ", without EXIF");
-    }
-
     /** For the Lab: every HEVC / HEIC encoder on the phone and what it offers. */
-    static String survey() { supported(); return survey.isEmpty() ? "    (none)\n" : survey; }
+    static String survey() { ways(); return survey.isEmpty() ? "    (none)\n" : survey; }
 
     /**
-     * Encodes {@code bm} to {@code outPath} the way the encoder check chose. {@code quality} is 0..100
-     * (higher = larger, closer to the original). {@code exif} is an "Exif\0\0" block, or null.
+     * Encodes {@code bm} to {@code outPath} with one way. {@code quality} is 0..100 (higher = larger, closer
+     * to the original). {@code exif} is an "Exif\0\0" block to store with the image, or null.
      */
-    static void encode(Bitmap bm, int quality, byte[] exif, String outPath) throws IOException {
-        if (!supported()) throw new IOException("HEIC encoding is not available on this phone");
-        encodeWith(useHeic, bm, quality, exifOk ? exif : null, outPath);
-    }
-
-    /** One specific way (used by the encoder check). */
-    static void encodeWith(boolean heic, Bitmap bm, int quality, byte[] exif, String outPath) throws IOException {
-        supported();
-        String name = heic ? heicName : hevcName;
-        if (name == null) throw new IOException(heic ? "no HEIC encoder" : "no HEVC encoder");
+    static void encode(Way way, Bitmap bm, int quality, byte[] exif, String outPath) throws IOException {
+        boolean heic = way.heicEncoder;
+        String name = way.codec;
         final int w = bm.getWidth(), h = bm.getHeight();
         final int cols = (w + TILE - 1) / TILE, rows = (h + TILE - 1) / TILE;
 
@@ -143,15 +131,15 @@ final class HeifEncoder {
             f.setInteger(MediaFormat.KEY_GRID_ROWS, rows);
             f.setInteger(MediaFormat.KEY_GRID_COLUMNS, cols);
             f.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CQ);
-            f.setInteger(MediaFormat.KEY_QUALITY, heicQMin + Math.round((heicQMax - heicQMin) * quality / 100f));
+            f.setInteger(MediaFormat.KEY_QUALITY, way.qMin + Math.round((way.qMax - way.qMin) * quality / 100f));
         } else {
             f = MediaFormat.createVideoFormat(HEVC, TILE, TILE);
-            if (hevcCq) {
+            if (way.cq) {
                 f.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CQ);
-                f.setInteger(MediaFormat.KEY_QUALITY, hevcQMin + Math.round((hevcQMax - hevcQMin) * quality / 100f));
+                f.setInteger(MediaFormat.KEY_QUALITY, way.qMin + Math.round((way.qMax - way.qMin) * quality / 100f));
             } else {
                 f.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
-                f.setInteger(MediaFormat.KEY_BIT_RATE, bitrate(quality));
+                f.setInteger(MediaFormat.KEY_BIT_RATE, bitrate(quality, way.maxBitrate));
             }
         }
         f.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible);
@@ -245,11 +233,11 @@ final class HeifEncoder {
     }
 
     /** Variable-bitrate fallback: quality 0..100 -> 0.15..4.15 bits per pixel for each tile. */
-    private static int bitrate(int quality) {
+    private static int bitrate(int quality, int maxBitrate) {
         double q = quality / 100.0;
         double bpp = 0.15 + 4.0 * q * q;
         long b = (long) (bpp * TILE * TILE * FPS);
-        return (int) Math.max(100_000, Math.min(hevcMaxBitrate > 0 ? hevcMaxBitrate : Integer.MAX_VALUE, b));
+        return (int) Math.max(100_000, Math.min(maxBitrate > 0 ? maxBitrate : Integer.MAX_VALUE, b));
     }
 
     /**

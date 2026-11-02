@@ -85,20 +85,25 @@ Three recommendations can now be carried out by the app itself: **Re-encode phot
 
 | Recommendation | Becomes | Check before the copy is kept |
 |---|---|---|
-| Photos (camera JPEGs) | HEIC, next to the original (`IMG_1.jpg` → `IMG_1.heic`) | Looks identical: SSIM(Y) ≥ 0.98 and PSNR(Y) ≥ 38 dB, the study's guard, plus no colour shift. Must save at least 10%. |
-| Chat images (WhatsApp JPEGs) | HEIC, next to the original | Same as photos. |
+| Photos (camera JPEGs) | HEIC or WebP, whichever is smaller, next to the original (`IMG_1.jpg` → `IMG_1.heic` or `IMG_1.webp`) | Looks identical: SSIM(Y) ≥ 0.98 and PSNR(Y) ≥ 38 dB, the study's guard, plus no colour shift. Must save at least 10%. |
+| Chat images (WhatsApp JPEGs) | HEIC or WebP, next to the original | Same as photos. |
 | Screenshots (PNG) | Lossless WebP (`.png` → `.webp`) | Must decode to exactly the same pixels. Must save at least 10%. |
 
 How it works:
 
 - **Which files.** Every item in the recommendation, except items you kept and items the plan removes another way (for example, deletes as a duplicate). Items that already have a compressed copy are skipped.
-- **Quality search.** For each photo, the lowest HEIC quality is found on four 512 px regions, encoded together as one 2×2 mosaic. The full image is then encoded and checked again on four other regions of the real file. If those fail, the quality goes up in steps of 3.
-- **Metadata.** The pixels are turned upright from the EXIF orientation, and the EXIF block (date taken, camera, location) is copied into the HEIC with its orientation set to upright. The copy also gets the original's file date.
+- **Ways of saving.** Once per run, the app tests every way it has on a test picture: each HEIC encoder (a dedicated HEIC encoder, and each HEVC encoder fed 512 px tiles, hardware or software) and Android's WebP encoder. For each it checks:
+  - that the picture comes back right;
+  - that the EXIF can be read back and doesn't break the picture;
+  - that Android's region decoder, which galleries use to zoom, reads the file correctly.
+  Ways that would lose the EXIF, or that the region decoder misreads, are not used in real runs. The Lab still tries them and says why they'd be skipped.
+- **Quality search.** For each photo and each usable way, the lowest quality that passes is found on four 512 px regions, encoded together as one 2×2 mosaic. The way with the smallest result is encoded in full and checked again on four other regions of the real file. If those fail, the quality goes up in steps of 3. If the copy fails, or saves less than 10%, the next way is tried.
+- **Metadata.** The pixels are turned upright from the EXIF orientation, and the EXIF block (date taken, camera, location) is copied into the copy with its orientation set to upright. Android's WebP encoder writes no EXIF, so the app adds an EXIF chunk to the WebP file itself (`core/WebpMeta`). The copy also gets the original's file date.
 - **Safe writing.** The copy is written to a hidden work file in the same folder, checked, then renamed. Anything that fails, or saves less than 10%, is thrown away, and its original is left as it is. The reason is shown in the summary and in the Lab log.
 - **Background.** It runs as a foreground service with progress and a **Stop** button in the notification, like the analysis. Analysis and compression never run at the same time.
 - **Look before trashing.** Under the waiting originals, **Compare** buttons open the five copies with the largest savings in the same compare screen as the Lab (side by side, flip, difference).
 - **Originals.** Nothing is deleted while compressing. Afterwards, **Move N originals to trash** sends them to Android's trash (Android 11+): Android asks you to confirm, and you can restore them for 30 days. On Android 9 and 10 there is no trash, so the app asks once more and then deletes them for good. **Keep both** stops offering it. The waiting originals are remembered across restarts and shown on the overview. Only originals whose compressed copy still exists are offered.
-- **Requirements.** HEIC needs Android 9 or later and an HEVC encoder the phone lets apps use. Screenshots work on every supported version.
+- **Requirements.** Photos need Android 9 or later; HEIC also needs an HEVC encoder the phone lets apps use, otherwise WebP is used. Screenshots work on every supported version.
 - **Things to know.** WhatsApp doesn't know about the new copies, so once the originals are gone, those images show as missing inside chats; your gallery shows the copies. Backup apps such as Google Photos will upload the new copies. Tap **Analyse** again afterwards to update the plan.
 
 HEIC is written with the framework only: 512×512 HEVC tiles from `MediaCodec`, stored as a HEIF image grid by `MediaMuxer` (`HeifEncoder`). This is the same layout AndroidX HeifWriter uses when a phone has no dedicated HEIC encoder.
@@ -294,7 +299,7 @@ building in another photo.
 | Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
-| Compress (test copy) | Compresses the picture with the same code and checks as a real run. **Treat as** picks the kind: Screenshot becomes lossless WebP, anything else HEIC. Logs every quality tried with its worst SSIM, PSNR and colour shift, the size before and after, the time taken, and whether a real run would keep the copy. The copy goes to `Download/StoragePlanner/compressed/`. It is kept even when a real run would throw it away, so you can see why |
+| Compress (test copy) | Compresses the picture with the same code and checks as a real run, once per way of saving (each HEIC encoder, and WebP), and shows which copy a real run would keep (★). **Treat as** picks the kind: Screenshot becomes lossless WebP, anything else HEIC. Logs every quality tried with its worst SSIM, PSNR and colour shift, the size before and after, the time taken, and whether a real run would keep the copy. The copies go to their own folder under `Download/StoragePlanner/compressed/`. It is kept even when a real run would throw it away, so you can see why |
 
 3. **Run on all picked pictures:**
 
@@ -371,7 +376,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
   - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
-  - **Compression / Exif:** which files a compression recommendation covers and where copies go; copying a JPEG's EXIF into the copy.
+  - **Compression / Exif / WebpMeta:** which files a compression recommendation covers and where copies go; copying a JPEG's EXIF into the copy; adding it to a WebP file.
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).

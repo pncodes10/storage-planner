@@ -68,21 +68,20 @@ public final class CompressionService extends Service {
     static void run(Context c, String technique, List<FileItem> files, Runnable onFile) {
         File work = new File(c.getCacheDir(), "compress");
         work.mkdirs();
-        int hint = -1;
+        java.util.Map<String, Integer> hints = new java.util.HashMap<String, Integer>();   // per way of saving
         List<String> scan = new ArrayList<String>();
         try {
             for (FileItem f : files) {
                 if (CompressionState.cancelled) break;
-                ImageCompressor.Outcome o = ImageCompressor.compress(f, technique, hint, work);
+                ImageCompressor.Outcome o = ImageCompressor.compress(f, technique, hints, work);
                 if (o.ok) {
-                    hint = o.quality >= 0 ? o.quality : hint;
                     CompressionState.compressed++;
                     CompressionState.before += o.before;
                     CompressionState.after += o.after;
                     Originals.add(c, f.abs, o.output);
                     scan.add(o.output);
                     LabLog.line(c, "Compressed " + f.rel + ": " + Report.size(o.before) + " -> " + Report.size(o.after)
-                            + (o.quality >= 0 ? " at quality " + o.quality : " (lossless)"));
+                            + " as " + o.format + (o.quality >= 0 ? " at quality " + o.quality : ""));
                 } else {
                     CompressionState.skip(o.skipped);
                     LabLog.line(c, "Skipped " + f.rel + ": " + o.skipped);
@@ -115,7 +114,7 @@ public final class CompressionService extends Service {
             }
             final PowerManager.WakeLock fwl = wl;
             LabLog.line(getApplicationContext(), "Compression started: " + technique + ", " + files.size() + " files"
-                    + (Compression.lossless(technique) ? "" : ", encoder " + ImageCompressor.encoderCheck(new File(getCacheDir(), "compress"))));
+                    + (Compression.lossless(technique) ? "" : ", ways of saving: " + ImageCompressor.encoderCheck(new File(getCacheDir(), "compress"))));
             run(getApplicationContext(), technique, files, new Runnable() {
                 public void run() {
                     if (fwl != null) fwl.acquire(WAKE_MS);

@@ -53,13 +53,16 @@ public final class LabScreen extends Screen {
     private Button areaBtn;
     private final List<Button> runButtons = new ArrayList<Button>();
     private final StringBuilder shown = new StringBuilder();
-    /** Test copies made with "Compress", newest last (at most one per picture). */
+    /** Test copies made with "Compress", newest last: one per way of saving for each picture. */
     private final List<Compressed> compressed = new ArrayList<Compressed>();
     private LinearLayout compareBox;
 
     private static final class Compressed {
-        final Lab.Pic pic; final ImageCompressor.Outcome o; final String technique;
-        Compressed(Lab.Pic pic, ImageCompressor.Outcome o, String technique) { this.pic = pic; this.o = o; this.technique = technique; }
+        final Lab.Pic pic; final String path, label, facts; final long before, after; final boolean chosen, skipped;
+        Compressed(Lab.Pic pic, String path, String label, String facts, long before, long after, boolean chosen, boolean skipped) {
+            this.pic = pic; this.path = path; this.label = label; this.facts = facts; this.before = before; this.after = after;
+            this.chosen = chosen; this.skipped = skipped;
+        }
     }
 
     public LabScreen(MainActivity a) { super(a); }
@@ -301,44 +304,61 @@ public final class LabScreen extends Screen {
     }
 
     // ------------------------------------------------------------------ compression test
-    /** "Treat as" decides the kind: screenshots become lossless WebP, everything else HEIC (chat images like photos). */
+    /** "Treat as" decides the kind: screenshots become lossless WebP, everything else HEIC or WebP (chat images like photos). */
     private static String techniqueFor(Lab.Pic p) {
         return "screenshot".equals(p.area) ? com.storageplanner.core.Techniques.SCREENSHOTS
                 : "wa_image".equals(p.area) ? com.storageplanner.core.Techniques.CHAT_IMAGES : com.storageplanner.core.Techniques.PHOTOS;
     }
 
     /**
-     * Compresses the Lab's copy of a picture into Download/StoragePlanner/compressed/, with the same code and checks as
-     * a real run, and logs every quality tried. The copy is kept even if a real run would throw it away, so it can be compared.
+     * Compresses the Lab's copy of a picture with the same code and checks as a real run, once per way of saving
+     * (each HEIC encoder and WebP), into its own folder Download/StoragePlanner/compressed/<name>-<time>/. Every
+     * copy is kept, even ones a real run would throw away, so they can be compared; the log says which one a real
+     * run would keep and why the others would not be.
      */
     private void compress(final Lab.Pic p, Lab.Out o) throws Exception {
         String tech = techniqueFor(p);
         boolean lossless = com.storageplanner.core.Compression.lossless(tech);
-        o.line("Compress " + p.name + " (treated as " + tech + ") to " + (lossless ? "lossless WebP" : "HEIC"));
+        o.line("Compress " + p.name + " (treated as " + tech + ") to " + (lossless ? "lossless WebP" : "HEIC and WebP, keeping the smallest that passes"));
         if (!lossless) o.line("  encoders on this phone:\n" + HeifEncoder.survey().replaceAll("\\s+$", ""));
         if (!ImageCompressor.available(tech)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(tech)); return; }
-        File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "StoragePlanner/compressed");
-        if (!dir.isDirectory() && !dir.mkdirs()) throw new Exception("cannot create " + dir);
-        String base = new File(com.storageplanner.core.Compression.outputPath("/" + p.name, tech)).getName();
-        File dst = new File(dir, base);
-        int dot = base.lastIndexOf('.');
-        for (int k = 2; dst.exists() || new File(com.storageplanner.core.Compression.tempPath(dst.getPath())).exists(); k++)
-            dst = new File(dir, base.substring(0, dot) + "-" + k + base.substring(dot));
-        final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), tech, dst.getPath(), new File(a.getCacheDir(), "compress"));
+        String stem = new File(com.storageplanner.core.Compression.base("/" + p.name)).getName();
+        File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                "StoragePlanner/compressed/" + stem + "-" + new java.text.SimpleDateFormat("HHmmss", Locale.US).format(new java.util.Date()));
+        for (int k = 2; dir.exists(); k++) dir = new File(dir.getParentFile(), dir.getName().replaceAll("(-\\d+)?$", "") + "-" + k);
+        if (!dir.mkdirs()) throw new Exception("cannot create " + dir);
+        final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), tech, new File(dir, stem).getPath(), new File(a.getCacheDir(), "compress"));
         for (String t : r.trace) o.line("  " + t);
         if (!r.ok) { o.line("  not compressed: " + r.skipped + String.format(Locale.US, " (%d ms)", r.ms)); return; }
-        o.line(String.format(Locale.US, "  %s -> %s (%s)%s; %d ms", com.storageplanner.core.Report.size(r.before),
-                com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.quality >= 0 ? ", quality " + r.quality : "", r.ms));
+        final List<Compressed> made = new ArrayList<Compressed>();
+        List<String> scan = new ArrayList<String>();
+        if (r.attempts.isEmpty()) {                                // lossless: one copy
+            made.add(new Compressed(p, r.output, r.format, facts(r.format, r.before, r.after, -1, null, r.identicalPixels, r.wouldSkip),
+                    r.before, r.after, r.wouldSkip == null, r.wouldSkip != null));
+            scan.add(r.output);
+        } else {
+            o.line("  every way, at full size:");
+            for (ImageCompressor.Attempt t : r.attempts) {
+                boolean chosen = t.path != null && t.path.equals(r.output) && r.wouldSkip == null;
+                o.line(String.format(Locale.US, "    %s: quality %d, %s (%s)%s%s", t.label, t.quality, com.storageplanner.core.Report.size(t.bytes),
+                        change(r.before, t.bytes), t.score != null ? String.format(Locale.US, ", worst SSIM %.4f, PSNR %.1f dB", t.score.ssim, t.score.psnr) : "",
+                        chosen ? "  <- a real run keeps this" : t.note != null ? "  (" + t.note + ")" : "  (passes, but another way is smaller)"));
+                if (t.path == null) continue;
+                made.add(new Compressed(p, t.path, t.label, facts(t.label, r.before, t.bytes, t.quality, t.score, false, t.note), r.before, t.bytes, chosen, t.note != null));
+                scan.add(t.path);
+            }
+        }
+        o.line(String.format(Locale.US, "  %s -> %s (%s) as %s; %d ms", com.storageplanner.core.Report.size(r.before),
+                com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.format, r.ms));
         if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f)",
                 r.ssim, Calibrator.SSIM_MIN, r.psnr, Calibrator.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT));
-        o.line(r.wouldSkip == null ? "  A real run would keep this copy." : "  A real run would NOT keep this copy: " + r.wouldSkip + ".");
-        o.line("  Saved as Download/StoragePlanner/compressed/" + dst.getName());
-        try { android.media.MediaScannerConnection.scanFile(a, new String[]{dst.getPath()}, null, null); } catch (Throwable ignored) {}
-        final String technique = tech;
+        o.line(r.wouldSkip == null ? "  A real run would keep the " + r.format + " copy." : "  A real run would NOT keep any copy: " + r.wouldSkip + ".");
+        o.line("  Saved in Download/StoragePlanner/compressed/" + dir.getName() + "/");
+        try { android.media.MediaScannerConnection.scanFile(a, scan.toArray(new String[0]), null, null); } catch (Throwable ignored) {}
         ui.post(new Runnable() {
             public void run() {
                 for (java.util.Iterator<Compressed> it = compressed.iterator(); it.hasNext(); ) if (it.next().pic == p) it.remove();
-                compressed.add(new Compressed(p, r, technique));
+                compressed.addAll(made);
                 showCompared();
             }
         });
@@ -352,19 +372,28 @@ public final class LabScreen extends Screen {
         Ui.add(compareBox, Ui.text(a, "Compare original vs compressed", 15, Ui.text, true), 4);
         for (int i = compressed.size() - 1; i >= 0; i--) {
             final Compressed c = compressed.get(i);
-            final String facts = facts(c);
-            Button b = Ui.button(a, "Compare: " + c.pic.name + " · " + com.storageplanner.core.Report.size(c.o.before) + " → "
-                    + com.storageplanner.core.Report.size(c.o.after) + (c.o.wouldSkip != null ? " · would be skipped" : ""), false);
-            b.setContentDescription("Compare " + c.pic.name + " with its compressed copy. " + facts);
+            Button b = Ui.button(a, (c.chosen ? "★ " : "") + c.pic.name + " · " + shortLabel(c.label) + " · " + com.storageplanner.core.Report.size(c.after)
+                    + " (" + change(c.before, c.after) + ")" + (c.skipped ? " · would be skipped" : ""), c.chosen);
+            b.setContentDescription("Compare " + c.pic.name + " with its " + c.label + " copy" + (c.chosen ? ", the one a real run keeps" : "") + ". " + c.facts);
             b.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
-                    if (!new File(c.o.output).isFile() || !new File(c.pic.path).isFile()) { a.toast("The picture or its copy is no longer there."); return; }
-                    a.push(new CompressCompareScreen(a, c.pic.path, c.o.output, c.pic.name, facts));
+                    if (!new File(c.path).isFile() || !new File(c.pic.path).isFile()) { a.toast("The picture or its copy is no longer there."); return; }
+                    a.push(new CompressCompareScreen(a, c.pic.path, c.path, c.pic.name + " · " + shortLabel(c.label), c.facts));
                 }
             });
             LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(-1, -2); l.topMargin = dp(6);
             compareBox.addView(b, l);
         }
+        Ui.add(compareBox, Ui.text(a, "★ = the copy a real run would keep.", 12, Ui.text2, false), 4);
+    }
+
+    /** "HEIC hardware tiles", "HEIC software", "WebP", ... for buttons. */
+    private static String shortLabel(String label) {
+        if (label == null) return "";
+        if (label.startsWith("WebP")) return "WebP";
+        if (label.startsWith("lossless")) return "lossless WebP";
+        if (label.contains("HEIC encoder")) return "HEIC (HEIC encoder)";
+        return label.contains("software") ? "HEIC (software tiles)" : "HEIC (hardware tiles)";
     }
 
     /** "55% smaller" or "3% larger". */
@@ -373,15 +402,14 @@ public final class LabScreen extends Screen {
         return pct >= 0 ? String.format(Locale.US, "%.0f%% smaller", pct) : String.format(Locale.US, "%.0f%% larger", -pct);
     }
 
-    private static String facts(Compressed c) {
-        ImageCompressor.Outcome o = c.o;
+    private static String facts(String label, long before, long after, int quality, ImageCompressor.Score sc, boolean identical, String note) {
         StringBuilder s = new StringBuilder();
-        s.append(com.storageplanner.core.Report.size(o.before)).append(" → ").append(com.storageplanner.core.Report.size(o.after))
-         .append(" (").append(change(o.before, o.after)).append(")");
-        if (o.quality >= 0) s.append(" · HEIC quality ").append(o.quality);
-        else s.append(o.identicalPixels ? " · lossless, pixel-identical" : " · lossless WebP, NOT pixel-identical");
-        if (o.quality >= 0 && o.ssim >= 0) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f", o.ssim, o.psnr, o.shift));
-        if (o.wouldSkip != null) s.append(" · a real run would skip it: ").append(o.wouldSkip);
+        s.append(label).append(": ").append(com.storageplanner.core.Report.size(before)).append(" → ").append(com.storageplanner.core.Report.size(after))
+         .append(" (").append(change(before, after)).append(")");
+        if (quality >= 0) s.append(" · quality ").append(quality);
+        else s.append(identical ? " · pixel-identical" : " · NOT pixel-identical");
+        if (sc != null) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f", sc.ssim, sc.psnr, sc.shift));
+        if (note != null) s.append(" · a real run would skip it: ").append(note);
         return s.toString();
     }
 
