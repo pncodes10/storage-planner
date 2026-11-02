@@ -190,6 +190,23 @@ public final class CompressScreen extends Screen {
         row.addView(trash, lp); row.addView(keep);
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(12);
         content.addView(row, rl);
+        // look before trashing: the largest savings first, where a change would be most likely to show
+        List<Originals.Pair> look = new ArrayList<Originals.Pair>(ps);
+        java.util.Collections.sort(look, new java.util.Comparator<Originals.Pair>() {
+            public int compare(Originals.Pair x, Originals.Pair y) { return Long.compare(y.savedBytes(), x.savedBytes()); }
+        });
+        Ui.add(content, Ui.text(a, "Check a few before you move them:", 15, Ui.text, true), 16);
+        for (int i = 0; i < Math.min(5, look.size()); i++) {
+            final Originals.Pair p = look.get(i);
+            final String name = new File(p.original).getName();
+            Button c = Ui.button(a, "Compare " + name + " · " + Report.size(new File(p.original).length()) + " → " + Report.size(new File(p.copy).length()), false);
+            c.setContentDescription("Compare " + name + " with its compressed copy");
+            c.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) { a.push(new CompressCompareScreen(a, p.original, p.copy, name, null)); }
+            });
+            LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2); cl.topMargin = dp(6);
+            content.addView(c, cl);
+        }
         if (ps.size() > MainActivity.TRASH_BATCH)
             Ui.add(content, Ui.text(a, "Originals go " + MainActivity.TRASH_BATCH + " at a time; tap again for the next ones.", 14, Ui.text2, false), 6);
     }

@@ -53,6 +53,14 @@ public final class LabScreen extends Screen {
     private Button areaBtn;
     private final List<Button> runButtons = new ArrayList<Button>();
     private final StringBuilder shown = new StringBuilder();
+    /** Test copies made with "Compress", newest last (at most one per picture). */
+    private final List<Compressed> compressed = new ArrayList<Compressed>();
+    private LinearLayout compareBox;
+
+    private static final class Compressed {
+        final Lab.Pic pic; final ImageCompressor.Outcome o; final String technique;
+        Compressed(Lab.Pic pic, ImageCompressor.Outcome o, String technique) { this.pic = pic; this.o = o; this.technique = technique; }
+    }
 
     public LabScreen(MainActivity a) { super(a); }
 
@@ -85,7 +93,9 @@ public final class LabScreen extends Screen {
         Button pick = Ui.button(a, "Pick pictures", true);
         pick.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.pickImages(LabScreen.this); } });
         Button clear = Ui.button(a, "Clear", false);
-        clear.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { pics.clear(); current = 0; showPics(); } });
+        clear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { pics.clear(); current = 0; compressed.clear(); showCompared(); showPics(); }   // slots are reused by the next picks
+        });
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(0, -2, 1); pl.rightMargin = dp(8);
         pickRow.addView(pick, pl); pickRow.addView(clear, new LinearLayout.LayoutParams(-2, -2));
         add(root, pickRow, 10);
@@ -138,6 +148,7 @@ public final class LabScreen extends Screen {
         addRun("Picture category", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.category(pf(), pic(), System.currentTimeMillis(), o)); } });
         addRun("QR code / barcode", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.codes(pf(), pic(), o); } });
         addRun("Read text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.text(pf(), pic(), System.currentTimeMillis(), o); } });
+        addRun("Compress (test copy)", false, new Job() { public void run(Lab.Out o) throws Exception { compress(pic(), o); } });
         Ui.add(root, Ui.heading(a, "Run on all picked pictures", 17), 14);
         LinearLayout groupButtons = new LinearLayout(a);
         groupButtons.setOrientation(LinearLayout.VERTICAL);
@@ -147,6 +158,9 @@ public final class LabScreen extends Screen {
         addRun("Best shot among them", true, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o)); } });
         addRun("Near-duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.nearDuplicates(pf(), new ArrayList<Lab.Pic>(pics), o); } });
         addRun("Exact duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.exactDuplicates(new ArrayList<Lab.Pic>(pics), o); } });
+        addRun("Compress all (test copies)", false, new Job() {
+            public void run(Lab.Out o) throws Exception { for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) compress(p, o); }
+        });
         buttons = keep;
 
         Ui.add(root, Ui.heading(a, "Results", 17), 14);
@@ -157,6 +171,10 @@ public final class LabScreen extends Screen {
         out.setPadding(dp(10), dp(8), dp(10), dp(8));
         out.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         add(root, out, 6);
+        compareBox = new LinearLayout(a);
+        compareBox.setOrientation(LinearLayout.VERTICAL);
+        add(root, compareBox, 6);
+        showCompared();
 
         Ui.add(root, Ui.heading(a, "Log", 17), 14);
         logInfo = Ui.text(a, "", 13, Ui.text2, false);
@@ -274,6 +292,85 @@ public final class LabScreen extends Screen {
                 }
             }
         });
+    }
+
+    // ------------------------------------------------------------------ compression test
+    /** "Treat as" decides the kind: screenshots become lossless WebP, everything else HEIC (chat images like photos). */
+    private static String techniqueFor(Lab.Pic p) {
+        return "screenshot".equals(p.area) ? com.storageplanner.core.Techniques.SCREENSHOTS
+                : "wa_image".equals(p.area) ? com.storageplanner.core.Techniques.CHAT_IMAGES : com.storageplanner.core.Techniques.PHOTOS;
+    }
+
+    /**
+     * Compresses the Lab's copy of a picture into Download/StoragePlanner/compressed/, with the same code and checks as
+     * a real run, and logs every quality tried. The copy is kept even if a real run would throw it away, so it can be compared.
+     */
+    private void compress(final Lab.Pic p, Lab.Out o) throws Exception {
+        String tech = techniqueFor(p);
+        boolean lossless = com.storageplanner.core.Compression.lossless(tech);
+        o.line("Compress " + p.name + " (treated as " + tech + ") to " + (lossless ? "lossless WebP" : "HEIC, encoder " + HeifEncoder.describe()));
+        if (!ImageCompressor.available(tech)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(tech)); return; }
+        File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "StoragePlanner/compressed");
+        if (!dir.isDirectory() && !dir.mkdirs()) throw new Exception("cannot create " + dir);
+        String base = new File(com.storageplanner.core.Compression.outputPath("/" + p.name, tech)).getName();
+        File dst = new File(dir, base);
+        int dot = base.lastIndexOf('.');
+        for (int k = 2; dst.exists() || new File(com.storageplanner.core.Compression.tempPath(dst.getPath())).exists(); k++)
+            dst = new File(dir, base.substring(0, dot) + "-" + k + base.substring(dot));
+        final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), tech, dst.getPath(), new File(a.getCacheDir(), "compress"));
+        for (String t : r.trace) o.line("  " + t);
+        if (!r.ok) { o.line("  not compressed: " + r.skipped + String.format(Locale.US, " (%d ms)", r.ms)); return; }
+        o.line(String.format(Locale.US, "  %s -> %s (%.0f%% smaller)%s; %d ms", com.storageplanner.core.Report.size(r.before),
+                com.storageplanner.core.Report.size(r.after), 100.0 * (r.before - r.after) / Math.max(1, r.before),
+                r.quality >= 0 ? ", quality " + r.quality : "", r.ms));
+        if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f)",
+                r.ssim, Calibrator.SSIM_MIN, r.psnr, Calibrator.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT));
+        o.line(r.wouldSkip == null ? "  A real run would keep this copy." : "  A real run would NOT keep this copy: " + r.wouldSkip + ".");
+        o.line("  Saved as Download/StoragePlanner/compressed/" + dst.getName());
+        try { android.media.MediaScannerConnection.scanFile(a, new String[]{dst.getPath()}, null, null); } catch (Throwable ignored) {}
+        final String technique = tech;
+        ui.post(new Runnable() {
+            public void run() {
+                for (java.util.Iterator<Compressed> it = compressed.iterator(); it.hasNext(); ) if (it.next().pic == p) it.remove();
+                compressed.add(new Compressed(p, r, technique));
+                showCompared();
+            }
+        });
+    }
+
+    /** One "Compare" button per test copy. */
+    private void showCompared() {
+        if (compareBox == null) return;
+        compareBox.removeAllViews();
+        if (compressed.isEmpty()) return;
+        Ui.add(compareBox, Ui.text(a, "Compare original vs compressed", 15, Ui.text, true), 4);
+        for (int i = compressed.size() - 1; i >= 0; i--) {
+            final Compressed c = compressed.get(i);
+            final String facts = facts(c);
+            Button b = Ui.button(a, "Compare: " + c.pic.name + " · " + com.storageplanner.core.Report.size(c.o.before) + " → "
+                    + com.storageplanner.core.Report.size(c.o.after) + (c.o.wouldSkip != null ? " · would be skipped" : ""), false);
+            b.setContentDescription("Compare " + c.pic.name + " with its compressed copy. " + facts);
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (!new File(c.o.output).isFile() || !new File(c.pic.path).isFile()) { a.toast("The picture or its copy is no longer there."); return; }
+                    a.push(new CompressCompareScreen(a, c.pic.path, c.o.output, c.pic.name, facts));
+                }
+            });
+            LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(-1, -2); l.topMargin = dp(6);
+            compareBox.addView(b, l);
+        }
+    }
+
+    private static String facts(Compressed c) {
+        ImageCompressor.Outcome o = c.o;
+        StringBuilder s = new StringBuilder();
+        s.append(com.storageplanner.core.Report.size(o.before)).append(" → ").append(com.storageplanner.core.Report.size(o.after))
+         .append(String.format(Locale.US, " (%.0f%% smaller)", 100.0 * (o.before - o.after) / Math.max(1, o.before)));
+        if (o.quality >= 0) s.append(" · HEIC quality ").append(o.quality);
+        else s.append(o.identicalPixels ? " · lossless, pixel-identical" : " · lossless WebP, NOT pixel-identical");
+        if (o.quality >= 0 && o.ssim >= 0) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f", o.ssim, o.psnr, o.shift));
+        if (o.wouldSkip != null) s.append(" · a real run would skip it: ").append(o.wouldSkip);
+        return s.toString();
     }
 
     private void setEnabled(boolean on) { for (Button b : runButtons) b.setEnabled(on); }

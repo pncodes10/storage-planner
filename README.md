@@ -96,6 +96,7 @@ How it works:
 - **Metadata.** The pixels are turned upright from the EXIF orientation, and the EXIF block (date taken, camera, location) is copied into the HEIC with its orientation set to upright. The copy also gets the original's file date.
 - **Safe writing.** The copy is written to a hidden work file in the same folder, checked, then renamed. Anything that fails, or saves less than 10%, is thrown away, and its original is left as it is. The reason is shown in the summary and in the Lab log.
 - **Background.** It runs as a foreground service with progress and a **Stop** button in the notification, like the analysis. Analysis and compression never run at the same time.
+- **Look before trashing.** Under the waiting originals, **Compare** buttons open the five copies with the largest savings in the same compare screen as the Lab (side by side, flip, difference).
 - **Originals.** Nothing is deleted while compressing. Afterwards, **Move N originals to trash** sends them to Android's trash (Android 11+): Android asks you to confirm, and you can restore them for 30 days. On Android 9 and 10 there is no trash, so the app asks once more and then deletes them for good. **Keep both** stops offering it. The waiting originals are remembered across restarts and shown on the overview. Only originals whose compressed copy still exists are offered.
 - **Requirements.** HEIC needs Android 9 or later and an HEVC encoder the phone lets apps use. Screenshots work on every supported version.
 - **Things to know.** WhatsApp doesn't know about the new copies, so once the originals are gone, those images show as missing inside chats; your gallery shows the copies. Backup apps such as Google Photos will upload the new copies. Tap **Analyse** again afterwards to update the plan.
@@ -293,6 +294,7 @@ building in another photo.
 | Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
+| Compress (test copy) | Compresses the picture with the same code and checks as a real run. **Treat as** picks the kind: Screenshot becomes lossless WebP, anything else HEIC. Logs every quality tried with its worst SSIM, PSNR and colour shift, the size before and after, the time taken, and whether a real run would keep the copy. The copy goes to `Download/StoragePlanner/compressed/`. It is kept even when a real run would throw it away, so you can see why |
 
 3. **Run on all picked pictures:**
 
@@ -301,8 +303,13 @@ building in another photo.
 | Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
 | Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
 | Exact duplicate check | SHA-256 of each file |
+| Compress all (test copies) | Compress (test copy) for every picked picture |
 
-4. **Log.**
+4. **Compare original vs compressed.** Each test copy gets a **Compare** button under the results. The compare screen has three modes:
+   - **Side by side:** stacked for landscape pictures, zooming together.
+   - **Flip:** one picture at a time at the same zoom and spot. Switching back and forth makes any change jump out.
+   - **Difference:** the change per pixel, amplified 8×, so black means identical. It also gives the average and largest change, and the share of pixels that changed.
+5. **Log.**
    - Every line, with the phone model, Android and WebView versions and the app version, is written to a log in the app's private storage.
    - **Save log** copies it to `Download/StoragePlanner/lab-log-<time>.txt`, **Share log** sends that copy, and **Clear log** starts a new one.
    - Picked pictures are copied into the app's cache (20 slots, reused); the originals are not touched.
@@ -377,7 +384,8 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **MainActivity:** the UI, back stack and its restore after process death.
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
   - **CompressScreen / CompressionService / CompressionState:** image compression: the screen, the foreground service and its live progress.
-  - **ImageCompressor / HeifEncoder:** one image's quality search, checks and safe write; the framework-only HEIC writer.
+  - **ImageCompressor / HeifEncoder:** one image's quality search, checks and safe write (with every step's scores for the Lab); the framework-only HEIC writer.
+  - **CompressCompareScreen:** original vs compressed: side by side, flip, and amplified difference.
   - **Originals:** originals waiting for the trash (remembered), and their MediaStore entries for the trash request.
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
 - `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
