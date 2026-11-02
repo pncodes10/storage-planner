@@ -342,7 +342,7 @@ public final class LabScreen extends Screen {
                 boolean chosen = t.path != null && t.path.equals(r.output) && r.wouldSkip == null;
                 o.line(String.format(Locale.US, "    %s: quality %d, %s (%s)%s%s", t.label, t.quality, com.storageplanner.core.Report.size(t.bytes),
                         change(r.before, t.bytes), t.score != null ? String.format(Locale.US, ", worst SSIM %.4f, PSNR %.1f dB", t.score.ssim, t.score.psnr) : "",
-                        chosen ? "  <- a real run keeps this" : t.note != null ? "  (" + t.note + ")" : "  (passes, but another way is smaller)"));
+                        chosen ? "  <- a real run keeps this" : t.note != null ? "  (" + t.note + ")" : "  (passes, but another way is smaller, or HEIC is not 5% smaller than WebP)"));
                 if (t.path == null) continue;
                 made.add(new Compressed(p, t.path, t.label, facts(t.label, r.before, t.bytes, t.quality, t.score, false, t.note), r.before, t.bytes, chosen, t.note != null));
                 scan.add(t.path);

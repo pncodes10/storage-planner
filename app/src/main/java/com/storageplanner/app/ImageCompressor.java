@@ -85,6 +85,9 @@ final class ImageCompressor {
     static final class Score {
         double ssim = 1, psnr = 99, shift = 0;
         boolean pass = true;
+        /** Android's region decoder (used by galleries to zoom) read the file differently from a full decode. */
+        boolean regionWrong;
+        String why;           // set when the copy could not be compared at all
 
         void worst(Score s) {
             ssim = Math.min(ssim, s.ssim); psnr = Math.min(psnr, s.psnr); shift = Math.max(shift, s.shift);
@@ -92,10 +95,12 @@ final class ImageCompressor {
         }
 
         @Override public String toString() {
+            if (why != null) return "FAIL (" + why + ")";
             return String.format(Locale.US, "%s (worst SSIM %.4f, PSNR %.1f dB, colour shift %.1f)", pass ? "pass" : "FAIL", ssim, psnr, shift);
         }
 
         static Score failed() { Score s = new Score(); s.ssim = 0; s.psnr = 0; s.shift = 255; s.pass = false; return s; }
+        static Score failed(String why) { Score s = failed(); s.why = why; return s; }
     }
 
     /** Whether this phone can carry out the recommendation at all. */
@@ -164,6 +169,17 @@ final class ImageCompressor {
     }
 
     // ------------------------------------------------------------------ photos and chat images -> HEIC or WebP
+    static final String REGION_WRONG = "Android's region decoder reads it wrongly, so galleries may show it wrong when zoomed";
+    /** HEIC must be this much smaller to win over WebP, which every app can open. */
+    static final double WEBP_PREFERENCE = 1.05;
+
+    private static double weight(Method m, long bytes) { return m != null && m.way != null ? bytes * WEBP_PREFERENCE : bytes; }
+
+    private static Method byKey(String key) {
+        if (methods != null) for (Method m : methods) if (m.key.equals(key)) return m;
+        return null;
+    }
+
     /** A way of saving under consideration for one picture. */
     private static final class Cand {
         final Method m; int best = -1; long mosaicBytes;
@@ -186,6 +202,7 @@ final class ImageCompressor {
         if (cands.isEmpty()) { o.fail("no way of saving worked on this phone"); return; }
         Bitmap img = upright(decode(src, 1), orientation);
         if (exif != null && orientation != 1) exif = Exif.withOrientation(exif, 1);   // the pixels are upright now
+        if (exif != null) exif = Exif.withSize(exif, img.getWidth(), img.getHeight());  // cameras record the size before turning
         o.trace.add(String.format(Locale.US, "%d x %d px, EXIF %s, orientation %d", img.getWidth(), img.getHeight(),
                 exif != null ? "copied (" + exif.length + " bytes)" : "none", orientation));
         o.before = src.length();
@@ -204,7 +221,7 @@ final class ImageCompressor {
                 else o.trace.add(cd.m.label + ": no quality looked identical");
             }
             if (ranked.isEmpty()) { o.fail("no quality setting looked identical"); return; }
-            Collections.sort(ranked, new Comparator<Cand>() { public int compare(Cand x, Cand y) { return Long.compare(x.mosaicBytes, y.mosaicBytes); } });
+            Collections.sort(ranked, new Comparator<Cand>() { public int compare(Cand x, Cand y) { return Double.compare(weight(x.m, x.mosaicBytes), weight(y.m, y.mosaicBytes)); } });
 
             // 2) full size, smallest first; a real run keeps the first that passes and saves enough
             Rect[] verify = Calibrator.crops(img.getWidth(), img.getHeight(), 0.4, 0.6);   // other regions than the search
@@ -227,13 +244,14 @@ final class ImageCompressor {
                     }
                     a.score = verifyFile(img, tmp, verify, o);
                     o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes), a.score));
+                    if (a.score.pass && a.score.regionWrong) { a.note = REGION_WRONG; break; }   // a higher quality would not change that
                     if (a.score.pass) break;
                     a.note = "did not look identical at full size";
                 }
                 if (a == null) continue;
                 o.attempts.add(a);
                 if (keep && tmp.renameTo(new File(out))) { a.path = out; new File(out).setLastModified(src.lastModified()); }
-                if (a.note == null && (chosen == null || a.bytes < chosen.bytes)) {
+                if (a.note == null && (chosen == null || weight(cd.m, a.bytes) < weight(byKey(chosen.key), chosen.bytes))) {
                     chosen = a;
                     if (!keep) {
                         if (!tmp.renameTo(new File(out))) { o.fail("could not write the copy (" + new File(out).getParent() + ")"); return; }
@@ -247,6 +265,7 @@ final class ImageCompressor {
                 for (Attempt a : o.attempts) if (a.path != null && (best == null || a.bytes < best.bytes)) best = a;
                 String why = "did not look identical at full size";
                 for (Attempt a : o.attempts) if (a.note != null && a.note.startsWith("saves")) why = "would save less than " + Math.round(MIN_SAVING * 100) + "%";
+                for (Attempt a : o.attempts) if (REGION_WRONG.equals(a.note)) why = REGION_WRONG;
                 if (!keep || best == null) { o.fail(why); return; }
                 o.wouldSkip = best.note;                           // Lab: show the smallest anyway
                 chosen = best;
@@ -322,7 +341,10 @@ final class ImageCompressor {
         try { s = regionScore(img, enc, regions, true); } catch (Throwable t) { s = null; }
         if (s != null && s.pass) return s;
         Score full = regionScore(img, enc, regions, false);
-        if (s != null && full.pass) o.trace.add("  the region decoder read the copy wrongly (" + s + "); a full decode passes");
+        if (s != null && full.pass) {
+            o.trace.add("  Android's region decoder reads this copy wrongly: " + s + "; a full decode passes");
+            full.regionWrong = true;
+        }
         return full;
     }
 
@@ -338,12 +360,18 @@ final class ImageCompressor {
                 if (whole == null) throw new IOException("the copy could not be opened");
             }
             int w = dec != null ? dec.getWidth() : whole.getWidth(), h = dec != null ? dec.getHeight() : whole.getHeight();
-            if (w != img.getWidth() || h != img.getHeight()) return Score.failed();
+            if (w != img.getWidth() || h != img.getHeight())
+                return Score.failed((regionDecoder ? "the region decoder" : "a full decode") + " sees " + w + "x" + h + " instead of " + img.getWidth() + "x" + img.getHeight());
             Score worst = new Score();
             for (Rect r : regions) {
                 Bitmap a = Bitmap.createBitmap(img, r.left, r.top, r.width(), r.height());
                 Bitmap b = dec != null ? dec.decodeRegion(r, argb()) : Bitmap.createBitmap(whole, r.left, r.top, r.width(), r.height());
                 if (b == null) { a.recycle(); throw new IOException("a region of the copy could not be opened"); }
+                if (b.getWidth() != a.getWidth() || b.getHeight() != a.getHeight()) {
+                    Score f = Score.failed("a " + r.width() + "x" + r.height() + " region came back " + b.getWidth() + "x" + b.getHeight());
+                    a.recycle(); b.recycle();
+                    return f;
+                }
                 worst.worst(score(a, b));
                 a.recycle(); b.recycle();
             }
@@ -389,7 +417,7 @@ final class ImageCompressor {
         }
         work.mkdirs();
         Bitmap t = testPattern(1100, 700);
-        byte[] exif = Exif.minimal(CHECK_MAKE);
+        byte[] exif = Exif.withSize(Exif.minimal(CHECK_MAKE), t.getWidth(), t.getHeight());
         StringBuilder log = new StringBuilder();
         try {
             for (Method m : methods) {

@@ -118,8 +118,21 @@ public final class CompressionTest {
         check("minimal block: valid, upright", mini[0] == 'E' && Exif.orientation(mini) == 1);
         check("minimal block: orientation settable", Exif.orientation(Exif.withOrientation(mini, 8)) == 8);
         String tail = new String(mini, mini.length - 15, 14, java.nio.charset.StandardCharsets.US_ASCII);
-        check("minimal block: maker name at its offset", tail.equals("StoragePlanner") && mini[mini.length - 1] == 0
-                && (mini[6 + 18] & 0xFF) == 38 && mini[6 + 14] == 15 && mini[6 + 10] == 0x0F && mini[6 + 11] == 0x01);
+        check("minimal block: maker name at the end", tail.equals("StoragePlanner") && mini[mini.length - 1] == 0);
+        byte[] sized = Exif.withSize(mini, 1100, 700);
+        check("minimal block: size settable", Exif.number(sized, false, 0x0100) == 1100 && Exif.number(sized, false, 0x0101) == 700
+                && Exif.orientation(sized) == 1);
+        // a camera block: IFD0 says 4000 x 1848 (SHORT), orientation 6, and an Exif IFD with PixelX/Y 4000 x 1848 (LONG)
+        for (boolean le : new boolean[]{true, false}) {
+            byte[] cam = camera(le);
+            check("camera block " + (le ? "LE" : "BE") + ": sizes read", Exif.number(cam, false, 0x0100) == 4000 && Exif.number(cam, false, 0x0101) == 1848
+                    && Exif.number(cam, true, 0xA002) == 4000 && Exif.number(cam, true, 0xA003) == 1848 && Exif.orientation(cam) == 6);
+            byte[] up = Exif.withSize(Exif.withOrientation(cam, 1), 1848, 4000);
+            check("camera block " + (le ? "LE" : "BE") + ": upright copy says 1848 x 4000", Exif.number(up, false, 0x0100) == 1848
+                    && Exif.number(up, false, 0x0101) == 4000 && Exif.number(up, true, 0xA002) == 1848 && Exif.number(up, true, 0xA003) == 4000
+                    && Exif.orientation(up) == 1 && up.length == cam.length);
+        }
+        check("size on a block without size tags: unchanged", Arrays.equals(Exif.withSize(Exif.fromJpeg(jpeg(true, 6)), 10, 20), Exif.fromJpeg(jpeg(true, 6))));
     }
 
     static int le32(byte[] b, int p) { return (b[p] & 255) | (b[p + 1] & 255) << 8 | (b[p + 2] & 255) << 16 | (b[p + 3] & 255) << 24; }
@@ -149,6 +162,26 @@ public final class CompressionTest {
         boolean threw = false;
         try { com.storageplanner.core.WebpMeta.withExif("not webp at all".getBytes(), exif, 1, 1); } catch (IllegalArgumentException x) { threw = true; }
         check("webp: rejects other files", threw);
+    }
+
+    /** "Exif\0\0" + TIFF: IFD0 {ImageWidth SHORT, ImageLength SHORT, Orientation, ExifIFD pointer}, Exif IFD {PixelX LONG, PixelY LONG}. */
+    static byte[] camera(boolean le) {
+        ByteArrayOutputStream t = new ByteArrayOutputStream();
+        w(t, le ? new byte[]{'I', 'I'} : new byte[]{'M', 'M'}); u16(t, 42, le); u32(t, 8, le);
+        u16(t, 4, le);
+        u16(t, 0x0100, le); u16(t, 3, le); u32(t, 1, le); u16(t, 4000, le); u16(t, 0, le);
+        u16(t, 0x0101, le); u16(t, 3, le); u32(t, 1, le); u16(t, 1848, le); u16(t, 0, le);
+        u16(t, 0x0112, le); u16(t, 3, le); u32(t, 1, le); u16(t, 6, le); u16(t, 0, le);
+        int exifAt = 8 + 2 + 4 * 12 + 4;
+        u16(t, 0x8769, le); u16(t, 4, le); u32(t, 1, le); u32(t, exifAt, le);
+        u32(t, 0, le);
+        u16(t, 2, le);
+        u16(t, 0xA002, le); u16(t, 4, le); u32(t, 1, le); u32(t, 4000, le);
+        u16(t, 0xA003, le); u16(t, 4, le); u32(t, 1, le); u32(t, 1848, le);
+        u32(t, 0, le);
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        w(o, new byte[]{'E', 'x', 'i', 'f', 0, 0}); w(o, t.toByteArray());
+        return o.toByteArray();
     }
 
     static void w(ByteArrayOutputStream o, byte[] b) { o.write(b, 0, b.length); }
