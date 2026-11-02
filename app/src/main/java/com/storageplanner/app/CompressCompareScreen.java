@@ -89,7 +89,7 @@ public final class CompressCompareScreen extends Screen {
         root.addView(h, new LinearLayout.LayoutParams(-1, -2));
         String sizes = Report.size(new File(original).length()) + " → " + Report.size(new File(copy).length());
         long before = new File(original).length(), after = new File(copy).length();
-        if (before > 0) sizes += String.format(Locale.US, " (%.0f%% smaller)", 100.0 * (before - after) / before);
+        if (before > 0) sizes += " (" + LabScreen.change(before, after) + ")";
         Ui.add(root, Ui.text(a, facts != null ? facts : sizes, 13, Ui.text2, false), 2);
 
         LinearLayout modes = Ui.row(a);

@@ -134,6 +134,8 @@ final class ImageCompressor {
 
     // ------------------------------------------------------------------ photos and chat images -> HEIC
     private static void lossy(File src, File tmp, int hint, File work, boolean keep, Outcome o) throws IOException {
+        o.trace.add("encoder: " + encoderCheck(work));
+        if (!HeifEncoder.supported()) { o.fail("no way of saving HEIC worked on this phone"); return; }
         byte[] exif = Exif.fromJpeg(head(src, 256 * 1024));
         int orientation = exif != null ? Exif.orientation(exif) : 1;
         Bitmap img = upright(decode(src, 1), orientation);
@@ -154,7 +156,7 @@ final class ImageCompressor {
                 HeifEncoder.encode(img, q, exif, tmp.getPath());
                 boolean small = tmp.length() <= limit;
                 if (!small && !keep) { o.fail("would save less than " + Math.round(MIN_SAVING * 100) + "%"); return; }
-                Score s = verifyFile(img, tmp, verify);
+                Score s = verifyFile(img, tmp, verify, o);
                 o.trace.add(String.format(Locale.US, "full image at quality %d: %s, %s", q, com.storageplanner.core.Report.size(tmp.length()), s));
                 o.quality = q; o.after = tmp.length(); o.ssim = s.ssim; o.psnr = s.psnr; o.shift = s.shift;
                 if (!small) {
@@ -219,13 +221,27 @@ final class ImageCompressor {
         }
     }
 
-    /** Checks the real output: region decoding where the phone supports it for HEIC, else a full decode. */
-    private static Score verifyFile(Bitmap img, File enc, Rect[] regions) throws IOException {
+    /**
+     * Checks the real output on the given regions. Region decoding saves memory, but HEIC region decoding has
+     * been unreliable on some phones, so a failure is looked at again with a full decode before it counts.
+     */
+    private static Score verifyFile(Bitmap img, File enc, Rect[] regions, Outcome o) throws IOException {
+        Score s = null;
+        try { s = regionScore(img, enc, regions, true); } catch (Throwable t) { s = null; }
+        if (s != null && s.pass) return s;
+        Score full = regionScore(img, enc, regions, false);
+        if (s != null && full.pass) o.trace.add("  the region decoder read the copy wrongly (" + s + "); a full decode passes");
+        return full;
+    }
+
+    private static Score regionScore(Bitmap img, File enc, Rect[] regions, boolean regionDecoder) throws IOException {
         BitmapRegionDecoder dec = null;
         Bitmap whole = null;
         try {
-            try { dec = newRegionDecoder(enc.getPath()); } catch (Throwable t) { dec = null; }
-            if (dec == null) {
+            if (regionDecoder) {
+                dec = newRegionDecoder(enc.getPath());
+                if (dec == null) throw new IOException("no region decoder for this file");
+            } else {
                 whole = BitmapFactory.decodeFile(enc.getPath(), argb());
                 if (whole == null) throw new IOException("the HEIC copy could not be opened");
             }
@@ -244,6 +260,78 @@ final class ImageCompressor {
             if (dec != null) dec.recycle();
             if (whole != null) whole.recycle();
         }
+    }
+
+    // ------------------------------------------------------------------ which way of encoding works on this phone
+    static final String CHECK_MAKE = "StoragePlanner check";
+    private static String checked;
+
+    /**
+     * Once per run: encodes a test picture (1100x700, so the grid has partial tiles, with gradients and sharp
+     * edges) each possible way and keeps the first that comes back right, preferring ways that keep EXIF:
+     * HEIC encoder with EXIF, HEVC tiles with EXIF, HEIC encoder, HEVC tiles. Catches encoders whose output
+     * decodes wrongly and phones that store EXIF as picture data or drop it.
+     */
+    static synchronized String encoderCheck(File work) {
+        if (checked != null) return checked;
+        if (!HeifEncoder.supported()) return checked = "none";
+        work.mkdirs();
+        File f = new File(work, "check.heic");
+        Bitmap t = testPattern(1100, 700);
+        byte[] exif = Exif.minimal(CHECK_MAKE);
+        boolean[][] ways = {{true, true}, {false, true}, {true, false}, {false, false}};
+        StringBuilder log = new StringBuilder();
+        boolean found = false;
+        try {
+            for (boolean[] w : ways) {
+                if (w[0] ? !HeifEncoder.hasHeicEncoder() : !HeifEncoder.hasHevcEncoder()) continue;
+                String why = tryWay(t, w[0], w[1] ? exif : null, f);
+                log.append(log.length() > 0 ? "; " : "").append(w[0] ? "HEIC encoder" : "HEVC tiles").append(w[1] ? " + EXIF" : "")
+                   .append(why == null ? ": ok" : ": " + why);
+                if (why == null) { HeifEncoder.choose(w[0], w[1]); found = true; break; }
+            }
+        } finally {
+            t.recycle();
+            f.delete();
+        }
+        if (!found) HeifEncoder.markUnusable();
+        return checked = (found ? HeifEncoder.describe() : "no way of saving HEIC worked") + " [check: " + log + "]";
+    }
+
+    /** Null if this way works, else why not. */
+    private static String tryWay(Bitmap t, boolean heic, byte[] exif, File f) {
+        Bitmap d = null;
+        try {
+            HeifEncoder.encodeWith(heic, t, 90, exif, f.getPath());
+            d = BitmapFactory.decodeFile(f.getPath(), argb());
+            if (d == null) return "the file could not be opened";
+            if (d.getWidth() != t.getWidth() || d.getHeight() != t.getHeight()) return "came back " + d.getWidth() + "x" + d.getHeight();
+            Score s = score(t, d);
+            if (s.psnr < 30 || s.ssim < 0.9) return "the picture came back wrong, " + s;
+            if (exif != null) {
+                String make = new android.media.ExifInterface(f.getPath()).getAttribute(android.media.ExifInterface.TAG_MAKE);
+                if (make == null || !CHECK_MAKE.equals(make.trim())) return "EXIF was not stored (read back: " + make + ")";
+            }
+            return null;
+        } catch (Throwable e) {
+            return e.getClass().getSimpleName() + (e.getMessage() != null ? ": " + e.getMessage() : "");
+        } finally {
+            if (d != null) d.recycle();
+        }
+    }
+
+    /** Smooth gradients plus a checkerboard that does not line up with the tiles, so misplaced tiles show. */
+    private static Bitmap testPattern(int w, int h) {
+        Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+        int[] row = new int[w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int r = x * 255 / w, g = y * 255 / h, bl = ((x / 37 + y / 29) & 1) == 0 ? 40 : 210;
+                row[x] = 0xFF000000 | (r << 16) | (g << 8) | bl;
+            }
+            b.setPixels(row, 0, w, 0, y, w, 1);
+        }
+        return b;
     }
 
     @SuppressWarnings("deprecation")

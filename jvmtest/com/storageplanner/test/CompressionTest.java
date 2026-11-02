@@ -112,6 +112,12 @@ public final class CompressionTest {
         check("cut-off segment", Exif.fromJpeg(cut) == null);
         check("missing block: upright", Exif.orientation(null) == 1);
         check("odd value: upright", Exif.orientation(Exif.fromJpeg(jpeg(true, 42))) == 1);
+        byte[] mini = Exif.minimal("StoragePlanner");
+        check("minimal block: valid, upright", mini[0] == 'E' && Exif.orientation(mini) == 1);
+        check("minimal block: orientation settable", Exif.orientation(Exif.withOrientation(mini, 8)) == 8);
+        String tail = new String(mini, mini.length - 15, 14, java.nio.charset.StandardCharsets.US_ASCII);
+        check("minimal block: maker name at its offset", tail.equals("StoragePlanner") && mini[mini.length - 1] == 0
+                && (mini[6 + 18] & 0xFF) == 38 && mini[6 + 14] == 15 && mini[6 + 10] == 0x0F && mini[6 + 11] == 0x01);
     }
 
     static void w(ByteArrayOutputStream o, byte[] b) { o.write(b, 0, b.length); }

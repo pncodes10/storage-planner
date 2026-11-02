@@ -308,7 +308,8 @@ public final class LabScreen extends Screen {
     private void compress(final Lab.Pic p, Lab.Out o) throws Exception {
         String tech = techniqueFor(p);
         boolean lossless = com.storageplanner.core.Compression.lossless(tech);
-        o.line("Compress " + p.name + " (treated as " + tech + ") to " + (lossless ? "lossless WebP" : "HEIC, encoder " + HeifEncoder.describe()));
+        o.line("Compress " + p.name + " (treated as " + tech + ") to " + (lossless ? "lossless WebP" : "HEIC"));
+        if (!lossless) o.line("  encoders on this phone:\n" + HeifEncoder.survey().replaceAll("\\s+$", ""));
         if (!ImageCompressor.available(tech)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(tech)); return; }
         File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "StoragePlanner/compressed");
         if (!dir.isDirectory() && !dir.mkdirs()) throw new Exception("cannot create " + dir);
@@ -320,9 +321,8 @@ public final class LabScreen extends Screen {
         final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), tech, dst.getPath(), new File(a.getCacheDir(), "compress"));
         for (String t : r.trace) o.line("  " + t);
         if (!r.ok) { o.line("  not compressed: " + r.skipped + String.format(Locale.US, " (%d ms)", r.ms)); return; }
-        o.line(String.format(Locale.US, "  %s -> %s (%.0f%% smaller)%s; %d ms", com.storageplanner.core.Report.size(r.before),
-                com.storageplanner.core.Report.size(r.after), 100.0 * (r.before - r.after) / Math.max(1, r.before),
-                r.quality >= 0 ? ", quality " + r.quality : "", r.ms));
+        o.line(String.format(Locale.US, "  %s -> %s (%s)%s; %d ms", com.storageplanner.core.Report.size(r.before),
+                com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.quality >= 0 ? ", quality " + r.quality : "", r.ms));
         if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f)",
                 r.ssim, Calibrator.SSIM_MIN, r.psnr, Calibrator.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT));
         o.line(r.wouldSkip == null ? "  A real run would keep this copy." : "  A real run would NOT keep this copy: " + r.wouldSkip + ".");
@@ -361,11 +361,17 @@ public final class LabScreen extends Screen {
         }
     }
 
+    /** "55% smaller" or "3% larger". */
+    static String change(long before, long after) {
+        double pct = 100.0 * (before - after) / Math.max(1, before);
+        return pct >= 0 ? String.format(Locale.US, "%.0f%% smaller", pct) : String.format(Locale.US, "%.0f%% larger", -pct);
+    }
+
     private static String facts(Compressed c) {
         ImageCompressor.Outcome o = c.o;
         StringBuilder s = new StringBuilder();
         s.append(com.storageplanner.core.Report.size(o.before)).append(" → ").append(com.storageplanner.core.Report.size(o.after))
-         .append(String.format(Locale.US, " (%.0f%% smaller)", 100.0 * (o.before - o.after) / Math.max(1, o.before)));
+         .append(" (").append(change(o.before, o.after)).append(")");
         if (o.quality >= 0) s.append(" · HEIC quality ").append(o.quality);
         else s.append(o.identicalPixels ? " · lossless, pixel-identical" : " · lossless WebP, NOT pixel-identical");
         if (o.quality >= 0 && o.ssim >= 0) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f", o.ssim, o.psnr, o.shift));

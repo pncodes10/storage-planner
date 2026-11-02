@@ -114,7 +114,8 @@ public final class CompressionService extends Service {
                 wl.acquire(WAKE_MS);
             }
             final PowerManager.WakeLock fwl = wl;
-            LabLog.line(getApplicationContext(), "Compression started: " + technique + ", " + files.size() + " files, encoder " + HeifEncoder.describe());
+            LabLog.line(getApplicationContext(), "Compression started: " + technique + ", " + files.size() + " files"
+                    + (Compression.lossless(technique) ? "" : ", encoder " + ImageCompressor.encoderCheck(new File(getCacheDir(), "compress"))));
             run(getApplicationContext(), technique, files, new Runnable() {
                 public void run() {
                     if (fwl != null) fwl.acquire(WAKE_MS);

@@ -51,6 +51,26 @@ public final class Exif {
         return out;
     }
 
+    /**
+     * A small valid block with a camera maker name and orientation 1 (upright), used to check whether a phone
+     * stores EXIF in HEIC files correctly: the maker name should be readable from the written file.
+     */
+    public static byte[] minimal(String make) {
+        byte[] m = make.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        int dataAt = 8 + 2 + 2 * 12 + 4;                     // header, entry count, two entries, next-IFD offset
+        byte[] e = new byte[TIFF + dataAt + m.length + 1];
+        System.arraycopy(new byte[]{'E', 'x', 'i', 'f', 0, 0, 'I', 'I', 42, 0, 8, 0, 0, 0, 2, 0}, 0, e, 0, 16);
+        int p = TIFF + 10;
+        le16(e, p, 0x010F); le16(e, p + 2, 2); le32(e, p + 4, m.length + 1); le32(e, p + 8, dataAt);     // Make (ASCII)
+        p += 12;
+        le16(e, p, TAG_ORIENTATION); le16(e, p + 2, TYPE_SHORT); le32(e, p + 4, 1); le16(e, p + 8, 1);   // Orientation = 1
+        System.arraycopy(m, 0, e, TIFF + dataAt, m.length);   // next-IFD offset and the final NUL are already 0
+        return e;
+    }
+
+    private static void le16(byte[] b, int p, int v) { b[p] = (byte) v; b[p + 1] = (byte) (v >> 8); }
+    private static void le32(byte[] b, int p, long v) { for (int i = 0; i < 4; i++) b[p + i] = (byte) (v >> (8 * i)); }
+
     /** Offset of the orientation value in IFD0, or -1. */
     private static int orientationValueAt(byte[] e) {
         if (e == null || e.length < TIFF + 8 || e[0] != 'E' || e[1] != 'x' || e[2] != 'i' || e[3] != 'f') return -1;
