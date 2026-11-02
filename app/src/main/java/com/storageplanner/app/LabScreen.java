@@ -187,10 +187,16 @@ public final class LabScreen extends Screen {
         share.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { saveLog(true); } });
         Button clearLog = Ui.button(a, "Clear log", false);
         clearLog.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { LabLog.clear(a); headerWritten = false; updateLogInfo(); } });
+        Button copy = Ui.button(a, "Copy log", false);
+        copy.setContentDescription("Copy the log to the clipboard, to paste it into a message");
+        copy.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { copyLog(); } });
         LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, -2, 1); l1.rightMargin = dp(8);
-        LinearLayout.LayoutParams l2 = new LinearLayout.LayoutParams(-2, -2); l2.rightMargin = dp(8);
-        logRow.addView(save, l1); logRow.addView(share, l2); logRow.addView(clearLog, new LinearLayout.LayoutParams(-2, -2));
+        logRow.addView(save, l1); logRow.addView(share, new LinearLayout.LayoutParams(0, -2, 1));
         add(root, logRow, 6);
+        LinearLayout logRow2 = Ui.row(a);
+        LinearLayout.LayoutParams l3 = new LinearLayout.LayoutParams(0, -2, 1); l3.rightMargin = dp(8);
+        logRow2.addView(copy, l3); logRow2.addView(clearLog, new LinearLayout.LayoutParams(0, -2, 1));
+        add(root, logRow2, 6);
         showPics();
         updateLogInfo();
         return sv;
@@ -383,7 +389,32 @@ public final class LabScreen extends Screen {
 
     private void updateLogInfo() {
         long n = LabLog.size(a);
-        logInfo.setText("Log: " + (n < 1024 ? n + " bytes" : (n / 1024) + " KB") + ". Save copies it to Download/StoragePlanner; Share sends that copy.");
+        logInfo.setText("Log: " + (n < 1024 ? n + " bytes" : (n / 1024) + " KB") + ". Save copies it to Download/StoragePlanner; Share sends that copy; Copy puts it on the clipboard.");
+    }
+
+    /** Puts the log on the clipboard (read on the worker thread; a long log is cut to its newest part). */
+    private void copyLog() {
+        worker.execute(new Runnable() {
+            public void run() {
+                final String text = LabLog.text(a, 200_000);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (text.isEmpty()) { a.toast("The log is empty."); return; }
+                        try {
+                            android.content.ClipboardManager cm = (android.content.ClipboardManager) a.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("Storage Planner Lab log", text));
+                            boolean cut = text.startsWith("(earlier lines left out");
+                            // Android 13+ shows its own "copied" confirmation; say more only when part was left out
+                            if (cut || android.os.Build.VERSION.SDK_INT < 33)
+                                a.toast(cut ? "Copied the newest part of the log. Save log has all of it." : "Log copied.");
+                            logInfo.announceForAccessibility("Log copied to the clipboard");
+                        } catch (Throwable t) {
+                            a.toast("Could not copy the log: " + t.getMessage());
+                        }
+                    }
+                });
+            }
+        });
     }
 
     private void saveLog(boolean share) {

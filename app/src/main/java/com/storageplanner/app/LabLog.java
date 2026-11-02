@@ -66,6 +66,22 @@ final class LabLog {
 
     static long size(Context c) { return file(c).length(); }
 
+    /**
+     * The log as text for the clipboard. Android's clipboard cannot hold very large text, so a long log is cut
+     * to its newest {@code maxChars} characters, starting at a whole line, with a note saying so.
+     */
+    static String text(Context c, int maxChars) {
+        String all;
+        synchronized (LOCK) {
+            try { all = new String(java.nio.file.Files.readAllBytes(file(c).toPath()), StandardCharsets.UTF_8); }
+            catch (Throwable t) { return ""; }
+        }
+        if (all.length() <= maxChars) return all;
+        int from = all.indexOf('\n', all.length() - maxChars);
+        return "(earlier lines left out: the log is too long for the clipboard; Save log has all of it)\n"
+                + all.substring(from < 0 ? all.length() - maxChars : from + 1);
+    }
+
     /** Starts the log afresh (overwrites; the app never deletes files). */
     static void clear(Context c) {
         synchronized (LOCK) {
