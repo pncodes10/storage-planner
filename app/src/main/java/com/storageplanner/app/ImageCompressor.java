@@ -237,12 +237,12 @@ final class ImageCompressor {
                     a.key = cd.m.key; a.label = cd.m.label; a.ext = cd.m.ext; a.quality = q; a.bytes = tmp.length();
                     if (a.bytes > limit) {
                         a.note = "saves less than " + Math.round(MIN_SAVING * 100) + "%";
-                        if (keep) a.score = verifyFile(img, tmp, verify, o);
+                        if (keep) a.score = verifyFile(img, tmp, verify, o, keep);
                         o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes),
                                 a.score != null ? a.score + ", " + a.note : a.note));
                         break;
                     }
-                    a.score = verifyFile(img, tmp, verify, o);
+                    a.score = verifyFile(img, tmp, verify, o, keep);
                     o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes), a.score));
                     if (a.score.pass && a.score.regionWrong) { a.note = REGION_WRONG; break; }   // a higher quality would not change that
                     if (a.score.pass) break;
@@ -332,20 +332,86 @@ final class ImageCompressor {
         }
     }
 
+    /** Galleries ask the region decoder for zoom tiles at aligned spots; the app checks it at multiples of this. */
+    static final int ALIGN = 16;
+
     /**
-     * Checks the real output on the given regions. Region decoding saves memory, but HEIC region decoding has
-     * been unreliable on some phones, so a failure is looked at again with a full decode before it counts.
+     * Checks the real output on the given regions against the original, with a full decode (exactly what the file
+     * holds). Then checks that Android's region decoder, which galleries use to zoom, reads the same pixels at
+     * aligned spots; if not, the score is marked {@link Score#regionWrong}. The region decoder is not used for the
+     * quality check itself: it moves an unaligned region (WebP to even pixels, so a 512 px region at x 483 comes back
+     * 513 px wide starting at 482), which would compare shifted pixels. Without memory for a full decode, the quality
+     * is checked with the region decoder at aligned spots.
      */
-    private static Score verifyFile(Bitmap img, File enc, Rect[] regions, Outcome o) throws IOException {
-        Score s = null;
-        try { s = regionScore(img, enc, regions, true); } catch (Throwable t) { s = null; }
-        if (s != null && s.pass) return s;
-        Score full = regionScore(img, enc, regions, false);
-        if (s != null && full.pass) {
-            o.trace.add("  Android's region decoder reads this copy wrongly: " + s + "; a full decode passes");
-            full.regionWrong = true;
+    private static Score verifyFile(Bitmap img, File enc, Rect[] regions, Outcome o, boolean diagnose) throws IOException {
+        Bitmap full = null;
+        BitmapRegionDecoder dec = null;
+        try {
+            try { full = BitmapFactory.decodeFile(enc.getPath(), argb()); } catch (OutOfMemoryError e) { full = null; }
+            try { dec = newRegionDecoder(enc.getPath()); } catch (Throwable t) { dec = null; }
+            if (full == null) {
+                if (dec == null) throw new IOException("the copy could not be opened");
+                Rect[] al = new Rect[regions.length];
+                for (int i = 0; i < regions.length; i++) al[i] = aligned(regions[i]);
+                o.trace.add("  (not enough memory for a full decode: checked with the region decoder at aligned spots)");
+                dec.recycle(); dec = null;
+                return regionScore(img, enc, al, true);
+            }
+            if (full.getWidth() != img.getWidth() || full.getHeight() != img.getHeight())
+                return Score.failed("a full decode sees " + full.getWidth() + "x" + full.getHeight() + " instead of " + img.getWidth() + "x" + img.getHeight());
+            Score worst = new Score();
+            for (Rect r : regions) {
+                Bitmap a = Bitmap.createBitmap(img, r.left, r.top, r.width(), r.height());
+                Bitmap b = Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height());
+                worst.worst(score(a, b));
+                a.recycle(); b.recycle();
+            }
+            if (dec != null) {
+                for (Rect r : new Rect[]{aligned(regions[0]), aligned(regions[regions.length - 1])}) {
+                    String why = regionAgrees(dec, full, r);
+                    if (why != null) {
+                        worst.regionWrong = true;
+                        o.trace.add("  Android's region decoder reads this copy wrongly at an aligned spot (x " + r.left + ", y " + r.top + "): " + why);
+                        break;
+                    }
+                }
+                if (diagnose) {                                // Lab: the same region at the unaligned spot, for comparison
+                    Rect odd = regions[0], al = aligned(odd);
+                    String w1 = regionAgrees(dec, full, odd), w2 = regionAgrees(dec, full, al);
+                    o.trace.add("  region decoder at x " + odd.left + ", y " + odd.top + ": " + (w1 == null ? "same as a full decode" : w1)
+                            + "; at aligned x " + al.left + ", y " + al.top + ": " + (w2 == null ? "same as a full decode" : w2));
+                }
+            }
+            return worst;
+        } finally {
+            if (dec != null) dec.recycle();
+            if (full != null) full.recycle();
         }
-        return full;
+    }
+
+    /** The same size region, moved left and up to a multiple of {@link #ALIGN}. */
+    static Rect aligned(Rect r) {
+        int l = r.left / ALIGN * ALIGN, t = r.top / ALIGN * ALIGN;
+        return new Rect(l, t, l + r.width(), t + r.height());
+    }
+
+    /** Null if the region decoder returns the same pixels as a full decode of the file for {@code r}, else what differs. */
+    private static String regionAgrees(BitmapRegionDecoder dec, Bitmap full, Rect r) {
+        Bitmap part = null;
+        try {
+            part = dec.decodeRegion(r, argb());
+            if (part == null) return "nothing came back";
+            if (part.getWidth() != r.width() || part.getHeight() != r.height())
+                return "a " + r.width() + "x" + r.height() + " region came back " + part.getWidth() + "x" + part.getHeight();
+            Bitmap ref = Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height());
+            Score s = score(ref, part);
+            ref.recycle();
+            return s.psnr >= 40 ? null : String.format(Locale.US, "it differs from a full decode (PSNR %.1f dB, SSIM %.4f)", s.psnr, s.ssim);
+        } catch (Throwable t) {
+            return "it failed (" + t.getClass().getSimpleName() + ")";
+        } finally {
+            if (part != null) part.recycle();
+        }
     }
 
     private static Score regionScore(Bitmap img, File enc, Rect[] regions, boolean regionDecoder) throws IOException {
@@ -446,22 +512,21 @@ final class ImageCompressor {
             m.exifOk = make != null && CHECK_MAKE.equals(make.trim());
             m.result = m.exifOk ? "works, EXIF kept" : "works, but EXIF is not kept (read back: " + make + ")";
         }
-        // the copy as galleries read it when zooming: a region across a tile edge and a partial tile
-        BitmapRegionDecoder dec = null; Bitmap full = null, part = null, ref = null;
+        // the copy as galleries read it when zooming: an aligned region across a tile edge and a partial tile
+        // decides; an unaligned one is only reported (decoders move those to their own alignment)
+        BitmapRegionDecoder dec = null; Bitmap full = null;
         try {
-            Rect r = new Rect(400, 150, 1100, 700);
             dec = newRegionDecoder(f.getPath());
             full = BitmapFactory.decodeFile(f.getPath(), argb());
-            part = dec.decodeRegion(r, argb());
-            ref = Bitmap.createBitmap(full, r.left, r.top, r.width(), r.height());
-            Score s = score(ref, part);
-            m.regionOk = s.psnr >= 40;
-            if (!m.regionOk) m.result += String.format(Locale.US, "; Android's region decoder reads it wrongly (PSNR %.1f dB against a full decode)", s.psnr);
+            String al = regionAgrees(dec, full, new Rect(400, 144, 1100, 700)), odd = regionAgrees(dec, full, new Rect(401, 151, 1001, 651));
+            m.regionOk = al == null;
+            m.result += al == null ? "; zoom (region decoder) reads it right" : "; Android's region decoder reads it wrongly (" + al + ")";
+            if (odd != null) m.result += " (at an unaligned spot " + odd + ")";
         } catch (Throwable e) {
             m.result += "; no region decoding (" + e.getClass().getSimpleName() + ")";
         } finally {
             if (dec != null) dec.recycle();
-            for (Bitmap b : new Bitmap[]{full, part, ref}) if (b != null) b.recycle();
+            if (full != null) full.recycle();
         }
     }
 
