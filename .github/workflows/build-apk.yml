@@ -1,20 +1,21 @@
 name: Build APK
 
-# Builds the installable APK on every push and pull request (and on demand from the Actions tab),
+# Builds the installable APK on every push (and on demand from the Actions tab),
 # with the same offline script as the released APKs (tools/build_offline.sh), using the Android SDK
 # that comes with GitHub's Ubuntu runners. Download it from the run's "Artifacts" section.
 #
-# Signing: so a new APK installs as an update over the one on your phone, add these repository secrets
-# (Settings > Secrets and variables > Actions) from the keystore folder the released APK was built with:
+# (No pull_request trigger: a pull request run cannot read the branch's cache, so it would sign with a
+# different key. Pushes to a pull request's branch are built anyway.)
+# Signing: every build is signed with the same key, so a new APK installs as an update over the last one.
+# The key is made on the first build and kept in the Actions cache (GitHub drops caches that go unused for
+# 7 days; the next build would then make a new key, and the app has to be uninstalled once).
+# For a key that never changes, add these repository secrets (Settings > Secrets and variables > Actions);
+# with the key the released 1.8.1 APK was signed with, builds also install over that release:
 #   SIGNING_KEY_PEM       contents of key.pem
 #   SIGNING_CERT_DER_B64  cert.der as base64 (base64 -w0 cert.der)
-# Without them each run signs with a new throw-away key: the APK works, but you must uninstall the
-# app first (which forgets your Keep decisions), and every later build needs that again.
 
 on:
   push:
-    paths: ["app/**", "tools/**", "jvmtest/**", ".github/workflows/build-apk.yml"]
-  pull_request:
     paths: ["app/**", "tools/**", "jvmtest/**", ".github/workflows/build-apk.yml"]
   workflow_dispatch:
 
@@ -64,19 +65,35 @@ jobs:
           ln -s "$JAVA_HOME" "$TC/java17"
           echo "TOOLCHAIN=$TC" >> "$GITHUB_ENV"
 
+      # One signing key for every build, so each new APK installs as an update over the last one.
+      # Android only updates an app when the new APK is signed with the same key as the installed one.
+      # Order: the SIGNING_* secrets if set (e.g. the key the released APK was signed with), else the key kept
+      # in the Actions cache (made on the first build and reused from then on).
+      - name: Restore the build signing key
+        id: keycache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-signing
+          key: apk-signing-key-v1
+
       - name: Signing key
         env:
           KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
           CERT_B64: ${{ secrets.SIGNING_CERT_DER_B64 }}
         run: |
-          KS="$RUNNER_TEMP/keystore"; mkdir -p "$KS"; chmod 700 "$KS"
+          KS="$GITHUB_WORKSPACE/.ci-signing"
           if [ -n "$KEY_PEM" ] && [ -n "$CERT_B64" ]; then
+            KS="$RUNNER_TEMP/keystore"; mkdir -p "$KS"; chmod 700 "$KS"
             printf '%s\n' "$KEY_PEM" > "$KS/key.pem"
             printf '%s' "$CERT_B64" | base64 -d > "$KS/cert.der"
-            echo "SIGNED=release key (installs as an update)" >> "$GITHUB_ENV"
+            echo "SIGNED=release key from the repository secrets" >> "$GITHUB_ENV"
+          elif [ -f "$KS/key.pem" ] && [ -f "$KS/cert.der" ]; then
+            echo "SIGNED=the build key kept in the Actions cache (same as earlier builds)" >> "$GITHUB_ENV"
           else
-            echo "::warning::No SIGNING_KEY_PEM / SIGNING_CERT_DER_B64 secrets: signed with a throw-away key. Uninstall the app before installing this APK."
-            echo "SIGNED=throw-away key (uninstall the app first)" >> "$GITHUB_ENV"
+            mkdir -p "$KS"; chmod 700 "$KS"            # apkbuild.py creates the key here; saved to the cache below
+            echo "::warning::First build with a kept key: uninstall the app once before installing this APK. Later builds install as updates."
+            echo "SIGNED=a new build key, kept for later builds (uninstall the app once before installing)" >> "$GITHUB_ENV"
+            echo "NEW_KEY=1" >> "$GITHUB_ENV"
           fi
           echo "KEYSTORE_DIR=$KS" >> "$GITHUB_ENV"
 
@@ -94,8 +111,16 @@ jobs:
             echo "### $NAME"
             echo "- version $VN-$SHA (code $VC)"
             echo "- signed with: $SIGNED"
+            echo "- signing certificate SHA-256: \`$(sha256sum "$KEYSTORE_DIR/cert.der" | cut -d' ' -f1)\` (the same for every APK that installs as an update)"
             echo "- size: $(du -h "build/offline/$NAME" | cut -f1)"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the new build signing key
+        if: env.NEW_KEY == '1'
+        uses: actions/cache/save@v4
+        with:
+          path: .ci-signing
+          key: apk-signing-key-v1
 
       - uses: actions/upload-artifact@v4
         with:

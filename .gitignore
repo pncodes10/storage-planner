@@ -16,3 +16,5 @@ __pycache__/
 *.pem
 *.p12
 keystore/
+# CI build signing key (restored from the Actions cache, never committed)
+.ci-signing/
