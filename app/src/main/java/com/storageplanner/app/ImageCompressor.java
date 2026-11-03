@@ -48,6 +48,11 @@ final class ImageCompressor {
     /** A copy that saves less than this is not worth replacing the original with. */
     static final double MIN_SAVING = 0.10;
     static final int Q_LOW = 30, Q_HIGH = 95, WEBP_LOW = 50, WEBP_HIGH = 99;
+    /** WebP passed at 89-93 on every camera photo tried, so its search starts here rather than mid-range. */
+    static final int WEBP_START = 90;
+    /** In a real run, after this many photos, ways of saving that never made the kept copy are no longer searched. */
+    static final int DROP_AFTER = 5;
+    private static final String FILES = "#files", WINS = "#wins:";
     /** Largest average shift of red, green or blue (0..255) allowed in a checked region. */
     static final double MAX_COLOR_SHIFT = 3.0;
 
@@ -87,6 +92,8 @@ final class ImageCompressor {
         boolean pass = true;
         /** Android's region decoder (used by galleries to zoom) read the file differently from a full decode. */
         boolean regionWrong;
+        /** What the check noticed about the decoders, logged after the line about this copy. */
+        final List<String> notes = new ArrayList<String>();
         String why;           // set when the copy could not be compared at all
 
         void worst(Score s) {
@@ -127,7 +134,11 @@ final class ImageCompressor {
             if (new File(base + "." + ext).exists()) return new Outcome().fail("a compressed copy (" + new File(base + "." + ext).getName() + ") already exists");
         if ((long) f.width * f.height > MAX_PIXELS) return new Outcome().fail("too large to process safely");
         Outcome o = write(src, technique, base, hints, work, false);
-        if (o.ok && o.quality >= 0 && o.key != null) hints.put(o.key, o.quality);
+        if (o.ok && o.key != null) {
+            if (o.quality >= 0) hints.put(o.key, o.quality);
+            hints.put(WINS + o.key, count(hints, WINS + o.key) + 1);
+            hints.put(FILES, count(hints, FILES) + 1);
+        }
         return o;
     }
 
@@ -139,6 +150,8 @@ final class ImageCompressor {
     static Outcome compressForLab(File src, String technique, String base, File work) {
         return write(src, technique, base, new HashMap<String, Integer>(), work, true);
     }
+
+    private static int count(Map<String, Integer> m, String k) { Integer v = m.get(k); return v == null ? 0 : v; }
 
     private static Outcome write(File src, String technique, String base, Map<String, Integer> hints, File work, boolean keep) {
         long t0 = System.nanoTime();
@@ -197,6 +210,11 @@ final class ImageCompressor {
             String why = exif != null && !m.exifOk ? "it would lose the photo's details (EXIF)"
                     : !m.regionOk ? "Android's region decoder reads its files wrongly, so galleries may show them wrong when zoomed" : null;
             if (why != null) { o.trace.add(m.label + ": not used in a real run, " + why); if (!keep) continue; }
+            int files = count(hints, FILES);
+            if (!keep && files >= DROP_AFTER && count(hints, WINS + m.key) == 0) {
+                o.trace.add(m.label + ": skipped, it made none of the " + files + " copies kept so far in this run");
+                continue;
+            }
             cands.add(new Cand(m));
         }
         if (cands.isEmpty()) { o.fail("no way of saving worked on this phone"); return; }
@@ -240,10 +258,12 @@ final class ImageCompressor {
                         if (keep) a.score = verifyFile(img, tmp, verify, o, keep);
                         o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes),
                                 a.score != null ? a.score + ", " + a.note : a.note));
+                        if (a.score != null) o.trace.addAll(a.score.notes);
                         break;
                     }
                     a.score = verifyFile(img, tmp, verify, o, keep);
                     o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, Report.size(a.bytes), a.score));
+                    o.trace.addAll(a.score.notes);
                     if (a.score.pass && a.score.regionWrong) { a.note = REGION_WRONG; break; }   // a higher quality would not change that
                     if (a.score.pass) break;
                     a.note = "did not look identical at full size";
@@ -288,9 +308,10 @@ final class ImageCompressor {
         File test = new File(work, "search." + cd.m.ext);
         try {
             int lo = cd.m.lo, hi = cd.m.hi;
-            boolean first = hint != null && hint >= lo && hint <= hi;
+            int q0 = hint != null && hint >= lo && hint <= hi ? hint : cd.m.start;
+            boolean first = q0 >= lo && q0 <= hi;
             while (lo <= hi) {
-                int q = first ? hint : (lo + hi) / 2;
+                int q = first ? q0 : (lo + hi) / 2;
                 first = false;
                 encodeTo(cd.m, mosaic, q, null, test);
                 Score s = mosaicScore(mosaic, test, c);
@@ -353,9 +374,10 @@ final class ImageCompressor {
                 if (dec == null) throw new IOException("the copy could not be opened");
                 Rect[] al = new Rect[regions.length];
                 for (int i = 0; i < regions.length; i++) al[i] = aligned(regions[i]);
-                o.trace.add("  (not enough memory for a full decode: checked with the region decoder at aligned spots)");
                 dec.recycle(); dec = null;
-                return regionScore(img, enc, al, true);
+                Score r = regionScore(img, enc, al, true);
+                r.notes.add("  (not enough memory for a full decode: checked with the region decoder at aligned spots)");
+                return r;
             }
             if (full.getWidth() != img.getWidth() || full.getHeight() != img.getHeight())
                 return Score.failed("a full decode sees " + full.getWidth() + "x" + full.getHeight() + " instead of " + img.getWidth() + "x" + img.getHeight());
@@ -371,14 +393,14 @@ final class ImageCompressor {
                     String why = regionAgrees(dec, full, r);
                     if (why != null) {
                         worst.regionWrong = true;
-                        o.trace.add("  Android's region decoder reads this copy wrongly at an aligned spot (x " + r.left + ", y " + r.top + "): " + why);
+                        worst.notes.add("  Android's region decoder reads this copy wrongly at an aligned spot (x " + r.left + ", y " + r.top + "): " + why);
                         break;
                     }
                 }
                 if (diagnose) {                                // Lab: the same region at the unaligned spot, for comparison
                     Rect odd = regions[0], al = aligned(odd);
                     String w1 = regionAgrees(dec, full, odd), w2 = regionAgrees(dec, full, al);
-                    o.trace.add("  region decoder at x " + odd.left + ", y " + odd.top + ": " + (w1 == null ? "same as a full decode" : w1)
+                    worst.notes.add("  region decoder at x " + odd.left + ", y " + odd.top + ": " + (w1 == null ? "same as a full decode" : w1)
                             + "; at aligned x " + al.left + ", y " + al.top + ": " + (w2 == null ? "same as a full decode" : w2));
                 }
             }
@@ -453,11 +475,11 @@ final class ImageCompressor {
     static final class Method {
         final String key, label, ext;
         final HeifEncoder.Way way;
-        final int lo, hi;
+        final int lo, hi, start;     // quality range, and the first quality tried when there is no hint yet
         boolean works, exifOk, regionOk = true;
         String result = "";
-        Method(String key, String label, String ext, HeifEncoder.Way way, int lo, int hi) {
-            this.key = key; this.label = label; this.ext = ext; this.way = way; this.lo = lo; this.hi = hi;
+        Method(String key, String label, String ext, HeifEncoder.Way way, int lo, int hi, int start) {
+            this.key = key; this.label = label; this.ext = ext; this.way = way; this.lo = lo; this.hi = hi; this.start = start;
         }
     }
 
@@ -478,8 +500,8 @@ final class ImageCompressor {
         if (checked != null) return checked;
         methods = new ArrayList<Method>();
         if (Build.VERSION.SDK_INT >= 28) {
-            for (HeifEncoder.Way w : HeifEncoder.ways()) methods.add(new Method(w.key, w.label(), "heic", w, Q_LOW, Q_HIGH));
-            methods.add(new Method("webp", "WebP (Android's encoder)", "webp", null, WEBP_LOW, WEBP_HIGH));
+            for (HeifEncoder.Way w : HeifEncoder.ways()) methods.add(new Method(w.key, w.label(), "heic", w, Q_LOW, Q_HIGH, (Q_LOW + Q_HIGH) / 2));
+            methods.add(new Method("webp", "WebP (Android's encoder)", "webp", null, WEBP_LOW, WEBP_HIGH, WEBP_START));
         }
         work.mkdirs();
         Bitmap t = testPattern(1100, 700);
