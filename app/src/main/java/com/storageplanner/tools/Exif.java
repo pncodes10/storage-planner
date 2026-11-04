@@ -95,6 +95,29 @@ public final class Exif {
         return out;
     }
 
+    /**
+     * A copy without the embedded thumbnail (IFD1): IFD0's link to the next IFD is set to 0. Used when the pixels
+     * are turned upright, because the thumbnail stays in the camera's orientation, and with orientation 1 a viewer
+     * that shows the EXIF thumbnail would show it sideways. The thumbnail's bytes stay in the block, unreferenced.
+     */
+    public static byte[] withoutThumbnail(byte[] exif) {
+        byte[] out = exif.clone();
+        int ifd0 = ifd0(out);
+        if (ifd0 < 0) return out;
+        int next = ifd0 + 2 + 12 * u16(out, ifd0, littleEndian(out));
+        if (next + 4 <= out.length) for (int i = 0; i < 4; i++) out[next + i] = 0;
+        return out;
+    }
+
+    /** Whether IFD0 links to a next IFD (IFD1, which holds the thumbnail). */
+    public static boolean hasThumbnail(byte[] exif) {
+        int ifd0 = ifd0(exif);
+        if (ifd0 < 0) return false;
+        boolean le = littleEndian(exif);
+        int next = ifd0 + 2 + 12 * u16(exif, ifd0, le);
+        return next + 4 <= exif.length && u32(exif, next, le) != 0;
+    }
+
     /** A SHORT or LONG tag of IFD0 ({@code exifIfd} false) or the Exif IFD, or -1 if missing. */
     public static long number(byte[] exif, boolean exifIfd, int tag) {
         int ifd0 = ifd0(exif);

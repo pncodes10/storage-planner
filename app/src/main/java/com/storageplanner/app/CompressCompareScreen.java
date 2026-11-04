@@ -36,7 +36,7 @@ public final class CompressCompareScreen extends Screen {
     private boolean together = true, showOriginal = true;
     private Bitmap bo, bc, bd;
     private String diffFacts, error;
-    private boolean loading;
+    private boolean loading, diffing;
     private float[] keepState;                         // zoom / spot carried across modes and flips
 
     private LinearLayout root, stage;
@@ -216,7 +216,23 @@ public final class CompressCompareScreen extends Screen {
                         + bc.getWidth() + "×" + bc.getHeight() + "), so they cannot be compared pixel by pixel.", 15, Ui.tier[4], true), 0);
                 return;
             }
-            makeDiff();
+            if (!diffing) {                                     // ~12 MP of pixel work: off the UI thread
+                diffing = true;
+                final Bitmap fo = bo, fc = bc;
+                new Thread(new Runnable() {
+                    public void run() {
+                        Bitmap d = null; String f = null;
+                        try { d = Bitmap.createBitmap(fo.getWidth(), fo.getHeight(), Bitmap.Config.ARGB_8888); f = makeDiff(fo, fc, d); }
+                        catch (OutOfMemoryError e) { d = null; f = "Not enough memory to show the difference."; }
+                        final Bitmap fd = d; final String ff = f;
+                        AnalysisState.UI.post(new Runnable() {
+                            public void run() { diffing = false; bd = fd; diffFacts = ff; if (fd == null) error = ff; render(); }
+                        });
+                    }
+                }, "compare-diff").start();
+            }
+            spinner();
+            return;
         }
         ZoomImageView iv = view(bd, "Difference between original and compressed copy, amplified " + AMPLIFY + " times");
         shownViews = new ZoomImageView[]{iv};
@@ -226,11 +242,10 @@ public final class CompressCompareScreen extends Screen {
                 + " times so small differences show. Fine grain and edges usually light up a little.", 13, Ui.text2, false), 2);
     }
 
-    /** Largest of the red / green / blue differences per pixel, times AMPLIFY, as grey. */
-    private void makeDiff() {
+    /** Draws into {@code bd} the largest of the red / green / blue differences per pixel, times AMPLIFY, as grey; returns the summary line. */
+    private static String makeDiff(Bitmap bo, Bitmap bc, Bitmap bd) {
         int w = bo.getWidth(), h = bo.getHeight();
         int[] ro = new int[w], rc = new int[w], out = new int[w];
-        bd = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
         long changed = 0, big = 0; int max = 0; double sum = 0;
         for (int y = 0; y < h; y++) {
             bo.getPixels(ro, 0, w, 0, y, w, 1);
@@ -249,7 +264,7 @@ public final class CompressCompareScreen extends Screen {
             bd.setPixels(out, 0, w, 0, y, w, 1);
         }
         double n = (double) w * h;
-        diffFacts = String.format(Locale.US, "Average change %.2f of 255 · largest %d · %.1f%% of pixels changed at all · %.2f%% by more than 8",
+        return String.format(Locale.US, "Average change %.2f of 255 · largest %d · %.1f%% of pixels changed at all · %.2f%% by more than 8",
                 sum / n, max, 100 * changed / n, 100 * big / n);
     }
 

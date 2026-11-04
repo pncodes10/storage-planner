@@ -327,9 +327,10 @@ public final class LabScreen extends Screen {
         if (!lossless) o.line("  encoders on this phone:\n" + HeifEncoder.survey().replaceAll("\\s+$", ""));
         if (!ImageCompressor.available(kind)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(kind)); return; }
         String stem = new File(CopyPaths.base("/" + p.name)).getName();
-        File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
-                "StoragePlanner/compressed/" + stem + "-" + new java.text.SimpleDateFormat("HHmmss", Locale.US).format(new java.util.Date()));
-        for (int k = 2; dir.exists(); k++) dir = new File(dir.getParentFile(), dir.getName().replaceAll("(-\\d+)?$", "") + "-" + k);
+        File parent = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "StoragePlanner/compressed");
+        String dirName = stem + "-" + new java.text.SimpleDateFormat("HHmmss", Locale.US).format(new java.util.Date());
+        File dir = new File(parent, dirName);
+        for (int k = 2; dir.exists(); k++) dir = new File(parent, dirName + "-" + k);
         if (!dir.mkdirs()) throw new Exception("cannot create " + dir);
         final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), kind, new File(dir, stem).getPath(), new File(a.getCacheDir(), "compress"));
         for (String t : r.trace) o.line("  " + t);
@@ -354,8 +355,8 @@ public final class LabScreen extends Screen {
         }
         o.line(String.format(Locale.US, "  %s -> %s (%s) as %s; %d ms", com.storageplanner.core.Report.size(r.before),
                 com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.format, r.ms));
-        if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f)",
-                r.ssim, Guard.SSIM_MIN, r.psnr, Guard.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT));
+        if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f), colour PSNR %.1f dB (need %.0f)",
+                r.ssim, Guard.SSIM_MIN, r.psnr, Guard.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT, r.chromaPsnr, ImageCompressor.CHROMA_PSNR_MIN));
         o.line(r.wouldSkip == null ? "  A real run would keep the " + r.format + " copy." : "  A real run would NOT keep any copy: " + r.wouldSkip + ".");
         o.line("  Saved in Download/StoragePlanner/compressed/" + dir.getName() + "/");
         try { android.media.MediaScannerConnection.scanFile(a, scan.toArray(new String[0]), null, null); } catch (Throwable ignored) {}
@@ -412,7 +413,7 @@ public final class LabScreen extends Screen {
          .append(" (").append(change(before, after)).append(")");
         if (quality >= 0) s.append(" · quality ").append(quality);
         else s.append(identical ? " · pixel-identical" : " · NOT pixel-identical");
-        if (sc != null) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f", sc.ssim, sc.psnr, sc.shift));
+        if (sc != null) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f · colour PSNR %.1f dB", sc.ssim, sc.psnr, sc.shift, sc.chromaPsnr));
         if (note != null) s.append(" · a real run would skip it: ").append(note);
         return s.toString();
     }

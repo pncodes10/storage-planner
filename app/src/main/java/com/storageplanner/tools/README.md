@@ -30,7 +30,8 @@ out what the plan recommends. Today it holds the image compression tools: HEIC, 
 | `HeifEncoder.java` | Writes HEIC with `MediaCodec` + `MediaMuxer`. Lists every HEIC/HEVC encoder on the phone (`Way`). | yes |
 | `Guard.java` | The "looks identical" thresholds, the regions they are checked on, brightness (luma), the WebP format constant. | yes |
 | `Ssim.java` | SSIM matching scikit-image. A **copy** of `app/Ssim.java` (used by the planner's Calibrator). | no (plain Java) |
-| `Exif.java` | Finds a JPEG's EXIF block, reads and sets orientation, sets the size tags, builds a test block. | no |
+| `Exif.java` | Finds a JPEG's EXIF block, reads and sets orientation, sets the size tags, drops the thumbnail, builds a test block. | no |
+| `Extras.java` | Finds what a JPEG holds that a copy would lose (Motion Photo video, gain map, depth map), so it is not compressed. | no |
 | `WebpMeta.java` | Adds an EXIF chunk to a WebP file (Android's WebP encoder writes none). | no |
 | `CopyPaths.java` | Where a copy goes (`IMG_1.jpg` → `IMG_1.heic` / `.webp`) and its hidden work file. | no |
 
@@ -82,6 +83,12 @@ if (o.ok) {
    made none of them is no longer searched.
 5. **Scan the new copies** with `MediaScannerConnection` so galleries show them.
 6. **Never remove an original** unless its copy still exists and is not empty, and the user confirmed it.
+7. **Know what a copy does not keep.** The tool refuses pictures it can't copy fully: Motion Photos (the video
+   after the JPEG), Ultra HDR gain maps, and depth maps (`Extras`), including Samsung Portrait photos. A
+   wide-colour (Display P3) photo is saved only as WebP that keeps the colour profile, never as HEIC. A copy
+   keeps the pixels, the colour profile (WebP) and the EXIF. **Lost silently:** plain XMP (edit history, ratings, panorama data),
+   small data after the picture (under 64 KB, such as Samsung's `Image_UTC_Data`), and the EXIF thumbnail of a
+   turned photo. Tell the user before removing originals.
 
 ### Removing originals (not built yet)
 
@@ -104,6 +111,14 @@ What the earlier version did, and what to keep:
 
 ### Photos (`Kind.PHOTO`)
 
+**First, refuse** what a copy can't fully keep. `compress()` does this before anything else; the Lab compresses
+anyway and says a real run would not. Refused: files over 25 MP, files that are already HEIC/WebP, and what
+`Extras` finds:
+- XMP that names a Motion Photo, gain map or depth map;
+- an MPF segment;
+- a second JPEG, or "MotionPhoto", after the picture;
+- 64 KB or more of data after the picture.
+
 1. **Encoder check, once per process** (`encoderCheck`). Every way of saving is tested on a 1100×700 test
    picture: smooth gradients plus a checkerboard that doesn't line up with the tiles, so misplaced tiles show,
    and partial edge tiles. It carries an EXIF block with a camera name and size tags. Each way records:
@@ -118,11 +133,14 @@ What the earlier version did, and what to keep:
    - a dedicated HEIC encoder, if the phone has one with constant quality;
    - Android's WebP encoder.
 
-   In a real run, a way is skipped if it would lose EXIF, or if the region decoder misreads it.
+   In a real run, a way is skipped if it would lose EXIF, or if the region decoder misreads it. For a
+   wide-colour photo (not sRGB), every HEIC way is skipped too. The Lab still tries them, and says a real run
+   would not keep them.
 2. **Decode** the photo and **turn the pixels upright** from the EXIF orientation (all 8 values, including the
    mirrored ones).
 3. **Fix the EXIF:**
-   - set Orientation to 1;
+   - set Orientation to 1, and drop the thumbnail (IFD1) when the photo was turned: it stays in the camera's
+     orientation;
    - set ImageWidth/ImageLength and PixelX/YDimension to the copy's real size (see
      [what we learned](#important-lessons-dont-forget)).
 4. **Search** (`search`), for each usable way. Four 512 px regions, at 0.25 and 0.75 of the width and height,
@@ -131,14 +149,16 @@ What the earlier version did, and what to keep:
    - The first try is the quality that worked for the previous photo of this run. Failing that, it's 90 for
      WebP (it passed at 89–93 on every camera photo tried) and mid-range for HEIC.
 5. **Rank** the ways by mosaic size. HEIC must be **5% smaller** than WebP to rank ahead
-   (`WEBP_PREFERENCE`), because every app can open WebP.
+   (`HEIC_PENALTY`), because every app can open WebP.
 6. **Full image**, smallest first:
-   - Encode it and check it again on four **other** regions (0.4 / 0.6) of the real file, using a **full
-     decode**.
+   - Encode it and check it again on six **other** regions of the real file, using a **full decode**: four at
+     0.4 / 0.6, plus the top-left and bottom-right corners, where HEVC tiles are partial.
    - If it fails, raise the quality by 3 and retry, up to the top of the range. If it saves less than 10%
      (`MIN_SAVING`), try the next way.
    - Also check that the region decoder reads two **aligned** spots the same as the full decode. If not,
      reject the copy (`REGION_WRONG`).
+   - For a wide-colour photo, the copy must decode in the **same colour space** as the original; if not, it's
+     rejected.
    - A real run keeps the first copy that passes. The Lab makes a copy with every way.
 7. **Safe write.** Each copy is written to a hidden work file in the target folder (`.sp-<name>.<ext>.tmp`),
    checked, then renamed. Work files are deleted in all cases. The copy gets the original's last-modified date.
@@ -146,7 +166,8 @@ What the earlier version did, and what to keep:
 ### Screenshots (`Kind.LOSSLESS`)
 
 The screenshot is compressed with `Bitmap.compress` to lossless WebP: `WEBP_LOSSLESS` on Android 11+, or `WEBP`
-at quality 100 before that, which is lossless there. The result is decoded again and must be `sameAs` the
+at quality 100 before that, which is lossless there. Like photos, the pixels are turned upright and the EXIF
+(if it's a JPEG) is carried over with `WebpMeta`. The result is decoded again and must be `sameAs` the upright
 original, and it must save at least 10%.
 
 ### The guard (what "looks identical" means)
@@ -155,7 +176,10 @@ On every checked 512 px region:
 - **SSIM(Y) ≥ 0.98** and **PSNR(Y) ≥ 38 dB**, where Y = 0.299 R + 0.587 G + 0.114 B. These are the research
   prototype's thresholds, the same as the app's `Calibrator` (`Guard.SSIM_MIN` / `Guard.PSNR_MIN`).
 - **colour shift ≤ 3**: the mean of R, G and B each moves by at most 3 of 255 (`MAX_COLOR_SHIFT`). This catches
-  colour-conversion mistakes the brightness checks can't see.
+  a colour cast, a conversion mistake the brightness checks can't see.
+- **colour PSNR ≥ 38 dB**: PSNR of Cb and Cr (BT.601), the lower of the two (`CHROMA_PSNR_MIN`). This catches
+  colour bleeding and blur, whose errors cancel out in the mean shift. Copies that passed the brightness guard
+  measured 46–52 dB on the desktop test photos, so it only rejects real colour damage.
 
 SSIM matches scikit-image's `structural_similarity` defaults: a 7×7 uniform window, sample covariance,
 K1 = 0.01, K2 = 0.03, range 255, and the mean over the area not touched by padding. It was checked against the
@@ -217,13 +241,25 @@ Each of these was found on a real phone: a Samsung Galaxy S23 FE (Exynos), Andro
 - **Speed.** A real run takes about 5–10 s per 7 MP photo on the S23 FE: three ways searched, then one full
   copy. That's an estimate from the Lab: a Lab run (every way, full size) takes about 20 s. Fewer ways
   (`DROP_AFTER`) and good first guesses (hints, `WEBP_START`) matter.
-- **Memory.** Above 25 MP (`MAX_PIXELS`) the tool refuses, because a full ARGB decode is needed twice: the
-  original and the copy being checked. On running out of memory it falls back to aligned region decoding.
+- **Memory.** Above 25 MP (`MAX_PIXELS`) the tool refuses, `compress()` and `compressForLab()` alike, because
+  a full ARGB decode is needed twice: the original and the copy being checked (about 200 MB at 25 MP). On
+  Android 8+ bitmap pixels live in native memory, outside the Java heap limit, and an `OutOfMemoryError` ends
+  in "not enough memory" with the original untouched. If the copy's full decode doesn't fit, the check falls
+  back to aligned region decoding.
+- **Samsung cameras take Display P3 photos.** The S23 FE's JPEGs carry a "DCI-P3 D65 Gamut with sRGB
+  Transfer" ICC profile. The HEIC writer tags its YUV as BT.601 / sRGB, with no profile (MediaMuxer can't add
+  one), so a HEIC copy of such a photo shows **duller colours**. The guard compares raw pixel values, so it
+  can't see this. Only copies that decode in the original's colour space are kept. Android's WebP encoder
+  writes an ICCP chunk, and `WebpMeta` keeps it; the copy's colour space is checked on every file.
+- **Samsung photos end with a trailer after the JPEG** (`SEFT`). Usually it's under 1 KB (`Image_UTC_Data`,
+  `Camera_Scene_Info`), and dropping it is fine. A Motion Photo's trailer holds `MotionPhoto_Data` and the
+  video; a Portrait photo's holds `DualShot_DepthMap` and a second picture, 3.4 MB on a 5.3 MB test photo.
+  Those are refused. Count savings against the main picture, not the whole file.
 
 ## Testing a tool on a phone
 
-1. Install the APK from the **Build APK** GitHub Actions run. The same signing key is used every time, so it
-   installs as an update.
+1. Install the APK from the **Build APK** GitHub Actions run. With the signing secrets set, every build uses the
+   same key and installs as an update (see the main README).
 2. Open **Algorithm Lab** → **Pick pictures** → **Compress (test copy)**. **Treat as: Screenshot** uses
    `Kind.LOSSLESS`.
 3. **Copy log** and read it. The log shows:

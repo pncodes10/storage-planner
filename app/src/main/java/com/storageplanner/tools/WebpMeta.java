@@ -31,7 +31,11 @@ public final class WebpMeta {
             int total = 8 + size + (size & 1);
             if (size < 0 || p + 8 + size > webp.length) throw new IllegalArgumentException("damaged WebP chunk " + id);
             if (id.equals("VP8X")) vp8x = java.util.Arrays.copyOfRange(webp, p + 8, p + 8 + size);
-            else if (!id.equals("EXIF")) body.write(webp, p, Math.min(total, webp.length - p));
+            else if (!id.equals("EXIF")) {
+                int have = Math.min(total, webp.length - p);
+                body.write(webp, p, have);
+                if (have < total) body.write(0);                    // a last odd-sized chunk without its pad byte
+            }
             p += total;
         }
         if (vp8x == null) {

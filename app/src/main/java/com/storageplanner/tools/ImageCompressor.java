@@ -4,6 +4,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.BitmapRegionDecoder;
 import android.graphics.Canvas;
+import android.graphics.ColorSpace;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.os.Build;
@@ -28,9 +29,13 @@ import java.util.Map;
  * <li>{@link Kind#PHOTO} (camera photos, chat images): every way of saving that works on this phone (each HEIC encoder, and
  *     Android's WebP encoder) finds the lowest quality that still passes the study's "looks identical"
  *     guard (SSIM(Y) >= 0.98 and PSNR(Y) >= 38 dB, see {@link Guard}) plus a colour check, on four
- *     512 px regions. The way with the smallest result is encoded in full and checked again on four other
- *     regions; if it fails, the next way is tried. EXIF (date taken, camera, location) is carried over.</li>
+ *     512 px regions. The way with the smallest result is encoded in full and checked again on six other
+ *     regions (two of them the top-left and bottom-right corners); if it fails, the next way is tried. EXIF (date
+ *     taken, camera, location) is carried over.</li>
  * <li>{@link Kind#LOSSLESS} (screenshots): lossless WebP, and the copy must decode to exactly the same pixels.</li>
+ * <li>Never compressed: pictures a copy would not fully keep: Motion Photos, Ultra HDR gain maps, depth maps
+ *     ({@link Extras}). Wide-colour pictures (Display P3, as Samsung cameras take them) are kept only by a copy that
+ *     carries the same colour space: WebP (which stores the colour profile), never HEIC (stored as sRGB here).</li>
  * </ul>
  * The copy is written to a work file, checked, and only then renamed to its final name. Every step's
  * scores are recorded in the outcome, for the Algorithm Lab.
@@ -60,8 +65,13 @@ public final class ImageCompressor {
     /** In a real run, after this many photos, ways of saving that never made the kept copy are no longer searched. */
     static final int DROP_AFTER = 5;
     private static final String FILES = "#files", WINS = "#wins:";
-    /** Largest average shift of red, green or blue (0..255) allowed in a checked region. */
+    /** Largest average shift of red, green or blue (0..255) allowed in a checked region: catches a colour cast. */
     public static final double MAX_COLOR_SHIFT = 3.0;
+    /**
+     * Lowest PSNR of the colour (Cb and Cr) allowed in a checked region: catches colour bleeding and blur, which
+     * cancel out in the average shift. Copies that pass the brightness guard measured 46-52 dB on the test photos.
+     */
+    public static final double CHROMA_PSNR_MIN = 38.0;
 
     /** One full-size copy that was made and checked. */
     public static final class Attempt {
@@ -80,7 +90,7 @@ public final class ImageCompressor {
         public long before, after, ms;
         public int quality = -1;
         /** Worst checked region of the kept copy (-1 = not measured). */
-        public double ssim = -1, psnr = -1, shift = -1;
+        public double ssim = -1, psnr = -1, shift = -1, chromaPsnr = -1;
         public boolean identicalPixels;   // lossless copies
         public String skipped;       // why nothing was written (ok == false)
         /** Lab only: the copy was kept for comparison, but a real run would have thrown it away for this reason. */
@@ -95,7 +105,7 @@ public final class ImageCompressor {
 
     /** Scores of one comparison (or the worst of several). */
     public static final class Score {
-        public double ssim = 1, psnr = 99, shift = 0;
+        public double ssim = 1, psnr = 99, shift = 0, chromaPsnr = 99;
         public boolean pass = true;
         /** Android's region decoder (used by galleries to zoom) read the file differently from a full decode. */
         public boolean regionWrong;
@@ -105,15 +115,16 @@ public final class ImageCompressor {
 
         void worst(Score s) {
             ssim = Math.min(ssim, s.ssim); psnr = Math.min(psnr, s.psnr); shift = Math.max(shift, s.shift);
+            chromaPsnr = Math.min(chromaPsnr, s.chromaPsnr);
             pass &= s.pass;
         }
 
         @Override public String toString() {
             if (why != null) return "FAIL (" + why + ")";
-            return String.format(Locale.US, "%s (worst SSIM %.4f, PSNR %.1f dB, colour shift %.1f)", pass ? "pass" : "FAIL", ssim, psnr, shift);
+            return String.format(Locale.US, "%s (worst SSIM %.4f, PSNR %.1f dB, colour shift %.1f, colour PSNR %.1f dB)", pass ? "pass" : "FAIL", ssim, psnr, shift, chromaPsnr);
         }
 
-        static Score failed() { Score s = new Score(); s.ssim = 0; s.psnr = 0; s.shift = 255; s.pass = false; return s; }
+        static Score failed() { Score s = new Score(); s.ssim = 0; s.psnr = 0; s.shift = 255; s.chromaPsnr = 0; s.pass = false; return s; }
         static Score failed(String why) { Score s = failed(); s.why = why; return s; }
     }
 
@@ -136,15 +147,16 @@ public final class ImageCompressor {
      * @param work  folder for temporary test encodes (the app's cache)
      */
     public static Outcome compress(File src, Kind kind, Map<String, Integer> hints, File work) {
-        if (!src.isFile()) return new Outcome().fail("no longer on the phone");
+        String why = cannotOpen(src);
+        if (why != null) return new Outcome().fail(why);
         String base = CopyPaths.base(src.getPath());
-        for (String ext : kind.extensions)
-            if (new File(base + "." + ext).exists()) return new Outcome().fail("a compressed copy (" + new File(base + "." + ext).getName() + ") already exists");
-        BitmapFactory.Options b = new BitmapFactory.Options();
-        b.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(src.getPath(), b);
-        if (b.outWidth <= 0 || b.outHeight <= 0) return new Outcome().fail("not a picture Android can open");
-        if ((long) b.outWidth * b.outHeight > MAX_PIXELS) return new Outcome().fail("too large to process safely");
+        for (String ext : kind.extensions) {
+            File out = new File(base + "." + ext);
+            if (out.getPath().equals(src.getPath())) return new Outcome().fail("it is already a " + ext.toUpperCase(Locale.US) + " file");
+            if (out.exists()) return new Outcome().fail("a compressed copy (" + out.getName() + ") already exists");
+        }
+        try { why = wouldLose(src); } catch (IOException e) { return new Outcome().fail("could not be read (" + e.getMessage() + ")"); }
+        if (why != null) return new Outcome().fail(why);
         Outcome o = write(src, kind, base, hints, work, false);
         if (o.ok && o.key != null) {
             if (o.quality >= 0) hints.put(o.key, o.quality);
@@ -160,7 +172,53 @@ public final class ImageCompressor {
      * compared. {@link Outcome#output} is the one a real run would choose.
      */
     public static Outcome compressForLab(File src, Kind kind, String base, File work) {
-        return write(src, kind, base, new HashMap<String, Integer>(), work, true);
+        String why = cannotOpen(src), lose = null;
+        if (why != null) return new Outcome().fail(why);
+        try { lose = wouldLose(src); } catch (IOException e) { return new Outcome().fail("could not be read (" + e.getMessage() + ")"); }
+        Outcome o = write(src, kind, base, new HashMap<String, Integer>(), work, true);
+        if (lose != null) {                                   // Lab: compressed anyway, to compare
+            o.trace.add(0, "a real run would not compress this picture: " + lose);
+            if (o.ok) o.wouldSkip = lose;
+        }
+        return o;
+    }
+
+    /** Why the picture cannot be compressed at all (gone, not a picture, too large for memory), or null. */
+    private static String cannotOpen(File src) {
+        if (!src.isFile()) return "no longer on the phone";
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        b.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(src.getPath(), b);
+        if (b.outWidth <= 0 || b.outHeight <= 0) return "not a picture Android can open";
+        if ((long) b.outWidth * b.outHeight > MAX_PIXELS) return "too large to process safely";
+        return null;
+    }
+
+    /** Why a copy would not keep all of this picture, or null: a Motion Photo, gain map or depth map (see {@link Extras}). */
+    private static String wouldLose(File src) throws IOException {
+        if (src.length() > 64L * 1024 * 1024) return null;    // the pixel limit decides
+        return Extras.lostOnCopy(head(src, (int) src.length()));
+    }
+
+    /** The picture's colour space if it is not sRGB (e.g. Display P3), else null. */
+    private static ColorSpace wideColour(File f) {
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        b.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(f.getPath(), b);
+        return b.outColorSpace != null && !b.outColorSpace.isSrgb() ? b.outColorSpace : null;
+    }
+
+    /**
+     * Null if a copy decodes in the same colour space as its wide-colour original, else what it got instead.
+     * HEIC is stored as sRGB / BT.601 without a colour profile, so a Display P3 photo would look duller; Android's
+     * WebP encoder writes the profile (ICCP chunk), which {@link WebpMeta} keeps.
+     */
+    private static String colourLost(File copy, ColorSpace want) {
+        BitmapFactory.Options b = new BitmapFactory.Options();
+        b.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(copy.getPath(), b);
+        if (b.outColorSpace != null && b.outColorSpace.equals(want)) return null;
+        return "it would not keep the photo's " + want.getName() + " colours (the copy is " + (b.outColorSpace != null ? b.outColorSpace.getName() : "untagged") + ")";
     }
 
     /** "1.9 MB", "230 KB": the same style as the app's reports. */
@@ -202,10 +260,10 @@ public final class ImageCompressor {
 
     // ------------------------------------------------------------------ photos and chat images -> HEIC or WebP
     static final String REGION_WRONG = "Android's region decoder reads it wrongly, so galleries may show it wrong when zoomed";
-    /** HEIC must be this much smaller to win over WebP, which every app can open. */
-    static final double WEBP_PREFERENCE = 1.05;
+    /** HEIC copies count this much bigger when picking the smallest: HEIC must be 5% smaller to win over WebP, which every app can open. */
+    static final double HEIC_PENALTY = 1.05;
 
-    private static double weight(Method m, long bytes) { return m != null && m.way != null ? bytes * WEBP_PREFERENCE : bytes; }
+    private static double weight(Method m, long bytes) { return m != null && m.way != null ? bytes * HEIC_PENALTY : bytes; }
 
     private static Method byKey(String key) {
         if (methods != null) for (Method m : methods) if (m.key.equals(key)) return m;
@@ -215,7 +273,8 @@ public final class ImageCompressor {
     /** A way of saving under consideration for one picture. */
     private static final class Cand {
         final Method m; int best = -1; long mosaicBytes;
-        Cand(Method m) { this.m = m; }
+        final String notInRealRun;   // Lab: tried anyway, but a real run would not use this way, for this reason
+        Cand(Method m, String notInRealRun) { this.m = m; this.notInRealRun = notInRealRun; }
     }
 
     private static void lossy(File src, String base, Map<String, Integer> hints, File work, boolean keep, Outcome o, List<File> temps) throws IOException {
@@ -223,25 +282,26 @@ public final class ImageCompressor {
         o.trace.add("ways of saving: " + checked);
         byte[] exif = Exif.fromJpeg(head(src, 256 * 1024));
         int orientation = exif != null ? Exif.orientation(exif) : 1;
+        ColorSpace wide = wideColour(src);
         List<Cand> cands = new ArrayList<Cand>();
         for (Method m : methods) {
             if (!m.works) continue;
             String why = exif != null && !m.exifOk ? "it would lose the photo's details (EXIF)"
-                    : !m.regionOk ? "Android's region decoder reads its files wrongly, so galleries may show them wrong when zoomed" : null;
+                    : !m.regionOk ? "Android's region decoder reads its files wrongly, so galleries may show them wrong when zoomed"
+                    : wide != null && m.way != null ? "HEIC is stored as sRGB here, so the photo's " + wide.getName() + " colours would look duller" : null;
             if (why != null) { o.trace.add(m.label + ": not used in a real run, " + why); if (!keep) continue; }
             int files = count(hints, FILES);
             if (!keep && files >= DROP_AFTER && count(hints, WINS + m.key) == 0) {
                 o.trace.add(m.label + ": skipped, it made none of the " + files + " copies kept so far in this run");
                 continue;
             }
-            cands.add(new Cand(m));
+            cands.add(new Cand(m, why));
         }
-        if (cands.isEmpty()) { o.fail("no way of saving worked on this phone"); return; }
+        if (cands.isEmpty()) { o.fail(wide != null ? "no way of saving here keeps its " + wide.getName() + " colours" : "no way of saving worked on this phone"); return; }
         Bitmap img = upright(decode(src, 1), orientation);
-        if (exif != null && orientation != 1) exif = Exif.withOrientation(exif, 1);   // the pixels are upright now
-        if (exif != null) exif = Exif.withSize(exif, img.getWidth(), img.getHeight());  // cameras record the size before turning
-        o.trace.add(String.format(Locale.US, "%d x %d px, EXIF %s, orientation %d", img.getWidth(), img.getHeight(),
-                exif != null ? "copied (" + exif.length + " bytes)" : "none", orientation));
+        exif = uprightExif(exif, orientation, img);
+        o.trace.add(String.format(Locale.US, "%d x %d px, EXIF %s, orientation %d, colours %s", img.getWidth(), img.getHeight(),
+                exif != null ? "copied (" + exif.length + " bytes)" : "none", orientation, wide != null ? wide.getName() : "sRGB"));
         o.before = src.length();
         Rect[] rs = Guard.crops(img.getWidth(), img.getHeight(), 0.25, 0.75);
         int c = rs[0].width();
@@ -261,7 +321,7 @@ public final class ImageCompressor {
             Collections.sort(ranked, new Comparator<Cand>() { public int compare(Cand x, Cand y) { return Double.compare(weight(x.m, x.mosaicBytes), weight(y.m, y.mosaicBytes)); } });
 
             // 2) full size, smallest first; a real run keeps the first that passes and saves enough
-            Rect[] verify = Guard.crops(img.getWidth(), img.getHeight(), 0.4, 0.6);   // other regions than the search
+            Rect[] verify = verifyRegions(img.getWidth(), img.getHeight());
             long limit = (long) (src.length() * (1 - MIN_SAVING));
             Attempt chosen = null;
             for (Cand cd : ranked) {
@@ -272,6 +332,12 @@ public final class ImageCompressor {
                     encodeTo(cd.m, img, q, exif, tmp);
                     a = new Attempt();
                     a.key = cd.m.key; a.label = cd.m.label; a.ext = cd.m.ext; a.quality = q; a.bytes = tmp.length();
+                    String colour = wide != null ? colourLost(tmp, wide) : null;
+                    if (colour != null) {
+                        a.note = colour;
+                        o.trace.add(String.format(Locale.US, "%s, full image at quality %d: %s, %s", cd.m.label, q, size(a.bytes), colour));
+                        break;
+                    }
                     if (a.bytes > limit) {
                         a.note = "saves less than " + Math.round(MIN_SAVING * 100) + "%";
                         if (keep) a.score = verifyFile(img, tmp, verify, o, keep);
@@ -288,9 +354,10 @@ public final class ImageCompressor {
                     a.note = "did not look identical at full size";
                 }
                 if (a == null) continue;
+                if (a.note == null && cd.notInRealRun != null) a.note = cd.notInRealRun;   // Lab: shown, never chosen
                 o.attempts.add(a);
                 if (keep && tmp.renameTo(new File(out))) { a.path = out; new File(out).setLastModified(src.lastModified()); }
-                if (a.note == null && (chosen == null || weight(cd.m, a.bytes) < weight(byKey(chosen.key), chosen.bytes))) {
+                if (a.note == null && (!keep || a.path != null) && (chosen == null || weight(cd.m, a.bytes) < weight(byKey(chosen.key), chosen.bytes))) {
                     chosen = a;
                     if (!keep) {
                         if (!tmp.renameTo(new File(out))) { o.fail("could not write the copy (" + new File(out).getParent() + ")"); return; }
@@ -305,17 +372,41 @@ public final class ImageCompressor {
                 String why = "did not look identical at full size";
                 for (Attempt a : o.attempts) if (a.note != null && a.note.startsWith("saves")) why = "would save less than " + Math.round(MIN_SAVING * 100) + "%";
                 for (Attempt a : o.attempts) if (REGION_WRONG.equals(a.note)) why = REGION_WRONG;
+                for (Attempt a : o.attempts) if (a.note != null && a.note.startsWith("it would not keep")) why = a.note;
                 if (!keep || best == null) { o.fail(why); return; }
                 o.wouldSkip = best.note;                           // Lab: show the smallest anyway
                 chosen = best;
             }
             o.output = chosen.path; o.key = chosen.key; o.format = chosen.label; o.quality = chosen.quality; o.after = chosen.bytes;
-            if (chosen.score != null) { o.ssim = chosen.score.ssim; o.psnr = chosen.score.psnr; o.shift = chosen.score.shift; }
+            if (chosen.score != null) { o.ssim = chosen.score.ssim; o.psnr = chosen.score.psnr; o.shift = chosen.score.shift; o.chromaPsnr = chosen.score.chromaPsnr; }
             o.ok = true;
         } finally {
             mosaic.recycle();
             img.recycle();
         }
+    }
+
+    /**
+     * The EXIF block for a copy whose pixels were turned upright: orientation 1, the upright size (cameras record the
+     * size before turning), and no thumbnail (it stays in the camera's orientation, so it would show sideways).
+     */
+    static byte[] uprightExif(byte[] exif, int orientation, Bitmap img) {
+        if (exif == null) return null;
+        if (orientation != 1) exif = Exif.withoutThumbnail(Exif.withOrientation(exif, 1));
+        return Exif.withSize(exif, img.getWidth(), img.getHeight());
+    }
+
+    /**
+     * Where the full-size copy is checked: four regions other than the search's (0.4 / 0.6), plus the top-left and
+     * bottom-right corners, where HEVC tiles are partial (the picture's edge) and encoders go wrong most.
+     */
+    static Rect[] verifyRegions(int w, int h) {
+        Rect[] mid = Guard.crops(w, h, 0.4, 0.6);
+        int c = mid[0].width();
+        Rect[] r = java.util.Arrays.copyOf(mid, mid.length + 2);   // first and last: also checked with the region decoder
+        r[mid.length] = new Rect(0, 0, c, c);
+        r[mid.length + 1] = new Rect(w - c, h - c, w, h);
+        return r;
     }
 
     /**
@@ -394,7 +485,7 @@ public final class ImageCompressor {
                 Rect[] al = new Rect[regions.length];
                 for (int i = 0; i < regions.length; i++) al[i] = aligned(regions[i]);
                 dec.recycle(); dec = null;
-                Score r = regionScore(img, enc, al, true);
+                Score r = regionScore(img, enc, al);
                 r.notes.add("  (not enough memory for a full decode: checked with the region decoder at aligned spots)");
                 return r;
             }
@@ -455,24 +546,17 @@ public final class ImageCompressor {
         }
     }
 
-    private static Score regionScore(Bitmap img, File enc, Rect[] regions, boolean regionDecoder) throws IOException {
-        BitmapRegionDecoder dec = null;
-        Bitmap whole = null;
+    /** The quality check with the region decoder at the given (aligned) regions, when a full decode does not fit in memory. */
+    private static Score regionScore(Bitmap img, File enc, Rect[] regions) throws IOException {
+        BitmapRegionDecoder dec = newRegionDecoder(enc.getPath());
+        if (dec == null) throw new IOException("no region decoder for this file");
         try {
-            if (regionDecoder) {
-                dec = newRegionDecoder(enc.getPath());
-                if (dec == null) throw new IOException("no region decoder for this file");
-            } else {
-                whole = BitmapFactory.decodeFile(enc.getPath(), argb());
-                if (whole == null) throw new IOException("the copy could not be opened");
-            }
-            int w = dec != null ? dec.getWidth() : whole.getWidth(), h = dec != null ? dec.getHeight() : whole.getHeight();
-            if (w != img.getWidth() || h != img.getHeight())
-                return Score.failed((regionDecoder ? "the region decoder" : "a full decode") + " sees " + w + "x" + h + " instead of " + img.getWidth() + "x" + img.getHeight());
+            if (dec.getWidth() != img.getWidth() || dec.getHeight() != img.getHeight())
+                return Score.failed("the region decoder sees " + dec.getWidth() + "x" + dec.getHeight() + " instead of " + img.getWidth() + "x" + img.getHeight());
             Score worst = new Score();
             for (Rect r : regions) {
                 Bitmap a = Bitmap.createBitmap(img, r.left, r.top, r.width(), r.height());
-                Bitmap b = dec != null ? dec.decodeRegion(r, argb()) : Bitmap.createBitmap(whole, r.left, r.top, r.width(), r.height());
+                Bitmap b = dec.decodeRegion(r, argb());
                 if (b == null) { a.recycle(); throw new IOException("a region of the copy could not be opened"); }
                 if (b.getWidth() != a.getWidth() || b.getHeight() != a.getHeight()) {
                     Score f = Score.failed("a " + r.width() + "x" + r.height() + " region came back " + b.getWidth() + "x" + b.getHeight());
@@ -484,8 +568,7 @@ public final class ImageCompressor {
             }
             return worst;
         } finally {
-            if (dec != null) dec.recycle();
-            if (whole != null) whole.recycle();
+            dec.recycle();
         }
     }
 
@@ -620,8 +703,25 @@ public final class ImageCompressor {
         s.psnr = mse == 0 ? 99 : 10 * Math.log10(255.0 * 255.0 / mse);
         s.ssim = Ssim.ssim(ya, yb, w, h);
         s.shift = colorShift(a, b);
-        s.pass = s.psnr >= Guard.PSNR_MIN && s.ssim >= Guard.SSIM_MIN && s.shift <= MAX_COLOR_SHIFT;
+        s.chromaPsnr = chromaPsnr(a, b);
+        s.pass = s.psnr >= Guard.PSNR_MIN && s.ssim >= Guard.SSIM_MIN && s.shift <= MAX_COLOR_SHIFT && s.chromaPsnr >= CHROMA_PSNR_MIN;
         return s;
+    }
+
+    /** The lower PSNR of the two colour channels Cb and Cr (BT.601), in dB: how much the colour itself changed. */
+    private static double chromaPsnr(Bitmap a, Bitmap b) {
+        int w = a.getWidth(), h = a.getHeight();
+        int[] pa = new int[w * h], pb = new int[w * h];
+        a.getPixels(pa, 0, w, 0, 0, w, h);
+        b.getPixels(pb, 0, w, 0, 0, w, h);
+        double eb = 0, er = 0;
+        for (int i = 0; i < pa.length; i++) {
+            double dr = ((pa[i] >> 16) & 255) - ((pb[i] >> 16) & 255), dg = ((pa[i] >> 8) & 255) - ((pb[i] >> 8) & 255), db = (pa[i] & 255) - (pb[i] & 255);
+            double cb = -0.168736 * dr - 0.331264 * dg + 0.5 * db, cr = 0.5 * dr - 0.418688 * dg - 0.081312 * db;
+            eb += cb * cb; er += cr * cr;
+        }
+        double mse = Math.max(eb, er) / pa.length;
+        return mse == 0 ? 99 : 10 * Math.log10(255.0 * 255.0 / mse);
     }
 
     /** Largest average change of red, green or blue (0..255). */
@@ -643,19 +743,29 @@ public final class ImageCompressor {
     // ------------------------------------------------------------------ screenshots -> lossless WebP
     @SuppressWarnings("deprecation")
     private static void lossless(File src, File tmp, boolean keep, Outcome o) throws IOException {
-        Bitmap bm = decode(src, 1), back = null;
+        byte[] exif = Exif.fromJpeg(head(src, 256 * 1024));
+        int orientation = exif != null ? Exif.orientation(exif) : 1;
+        Bitmap bm = upright(decode(src, 1), orientation), back = null;
+        exif = uprightExif(exif, orientation, bm);
         o.before = src.length();
         try {
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             if (Build.VERSION.SDK_INT >= 30) bm.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 100, bos);
             else bm.compress(Bitmap.CompressFormat.WEBP, 100, bos);    // quality 100 is lossless before Android 11
             byte[] d = bos.toByteArray();
+            if (exif != null) d = WebpMeta.withExif(d, exif, bm.getWidth(), bm.getHeight());
             boolean small = d.length <= src.length() * (1 - MIN_SAVING);
             if (!small && !keep) { o.fail("would save less than " + Math.round(MIN_SAVING * 100) + "%"); return; }
             back = BitmapFactory.decodeByteArray(d, 0, d.length, argb());
+            ColorSpace want = bm.getColorSpace();
+            if (back != null && want != null && !want.isSrgb() && !want.equals(back.getColorSpace())) {
+                String why = "it would not keep the picture's " + want.getName() + " colours";
+                if (!keep) { o.fail(why); return; }
+                o.wouldSkip = why;
+            }
             o.identicalPixels = back != null && back.sameAs(bm);
-            o.trace.add(String.format(Locale.US, "%d x %d px, lossless WebP %s, pixel-identical: %s", bm.getWidth(), bm.getHeight(),
-                    size(d.length), o.identicalPixels ? "yes" : "NO"));
+            o.trace.add(String.format(Locale.US, "%d x %d px, orientation %d, EXIF %s, lossless WebP %s, pixel-identical: %s", bm.getWidth(), bm.getHeight(),
+                    orientation, exif != null ? "copied" : "none", size(d.length), o.identicalPixels ? "yes" : "NO"));
             if (!o.identicalPixels) {
                 if (!keep) { o.fail("the copy was not pixel-identical"); return; }
                 o.wouldSkip = "not pixel-identical";

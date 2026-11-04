@@ -2,6 +2,7 @@ package com.storageplanner.test;
 
 import com.storageplanner.tools.CopyPaths;
 import com.storageplanner.tools.Exif;
+import com.storageplanner.tools.Extras;
 
 import java.io.ByteArrayOutputStream;
 import java.util.Arrays;
@@ -9,7 +10,7 @@ import java.util.Random;
 
 /**
  * The compression tools' plain-Java parts (app/src/main/java/com/storageplanner/tools): where copies go, EXIF
- * carried into the copy, EXIF in WebP, and that the tools' SSIM is the same as the app's.
+ * carried into the copy, EXIF in WebP, what a copy would lose (Extras), and that the tools' SSIM is the same as the app's.
  */
 public final class CompressionTest {
     static int checks, fails;
@@ -23,6 +24,7 @@ public final class CompressionTest {
         names();
         exif();
         webp();
+        extras();
         ssim();
         System.out.println("CompressionTest: " + (checks - fails) + " of " + checks + " checks passed");
         if (fails > 0) System.exit(1);
@@ -106,6 +108,16 @@ public final class CompressionTest {
                     && Exif.number(up, false, 0x0101) == 4000 && Exif.number(up, true, 0xA002) == 1848 && Exif.number(up, true, 0xA003) == 4000
                     && Exif.orientation(up) == 1 && up.length == cam.length);
         }
+        // a thumbnail (IFD1): IFD0's next-IFD link, right after its 4 entries, points at it
+        for (boolean le : new boolean[]{true, false}) {
+            byte[] cam = camera(le);
+            int link = 6 + 8 + 2 + 4 * 12;
+            cam[link + (le ? 0 : 3)] = 62;                               // any IFD offset; 62 = the Exif IFD
+            check("thumbnail " + (le ? "LE" : "BE") + ": found", Exif.hasThumbnail(cam) && !Exif.hasThumbnail(camera(le)));
+            byte[] up = Exif.withoutThumbnail(Exif.withOrientation(cam, 1));
+            check("thumbnail " + (le ? "LE" : "BE") + ": dropped, rest kept", !Exif.hasThumbnail(up) && Exif.hasThumbnail(cam)
+                    && Exif.orientation(up) == 1 && Exif.number(up, true, 0xA002) == 4000 && up.length == cam.length);
+        }
         check("size on a block without size tags: unchanged", Arrays.equals(Exif.withSize(Exif.fromJpeg(jpeg(true, 6)), 10, 20), Exif.fromJpeg(jpeg(true, 6))));
     }
 
@@ -133,9 +145,51 @@ public final class CompressionTest {
         check("webp: second EXIF replaces the first", le32(again, 4) == again.length - 8
                 && new String(again).indexOf("Cam") < 0 && new String(again).indexOf("Other") > 0
                 && new String(again).indexOf("EXIF") == new String(again).lastIndexOf("EXIF"));
+        // the last chunk odd-sized and missing its pad byte: padded in the copy, so the EXIF chunk starts even
+        ByteArrayOutputStream u = new ByteArrayOutputStream();
+        w(u, "RIFF".getBytes()); u32(u, 4 + 8 + 5, true); w(u, "WEBP".getBytes());
+        w(u, "VP8 ".getBytes()); u32(u, 5, true); w(u, img);
+        byte[] unpadded = com.storageplanner.tools.WebpMeta.withExif(u.toByteArray(), exif, 1848, 4000);
+        check("webp: unpadded last chunk gets padded", unpadded.length == out.length && new String(unpadded, 44, 4).equals("EXIF")
+                && le32(unpadded, 4) == unpadded.length - 8);
         boolean threw = false;
         try { com.storageplanner.tools.WebpMeta.withExif("not webp at all".getBytes(), exif, 1, 1); } catch (IllegalArgumentException x) { threw = true; }
         check("webp: rejects other files", threw);
+    }
+
+    /** Motion Photos, gain maps and depth maps are found; a plain photo and small trailers pass. */
+    static void extras() {
+        byte[] plain = photo(null, null, null);                         // its data holds FF 00 D9: not the end
+        check("extras: plain photo", Extras.lostOnCopy(plain) == null);
+        check("extras: not a JPEG", Extras.lostOnCopy("PNG data".getBytes()) == null);
+        check("extras: zero padding after the picture", Extras.lostOnCopy(photo(null, null, new byte[100_000])) == null);
+        check("extras: small Samsung trailer (Image_UTC_Data)", Extras.lostOnCopy(photo(null, null,
+                ("Image_UTC_Data1700000000000" + "SEFH" + "SEFT").getBytes())) == null);
+        check("extras: Samsung Motion Photo trailer", Extras.lostOnCopy(photo(null, null, ("....video....MotionPhoto_Data" + "SEFT").getBytes())) != null);
+        byte[] second = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 2, (byte) 0xFF, (byte) 0xD9};
+        check("extras: second JPEG after the picture (gain map)", Extras.lostOnCopy(photo(null, null, second)) != null);
+        byte[] big = new byte[70_000]; Arrays.fill(big, (byte) 0x11);
+        check("extras: large data after the picture", Extras.lostOnCopy(photo(null, null, big)) != null);
+        check("extras: XMP Motion Photo", Extras.lostOnCopy(photo("<x:xmpmeta><rdf:Description GCamera:MotionPhoto=\"1\"/></x:xmpmeta>", null, null)) != null);
+        check("extras: XMP Ultra HDR", Extras.lostOnCopy(photo("<rdf:Description hdrgm:Version=\"1.0\"/>", null, null)) != null);
+        check("extras: plain XMP is allowed", Extras.lostOnCopy(photo("<rdf:Description xmp:Rating=\"5\"/>", null, null)) == null);
+        check("extras: MPF segment", Extras.lostOnCopy(photo(null, "MPF\0MM\0*".getBytes(), null)) != null);
+    }
+
+    /** SOI, optional XMP (APP1) and APP2 segments, SOS with data containing a stuffed FF, EOI, then {@code after}. */
+    static byte[] photo(String xmp, byte[] app2, byte[] after) {
+        ByteArrayOutputStream o = new ByteArrayOutputStream();
+        o.write(0xFF); o.write(0xD8);
+        if (xmp != null) {
+            byte[] d = ("http://ns.adobe.com/xap/1.0/\0" + xmp).getBytes();
+            o.write(0xFF); o.write(0xE1); u16(o, d.length + 2, false); w(o, d);
+        }
+        if (app2 != null) { o.write(0xFF); o.write(0xE2); u16(o, app2.length + 2, false); w(o, app2); }
+        o.write(0xFF); o.write(0xDA); u16(o, 8, false); w(o, new byte[]{1, 1, 0, 0, 63, 0});
+        w(o, new byte[]{0x12, 0x34, (byte) 0xFF, 0x00, (byte) 0xD9, 0x56, (byte) 0xFF, (byte) 0xD0, 0x78});   // FF 00 D9: not the end
+        o.write(0xFF); o.write(0xD9);
+        if (after != null) w(o, after);
+        return o.toByteArray();
     }
 
     /** "Exif\0\0" + TIFF: IFD0 {ImageWidth SHORT, ImageLength SHORT, Orientation, ExifIFD pointer}, Exif IFD {PixelX LONG, PixelY LONG}. */

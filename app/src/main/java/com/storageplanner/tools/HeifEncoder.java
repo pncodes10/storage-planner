@@ -63,8 +63,6 @@ public final class HeifEncoder {
         return ways;
     }
 
-    static boolean supported() { return !ways().isEmpty(); }
-
     private static void pick() {
         StringBuilder s = new StringBuilder();
         try {
