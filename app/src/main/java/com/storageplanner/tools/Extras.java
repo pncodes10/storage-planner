@@ -1,5 +1,9 @@
 package com.storageplanner.tools;
 
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -21,50 +25,71 @@ public final class Extras {
     private static final byte[] XMP = "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.US_ASCII);
     private static final String[] XMP_EXTRAS = {"MotionPhoto", "MicroVideo", "hdrgm:", "GainMap", "Container:Directory", "GDepth:"};
 
-    /**
-     * @param jpeg the whole file
-     * @return why a copy would lose part of this photo, or null if it holds only the picture, EXIF and small
-     *         metadata. Not a JPEG: null (nothing is checked).
-     */
+    /** {@link #lostOnCopy(InputStream)} on a file held in memory (tests). */
     public static String lostOnCopy(byte[] jpeg) {
-        if (jpeg == null || jpeg.length < 4 || (jpeg[0] & 0xFF) != 0xFF || (jpeg[1] & 0xFF) != 0xD8) return null;
-        int p = 2, scan = -1;
-        while (p + 4 <= jpeg.length) {
-            if ((jpeg[p] & 0xFF) != 0xFF) return null;                     // damaged: let the decoder decide
-            int m = jpeg[p + 1] & 0xFF;
-            if (m == 0xFF) { p++; continue; }
-            if (m == 0xD9) return null;
-            if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) { p += 2; continue; }
-            int len = ((jpeg[p + 2] & 0xFF) << 8) | (jpeg[p + 3] & 0xFF);
-            if (len < 2 || p + 2 + len > jpeg.length) return null;
-            if (m == 0xE1 && startsWith(jpeg, p + 4, XMP)) {
-                String xmp = new String(jpeg, p + 4 + XMP.length, len - 2 - XMP.length, StandardCharsets.UTF_8);
+        try { return lostOnCopy(new ByteArrayInputStream(jpeg)); }
+        catch (IOException e) { throw new IllegalStateException(e); }   // cannot happen in memory
+    }
+
+    /**
+     * Reads the file once, keeping at most one segment (under 64 KB) and {@link #SMALL_TRAILER} bytes of what
+     * follows the picture in memory, so any file size can be checked.
+     * @return why a copy would lose part of this photo, or null if it holds only the picture, EXIF and small
+     *         metadata. Not a JPEG, or damaged before the picture's data: null (the decoder decides).
+     */
+    public static String lostOnCopy(InputStream raw) throws IOException {
+        InputStream in = raw instanceof BufferedInputStream ? raw : new BufferedInputStream(raw, 64 * 1024);
+        if (in.read() != 0xFF || in.read() != 0xD8) return null;
+        while (true) {                                                  // segments up to the start of scan
+            if (in.read() != 0xFF) return null;
+            int m = in.read();
+            while (m == 0xFF) m = in.read();                            // fill bytes
+            if (m < 0 || m == 0xD9) return null;
+            if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) continue;        // markers without a length
+            int hi = in.read(), lo = in.read();
+            if (lo < 0) return null;
+            int len = (hi << 8) | lo;
+            if (len < 2) return null;
+            byte[] seg = readFully(in, len - 2);
+            if (seg == null) return null;
+            if (m == 0xE1 && seg.length >= XMP.length && startsWith(seg, 0, XMP)) {
+                String xmp = new String(seg, XMP.length, seg.length - XMP.length, StandardCharsets.UTF_8);
                 for (String k : XMP_EXTRAS)
                     if (xmp.contains(k)) return "it is a Motion Photo or holds a gain map or depth map (XMP " + k.replace(":", "") + "), which a copy would lose";
             }
-            if (m == 0xE2 && len >= 6 && jpeg[p + 4] == 'M' && jpeg[p + 5] == 'P' && jpeg[p + 6] == 'F' && jpeg[p + 7] == 0)
+            if (m == 0xE2 && seg.length >= 4 && seg[0] == 'M' && seg[1] == 'P' && seg[2] == 'F' && seg[3] == 0)
                 return "it holds more than one picture (MPF: an Ultra HDR gain map or a depth map), which a copy would lose";
-            p += 2 + len;
-            if (m == 0xDA) { scan = p; break; }
+            if (m == 0xDA) break;
         }
-        if (scan < 0) return null;
         // In the compressed data every 0xFF is followed by 0x00 or a restart marker, so the first FF D9 ends the picture.
-        int eoi = -1;
-        for (int i = scan; i + 1 < jpeg.length; i++)
-            if ((jpeg[i] & 0xFF) == 0xFF && (jpeg[i + 1] & 0xFF) == 0xD9) { eoi = i + 2; break; }
-        if (eoi < 0) return null;
-        int end = jpeg.length;
-        while (end > eoi && jpeg[end - 1] == 0) end--;                    // zero padding
-        int trailer = end - eoi;
-        if (trailer == 0) return null;
-        if (contains(jpeg, eoi, end, "MotionPhoto"))      // Samsung: MotionPhoto_Data in the SEF trailer
+        for (int prev = -1, b; ; prev = b) {
+            b = in.read();
+            if (b < 0) return null;                                     // cut off: the decoder decides
+            if (prev == 0xFF && b == 0xD9) break;
+        }
+        byte[] kept = new byte[SMALL_TRAILER];
+        long n = 0, end = 0;                                            // end: just after the last non-zero byte
+        for (int b; (b = in.read()) >= 0; n++) {
+            if (n < kept.length) kept[(int) n] = (byte) b;
+            if (b != 0) end = n + 1;                                    // trailing zeros are padding
+        }
+        if (end == 0) return null;
+        if (end >= SMALL_TRAILER)
+            return "it holds " + (end / 1024) + " KB of data after the picture (a Motion Photo video, a depth map or a second picture), which a copy would lose";
+        int t = (int) end;
+        if (contains(kept, 0, t, "MotionPhoto"))                        // Samsung: MotionPhoto_Data in the SEF trailer
             return "it is a Motion Photo (a video is stored after the picture), which a copy would lose";
-        for (int i = eoi; i + 2 < end; i++)
-            if ((jpeg[i] & 0xFF) == 0xFF && (jpeg[i + 1] & 0xFF) == 0xD8 && (jpeg[i + 2] & 0xFF) == 0xFF)
+        for (int i = 0; i + 2 < t; i++)
+            if ((kept[i] & 0xFF) == 0xFF && (kept[i + 1] & 0xFF) == 0xD8 && (kept[i + 2] & 0xFF) == 0xFF)
                 return "it holds a second picture after the first (a gain map, depth map or preview), which a copy would lose";
-        if (trailer >= SMALL_TRAILER)
-            return "it holds " + (trailer / 1024) + " KB of data after the picture (often a Motion Photo video), which a copy would lose";
         return null;
+    }
+
+    /** Exactly {@code n} bytes, or null at the end of the file. */
+    private static byte[] readFully(InputStream in, int n) throws IOException {
+        byte[] b = new byte[n];
+        for (int got = 0, r; got < n; got += r) if ((r = in.read(b, got, n - got)) < 0) return null;
+        return b;
     }
 
     private static boolean startsWith(byte[] d, int p, byte[] prefix) {

@@ -119,6 +119,9 @@ anyway and says a real run would not. Refused: files over 25 MP, files that are 
 - a second JPEG, or "MotionPhoto", after the picture;
 - 64 KB or more of data after the picture.
 
+`Extras` streams the file, keeping at most one segment and 64 KB of trailing data in memory, so files of any
+size are checked. A file that can't be checked (read error, damaged data) is refused, not let through.
+
 1. **Encoder check, once per process** (`encoderCheck`). Every way of saving is tested on a 1100×700 test
    picture: smooth gradients plus a checkerboard that doesn't line up with the tiles, so misplaced tiles show,
    and partial edge tiles. It carries an EXIF block with a camera name and size tags. Each way records:
@@ -249,7 +252,9 @@ Each of these was found on a real phone: a Samsung Galaxy S23 FE (Exynos), Andro
 - **Samsung cameras take Display P3 photos.** The S23 FE's JPEGs carry a "DCI-P3 D65 Gamut with sRGB
   Transfer" ICC profile. The HEIC writer tags its YUV as BT.601 / sRGB, with no profile (MediaMuxer can't add
   one), so a HEIC copy of such a photo shows **duller colours**. The guard compares raw pixel values, so it
-  can't see this. Only copies that decode in the original's colour space are kept. Android's WebP encoder
+  can't see this. Only copies that decode in the original's colour space are kept (`sameColours`: equal, or the same primaries,
+white point and transfer curve within 0.001, since a profile read back from a copy can come out as an unnamed
+space). The search mosaic is made in the photo's own colour space. Android's WebP encoder
   writes an ICCP chunk, and `WebpMeta` keeps it; the copy's colour space is checked on every file.
 - **Samsung photos end with a trailer after the JPEG** (`SEFT`). Usually it's under 1 KB (`Image_UTC_Data`,
   `Camera_Scene_Info`), and dropping it is fine. A Motion Photo's trailer holds `MotionPhoto_Data` and the

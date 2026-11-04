@@ -155,7 +155,7 @@ public final class ImageCompressor {
             if (out.getPath().equals(src.getPath())) return new Outcome().fail("it is already a " + ext.toUpperCase(Locale.US) + " file");
             if (out.exists()) return new Outcome().fail("a compressed copy (" + out.getName() + ") already exists");
         }
-        try { why = wouldLose(src); } catch (IOException e) { return new Outcome().fail("could not be read (" + e.getMessage() + ")"); }
+        why = wouldLose(src);
         if (why != null) return new Outcome().fail(why);
         Outcome o = write(src, kind, base, hints, work, false);
         if (o.ok && o.key != null) {
@@ -172,9 +172,9 @@ public final class ImageCompressor {
      * compared. {@link Outcome#output} is the one a real run would choose.
      */
     public static Outcome compressForLab(File src, Kind kind, String base, File work) {
-        String why = cannotOpen(src), lose = null;
+        String why = cannotOpen(src);
         if (why != null) return new Outcome().fail(why);
-        try { lose = wouldLose(src); } catch (IOException e) { return new Outcome().fail("could not be read (" + e.getMessage() + ")"); }
+        String lose = wouldLose(src);
         Outcome o = write(src, kind, base, new HashMap<String, Integer>(), work, true);
         if (lose != null) {                                   // Lab: compressed anyway, to compare
             o.trace.add(0, "a real run would not compress this picture: " + lose);
@@ -194,10 +194,17 @@ public final class ImageCompressor {
         return null;
     }
 
-    /** Why a copy would not keep all of this picture, or null: a Motion Photo, gain map or depth map (see {@link Extras}). */
-    private static String wouldLose(File src) throws IOException {
-        if (src.length() > 64L * 1024 * 1024) return null;    // the pixel limit decides
-        return Extras.lostOnCopy(head(src, (int) src.length()));
+    /**
+     * Why a copy would not keep all of this picture, or null: a Motion Photo, gain map or depth map (see
+     * {@link Extras}, which streams the file, so any size is checked). A file that cannot be checked is refused.
+     */
+    private static String wouldLose(File src) {
+        try {
+            FileInputStream in = new FileInputStream(src);
+            try { return Extras.lostOnCopy(in); } finally { in.close(); }
+        } catch (Throwable t) {
+            return "it could not be checked for Motion Photo or depth data (" + t.getClass().getSimpleName() + ")";
+        }
     }
 
     /** The picture's colour space if it is not sRGB (e.g. Display P3), else null. */
@@ -217,7 +224,7 @@ public final class ImageCompressor {
         BitmapFactory.Options b = new BitmapFactory.Options();
         b.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(copy.getPath(), b);
-        if (b.outColorSpace != null && b.outColorSpace.equals(want)) return null;
+        if (b.outColorSpace != null && sameColours(b.outColorSpace, want)) return null;
         return "it would not keep the photo's " + want.getName() + " colours (the copy is " + (b.outColorSpace != null ? b.outColorSpace.getName() : "untagged") + ")";
     }
 
@@ -260,6 +267,27 @@ public final class ImageCompressor {
 
     // ------------------------------------------------------------------ photos and chat images -> HEIC or WebP
     static final String REGION_WRONG = "Android's region decoder reads it wrongly, so galleries may show it wrong when zoomed";
+    /**
+     * Whether two colour spaces show the same colours: equal, or both RGB with the same primaries and white point
+     * and the same transfer curve, within 0.001. A colour profile read back from a copy can come out as an unnamed
+     * space with slightly different numbers than the original's.
+     */
+    static boolean sameColours(ColorSpace a, ColorSpace b) {
+        if (a.equals(b)) return true;
+        if (!(a instanceof ColorSpace.Rgb) || !(b instanceof ColorSpace.Rgb)) return false;
+        ColorSpace.Rgb x = (ColorSpace.Rgb) a, y = (ColorSpace.Rgb) b;
+        if (!close(x.getPrimaries(), y.getPrimaries()) || !close(x.getWhitePoint(), y.getWhitePoint())) return false;
+        for (double v = 0; v <= 1.0001; v += 0.05)
+            if (Math.abs(x.getEotf().applyAsDouble(v) - y.getEotf().applyAsDouble(v)) > 1e-3) return false;
+        return true;
+    }
+
+    private static boolean close(float[] p, float[] q) {
+        if (p.length != q.length) return false;
+        for (int i = 0; i < p.length; i++) if (Math.abs(p[i] - q[i]) > 1e-3) return false;
+        return true;
+    }
+
     /** HEIC copies count this much bigger when picking the smallest: HEIC must be 5% smaller to win over WebP, which every app can open. */
     static final double HEIC_PENALTY = 1.05;
 
@@ -305,7 +333,8 @@ public final class ImageCompressor {
         o.before = src.length();
         Rect[] rs = Guard.crops(img.getWidth(), img.getHeight(), 0.25, 0.75);
         int c = rs[0].width();
-        Bitmap mosaic = Bitmap.createBitmap(2 * c, 2 * c, Bitmap.Config.ARGB_8888);
+        // in the picture's own colour space: an sRGB mosaic would convert (and clip) Display P3 pixels
+        Bitmap mosaic = Bitmap.createBitmap(2 * c, 2 * c, Bitmap.Config.ARGB_8888, true, img.getColorSpace());
         try {
             Canvas cv = new Canvas(mosaic);
             for (int k = 0; k < 4; k++) cv.drawBitmap(img, rs[k], new Rect((k % 2) * c, (k / 2) * c, (k % 2 + 1) * c, (k / 2 + 1) * c), null);

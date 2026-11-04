@@ -173,6 +173,14 @@ public final class CompressionTest {
         check("extras: XMP Motion Photo", Extras.lostOnCopy(photo("<x:xmpmeta><rdf:Description GCamera:MotionPhoto=\"1\"/></x:xmpmeta>", null, null)) != null);
         check("extras: XMP Ultra HDR", Extras.lostOnCopy(photo("<rdf:Description hdrgm:Version=\"1.0\"/>", null, null)) != null);
         check("extras: plain XMP is allowed", Extras.lostOnCopy(photo("<rdf:Description xmp:Rating=\"5\"/>", null, null)) == null);
+        // the review's crash: an APP1 shorter than the XMP namespace it starts with (FF D8 FF E1 00 0A + namespace)
+        ByteArrayOutputStream bad = new ByteArrayOutputStream();
+        w(bad, new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE1, 0, 10}); w(bad, "http://ns.adobe.com/xap/1.0/\0".getBytes());
+        String r = "threw";
+        try { r = Extras.lostOnCopy(bad.toByteArray()); } catch (RuntimeException x) { r = "threw " + x; }
+        check("extras: short XMP segment does not throw", r == null);
+        byte[] mixed = new byte[200_000]; mixed[150_000] = 7;            // non-zero data far past the 64 KB kept
+        check("extras: large trailer with zero padding after it", Extras.lostOnCopy(photo(null, null, mixed)) != null);
         check("extras: MPF segment", Extras.lostOnCopy(photo(null, "MPF\0MM\0*".getBytes(), null)) != null);
     }
 

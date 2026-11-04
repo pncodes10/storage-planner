@@ -35,7 +35,7 @@ public final class CompressCompareScreen extends Screen {
     private int mode = SIDE;
     private boolean together = true, showOriginal = true;
     private Bitmap bo, bc, bd;
-    private String diffFacts, error;
+    private String diffFacts, diffError, error;
     private boolean loading, diffing;
     private float[] keepState;                         // zoom / spot carried across modes and flips
 
@@ -216,6 +216,7 @@ public final class CompressCompareScreen extends Screen {
                         + bc.getWidth() + "×" + bc.getHeight() + "), so they cannot be compared pixel by pixel.", 15, Ui.tier[4], true), 0);
                 return;
             }
+            if (diffError != null) { Ui.add(stage, Ui.text(a, diffError, 15, Ui.tier[4], true), 0); return; }   // the other views still work
             if (!diffing) {                                     // ~12 MP of pixel work: off the UI thread
                 diffing = true;
                 final Bitmap fo = bo, fc = bc;
@@ -226,7 +227,7 @@ public final class CompressCompareScreen extends Screen {
                         catch (OutOfMemoryError e) { d = null; f = "Not enough memory to show the difference."; }
                         final Bitmap fd = d; final String ff = f;
                         AnalysisState.UI.post(new Runnable() {
-                            public void run() { diffing = false; bd = fd; diffFacts = ff; if (fd == null) error = ff; render(); }
+                            public void run() { diffing = false; bd = fd; if (fd != null) diffFacts = ff; else diffError = ff; render(); }
                         });
                     }
                 }, "compare-diff").start();
