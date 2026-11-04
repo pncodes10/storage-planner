@@ -254,7 +254,11 @@ Each of these was found on a real phone: a Samsung Galaxy S23 FE (Exynos), Andro
   one), so a HEIC copy of such a photo shows **duller colours**. The guard compares raw pixel values, so it
   can't see this. Only copies that decode in the original's colour space are kept (`sameColours`: equal, or the same primaries,
 white point and transfer curve within 0.001, since a profile read back from a copy can come out as an unnamed
-space). The search mosaic is made in the photo's own colour space. Android's WebP encoder
+space). The search mosaic is made in the photo's own colour space.
+  **Verified on the S23 FE** (build 764cd46): both HEIC copies of a P3 photo read back as `sRGB IEC61966-2.1`
+  and were rejected; the WebP copy kept Display P3 and passed (colour PSNR 49.6 dB). The cost is real: on
+  that photo, HEIC would have been about 8 points smaller than WebP. A HEIF writer that stores an ICC
+  profile (`colr` box) would win that back; `MediaMuxer` can't do it. Android's WebP encoder
   writes an ICCP chunk, and `WebpMeta` keeps it; the copy's colour space is checked on every file.
 - **Samsung photos end with a trailer after the JPEG** (`SEFT`). Usually it's under 1 KB (`Image_UTC_Data`,
   `Camera_Scene_Info`), and dropping it is fine. A Motion Photo's trailer holds `MotionPhoto_Data` and the

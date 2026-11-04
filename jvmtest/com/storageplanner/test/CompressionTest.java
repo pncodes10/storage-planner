@@ -181,6 +181,11 @@ public final class CompressionTest {
         check("extras: short XMP segment does not throw", r == null);
         byte[] mixed = new byte[200_000]; mixed[150_000] = 7;            // non-zero data far past the 64 KB kept
         check("extras: large trailer with zero padding after it", Extras.lostOnCopy(photo(null, null, mixed)) != null);
+        try {
+            byte[] tr = new byte[1000]; Arrays.fill(tr, (byte) 0x22);
+            Extras.Result er = Extras.check(new java.io.ByteArrayInputStream(photo(null, null, tr)));
+            check("extras: picture end found", er.pictureEnd == plain.length && er.lost == null);
+        } catch (java.io.IOException x) { check("extras: picture end found (" + x + ")", false); }
         check("extras: MPF segment", Extras.lostOnCopy(photo(null, "MPF\0MM\0*".getBytes(), null)) != null);
     }
 

@@ -344,10 +344,11 @@ public final class LabScreen extends Screen {
         } else {
             o.line("  every way, at full size:");
             for (ImageCompressor.Attempt t : r.attempts) {
-                boolean chosen = t.path != null && t.path.equals(r.output) && r.wouldSkip == null;
+                boolean best = t.path != null && t.path.equals(r.output), chosen = best && r.wouldSkip == null;
                 o.line(String.format(Locale.US, "    %s: quality %d, %s (%s)%s%s", t.label, t.quality, com.storageplanner.core.Report.size(t.bytes),
                         change(r.before, t.bytes), t.score != null ? String.format(Locale.US, ", worst SSIM %.4f, PSNR %.1f dB", t.score.ssim, t.score.psnr) : "",
-                        chosen ? "  <- a real run keeps this" : t.note != null ? "  (" + t.note + ")" : "  (passes, but another way is smaller, or HEIC is not 5% smaller than WebP)"));
+                        chosen ? "  <- a real run keeps this" : best ? "  <- the best copy, but a real run would not compress this picture"
+                                : t.note != null ? "  (" + t.note + ")" : "  (passes, but another way is smaller, or HEIC is not 5% smaller than WebP)"));
                 if (t.path == null) continue;
                 made.add(new Compressed(p, t.path, t.label, facts(t.label, r.before, t.bytes, t.quality, t.score, false, t.note), r.before, t.bytes, chosen, t.note != null));
                 scan.add(t.path);
@@ -355,6 +356,9 @@ public final class LabScreen extends Screen {
         }
         o.line(String.format(Locale.US, "  %s -> %s (%s) as %s; %d ms", com.storageplanner.core.Report.size(r.before),
                 com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.format, r.ms));
+        if (r.pictureBytes > 0 && r.before - r.pictureBytes >= 64 * 1024 && r.after > 0)   // more than a small trailer
+            o.line(String.format(Locale.US, "  the picture itself is %s of the file's %s (the rest is data after it); against the picture alone: %s",
+                    com.storageplanner.core.Report.size(r.pictureBytes), com.storageplanner.core.Report.size(r.before), change(r.pictureBytes, r.after)));
         if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f), colour PSNR %.1f dB (need %.0f)",
                 r.ssim, Guard.SSIM_MIN, r.psnr, Guard.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT, r.chromaPsnr, ImageCompressor.CHROMA_PSNR_MIN));
         o.line(r.wouldSkip == null ? "  A real run would keep the " + r.format + " copy." : "  A real run would NOT keep any copy: " + r.wouldSkip + ".");

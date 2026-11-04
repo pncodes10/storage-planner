@@ -92,6 +92,8 @@ public final class ImageCompressor {
         /** Worst checked region of the kept copy (-1 = not measured). */
         public double ssim = -1, psnr = -1, shift = -1, chromaPsnr = -1;
         public boolean identicalPixels;   // lossless copies
+        /** Lab: bytes of the picture itself (up to the JPEG's end), when the file holds more after it; else -1. */
+        public long pictureBytes = -1;
         public String skipped;       // why nothing was written (ok == false)
         /** Lab only: the copy was kept for comparison, but a real run would have thrown it away for this reason. */
         public String wouldSkip;
@@ -155,7 +157,7 @@ public final class ImageCompressor {
             if (out.getPath().equals(src.getPath())) return new Outcome().fail("it is already a " + ext.toUpperCase(Locale.US) + " file");
             if (out.exists()) return new Outcome().fail("a compressed copy (" + out.getName() + ") already exists");
         }
-        why = wouldLose(src);
+        why = wouldLose(src).lost;
         if (why != null) return new Outcome().fail(why);
         Outcome o = write(src, kind, base, hints, work, false);
         if (o.ok && o.key != null) {
@@ -174,12 +176,13 @@ public final class ImageCompressor {
     public static Outcome compressForLab(File src, Kind kind, String base, File work) {
         String why = cannotOpen(src);
         if (why != null) return new Outcome().fail(why);
-        String lose = wouldLose(src);
+        Extras.Result ex = wouldLose(src);
         Outcome o = write(src, kind, base, new HashMap<String, Integer>(), work, true);
-        if (lose != null) {                                   // Lab: compressed anyway, to compare
-            o.trace.add(0, "a real run would not compress this picture: " + lose);
-            if (o.ok) o.wouldSkip = lose;
+        if (ex.lost != null) {                                // Lab: compressed anyway, to compare
+            o.trace.add(0, "a real run would not compress this picture: " + ex.lost);
+            if (o.ok) o.wouldSkip = ex.lost;
         }
+        o.pictureBytes = ex.pictureEnd;
         return o;
     }
 
@@ -198,12 +201,14 @@ public final class ImageCompressor {
      * Why a copy would not keep all of this picture, or null: a Motion Photo, gain map or depth map (see
      * {@link Extras}, which streams the file, so any size is checked). A file that cannot be checked is refused.
      */
-    private static String wouldLose(File src) {
+    private static Extras.Result wouldLose(File src) {
         try {
             FileInputStream in = new FileInputStream(src);
-            try { return Extras.lostOnCopy(in); } finally { in.close(); }
+            try { return Extras.check(in); } finally { in.close(); }
         } catch (Throwable t) {
-            return "it could not be checked for Motion Photo or depth data (" + t.getClass().getSimpleName() + ")";
+            Extras.Result r = new Extras.Result();
+            r.lost = "it could not be checked for Motion Photo or depth data (" + t.getClass().getSimpleName() + ")";
+            return r;
         }
     }
 

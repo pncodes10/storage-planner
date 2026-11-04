@@ -25,6 +25,14 @@ public final class Extras {
     private static final byte[] XMP = "http://ns.adobe.com/xap/1.0/\0".getBytes(StandardCharsets.US_ASCII);
     private static final String[] XMP_EXTRAS = {"MotionPhoto", "MicroVideo", "hdrgm:", "GainMap", "Container:Directory", "GDepth:"};
 
+    /** What {@link #check} found. */
+    public static final class Result {
+        /** Why a copy would lose part of the photo, or null. */
+        public String lost;
+        /** Bytes up to the picture's end-of-image marker (the picture itself), or -1 if not found. */
+        public long pictureEnd = -1;
+    }
+
     /** {@link #lostOnCopy(InputStream)} on a file held in memory (tests). */
     public static String lostOnCopy(byte[] jpeg) {
         try { return lostOnCopy(new ByteArrayInputStream(jpeg)); }
@@ -37,13 +45,23 @@ public final class Extras {
      * @return why a copy would lose part of this photo, or null if it holds only the picture, EXIF and small
      *         metadata. Not a JPEG, or damaged before the picture's data: null (the decoder decides).
      */
-    public static String lostOnCopy(InputStream raw) throws IOException {
-        InputStream in = raw instanceof BufferedInputStream ? raw : new BufferedInputStream(raw, 64 * 1024);
+    public static String lostOnCopy(InputStream raw) throws IOException { return check(raw).lost; }
+
+    /** Like {@link #lostOnCopy(InputStream)}, also saying where the picture ends (to measure savings against it). */
+    public static Result check(InputStream raw) throws IOException {
+        Result r = new Result();
+        r.lost = scan(raw instanceof BufferedInputStream ? raw : new BufferedInputStream(raw, 64 * 1024), r);
+        return r;
+    }
+
+    private static String scan(InputStream in, Result r) throws IOException {
+        long pos = 2;
         if (in.read() != 0xFF || in.read() != 0xD8) return null;
         while (true) {                                                  // segments up to the start of scan
             if (in.read() != 0xFF) return null;
             int m = in.read();
-            while (m == 0xFF) m = in.read();                            // fill bytes
+            pos += 2;
+            while (m == 0xFF) { m = in.read(); pos++; }                 // fill bytes
             if (m < 0 || m == 0xD9) return null;
             if (m == 0x01 || (m >= 0xD0 && m <= 0xD7)) continue;        // markers without a length
             int hi = in.read(), lo = in.read();
@@ -52,6 +70,7 @@ public final class Extras {
             if (len < 2) return null;
             byte[] seg = readFully(in, len - 2);
             if (seg == null) return null;
+            pos += len;
             if (m == 0xE1 && seg.length >= XMP.length && startsWith(seg, 0, XMP)) {
                 String xmp = new String(seg, XMP.length, seg.length - XMP.length, StandardCharsets.UTF_8);
                 for (String k : XMP_EXTRAS)
@@ -65,8 +84,10 @@ public final class Extras {
         for (int prev = -1, b; ; prev = b) {
             b = in.read();
             if (b < 0) return null;                                     // cut off: the decoder decides
+            pos++;
             if (prev == 0xFF && b == 0xD9) break;
         }
+        r.pictureEnd = pos;
         byte[] kept = new byte[SMALL_TRAILER];
         long n = 0, end = 0;                                            // end: just after the last non-zero byte
         for (int b; (b = in.read()) >= 0; n++) {
