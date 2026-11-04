@@ -45,11 +45,13 @@ jobs:
       - name: Python packages (signer, audit)
         run: pip install cryptography androguard apksigtool loguru
 
-      - name: Core tests (image compression rules)
+      - name: Core tests (compression tools, plain-Java parts)
         run: |
           mkdir -p "$RUNNER_TEMP/jvm"
+          T=app/src/main/java/com/storageplanner/tools
           javac -encoding UTF-8 -nowarn -d "$RUNNER_TEMP/jvm" \
             $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
+            $T/Exif.java $T/WebpMeta.java $T/CopyPaths.java $T/Ssim.java app/src/main/java/com/storageplanner/app/Ssim.java \
             jvmtest/com/storageplanner/test/CompressionTest.java
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.CompressionTest
 

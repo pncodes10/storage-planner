@@ -1,4 +1,4 @@
-package com.storageplanner.app;
+package com.storageplanner.tools;
 
 import android.graphics.Bitmap;
 import android.media.Image;
@@ -28,7 +28,7 @@ import java.util.Locale;
  * Either way MediaMuxer stores the tiles as a HEIF image grid (MUXER_OUTPUT_HEIF, Android 9+). Every
  * encoder found is one {@link Way}; {@link ImageCompressor#encoderCheck} tests each on a test picture.
  */
-final class HeifEncoder {
+public final class HeifEncoder {
     private HeifEncoder() {}
 
     static final int TILE = 512;
@@ -111,7 +111,7 @@ final class HeifEncoder {
     }
 
     /** For the Lab: every HEVC / HEIC encoder on the phone and what it offers. */
-    static String survey() { ways(); return survey.isEmpty() ? "    (none)\n" : survey; }
+    public static String survey() { ways(); return survey.isEmpty() ? "    (none)\n" : survey; }
 
     /**
      * Encodes {@code bm} to {@code outPath} with one way. {@code quality} is 0..100 (higher = larger, closer

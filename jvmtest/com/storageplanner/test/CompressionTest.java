@@ -1,22 +1,16 @@
 package com.storageplanner.test;
 
-import com.storageplanner.core.Compression;
-import com.storageplanner.core.Exif;
-import com.storageplanner.core.FileItem;
-import com.storageplanner.core.Option;
-import com.storageplanner.core.Techniques;
-import com.storageplanner.core.Unit;
+import com.storageplanner.tools.CopyPaths;
+import com.storageplanner.tools.Exif;
 
 import java.io.ByteArrayOutputStream;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.Random;
 
-/** Image compression rules: output names, which files a recommendation compresses, EXIF carried into the copy. */
+/**
+ * The compression tools' plain-Java parts (app/src/main/java/com/storageplanner/tools): where copies go, EXIF
+ * carried into the copy, EXIF in WebP, and that the tools' SSIM is the same as the app's.
+ */
 public final class CompressionTest {
     static int checks, fails;
 
@@ -27,51 +21,31 @@ public final class CompressionTest {
 
     public static void main(String[] a) {
         names();
-        targets();
         exif();
         webp();
+        ssim();
         System.out.println("CompressionTest: " + (checks - fails) + " of " + checks + " checks passed");
         if (fails > 0) System.exit(1);
     }
 
     static void names() {
-        check("photo -> heic", Compression.outputPath("/s/DCIM/Camera/IMG_1.jpg", "heic").equals("/s/DCIM/Camera/IMG_1.heic"));
-        check("chat image -> webp", Compression.outputPath("/s/WhatsApp/IMG-2024-WA0001.jpeg", "webp").equals("/s/WhatsApp/IMG-2024-WA0001.webp"));
-        check("dot in folder, none in name", Compression.base("/s/my.photos/IMG").equals("/s/my.photos/IMG"));
-        check("hidden file keeps its name", Compression.base("/s/x/.jpg").equals("/s/x/.jpg"));
-        check("photos may become HEIC or WebP", Arrays.equals(Compression.extensions(Techniques.PHOTOS), new String[]{"heic", "webp"}));
-        check("screenshots only lossless WebP", Arrays.equals(Compression.extensions(Techniques.SCREENSHOTS), new String[]{"webp"}));
-        check("temp is hidden, same folder", Compression.tempPath("/s/DCIM/Camera/IMG_1.heic").equals("/s/DCIM/Camera/.sp-IMG_1.heic.tmp"));
-        check("only image recommendations", Compression.isCompression(Techniques.PHOTOS) && Compression.isCompression(Techniques.CHAT_IMAGES)
-                && Compression.isCompression(Techniques.SCREENSHOTS) && !Compression.isCompression(Techniques.VIDEOS)
-                && !Compression.isCompression(Techniques.DUPLICATES));
-        check("nouns", Compression.noun(Techniques.PHOTOS, 1).equals("photo") && Compression.noun(Techniques.SCREENSHOTS, 3).equals("screenshots"));
+        check("photo -> heic", CopyPaths.outputPath("/s/DCIM/Camera/IMG_1.jpg", "heic").equals("/s/DCIM/Camera/IMG_1.heic"));
+        check("chat image -> webp", CopyPaths.outputPath("/s/WhatsApp/IMG-2024-WA0001.jpeg", "webp").equals("/s/WhatsApp/IMG-2024-WA0001.webp"));
+        check("dot in folder, none in name", CopyPaths.base("/s/my.photos/IMG").equals("/s/my.photos/IMG"));
+        check("hidden file keeps its name", CopyPaths.base("/s/x/.jpg").equals("/s/x/.jpg"));
+        check("temp is hidden, same folder", CopyPaths.tempPath("/s/DCIM/Camera/IMG_1.heic").equals("/s/DCIM/Camera/.sp-IMG_1.heic.tmp"));
     }
 
-    static Unit photo(String name) {
-        Unit u = Unit.forFile(new FileItem("DCIM/Camera/" + name, "/s/DCIM/Camera/" + name, 4_000_000, 0));
-        u.add(new Option("reencode_photo", Techniques.PHOTOS, 1_800_000, Option.R2, false, "test"));
-        return u;
-    }
-
-    static void targets() {
-        Unit plain = photo("a.jpg"), kept = photo("b.jpg"), dup = photo("c.jpg"), inPlan = photo("d.jpg");
-        Option del = new Option("delete", Techniques.DUPLICATES, 4_000_000, Option.R1, true, "Identical to x");
-        dup.add(del);
-        Unit app = Unit.forCache(new com.storageplanner.core.AppItem("p", "P"));
-        List<Unit> cands = new ArrayList<Unit>(Arrays.asList(plain, kept, dup, inPlan, app));
-        Set<String> keptIds = new HashSet<String>(); keptIds.add(kept.id);
-        Map<Unit, Option> chosen = new HashMap<Unit, Option>();
-        chosen.put(dup, del);
-        chosen.put(inPlan, inPlan.options.get(0));
-        List<Unit> t = Compression.targets(cands, Techniques.PHOTOS, keptIds, chosen);
-        check("not planned: compressed", t.contains(plain));
-        check("in plan: compressed", t.contains(inPlan));
-        check("kept: left out", !t.contains(kept));
-        check("deleted as duplicate: left out", !t.contains(dup));
-        check("apps: left out", !t.contains(app));
-        check("other recommendation: nothing", Compression.targets(cands, Techniques.SCREENSHOTS, keptIds, chosen).isEmpty());
-        check("no candidates", Compression.targets(null, Techniques.PHOTOS, keptIds, chosen).isEmpty());
+    /** The tools keep their own copy of the app's SSIM (so they depend on nothing in the app): both must agree. */
+    static void ssim() {
+        Random r = new Random(7);
+        for (int t = 0; t < 3; t++) {
+            int w = 40 + r.nextInt(60), h = 30 + r.nextInt(60);
+            double[] x = new double[w * h], y = new double[w * h];
+            for (int i = 0; i < x.length; i++) { x[i] = r.nextDouble() * 255; y[i] = Math.max(0, Math.min(255, x[i] + r.nextGaussian() * (5 + 10 * t))); }
+            double a = com.storageplanner.tools.Ssim.ssim(x, y, w, h), b = com.storageplanner.app.Ssim.ssim(x, y, w, h);
+            check("tools SSIM == app SSIM (" + w + "x" + h + ")", a == b);
+        }
     }
 
     /** A JPEG head: SOI, APP0 (JFIF), APP1 (EXIF with orientation and one more tag), then start of scan. */
@@ -145,7 +119,7 @@ public final class CompressionTest {
         w(s, "VP8 ".getBytes()); u32(s, 5, true); w(s, img); s.write(0);
         byte[] simple = s.toByteArray();
         byte[] exif = Exif.minimal("Cam");
-        byte[] out = com.storageplanner.core.WebpMeta.withExif(simple, exif, 1848, 4000);
+        byte[] out = com.storageplanner.tools.WebpMeta.withExif(simple, exif, 1848, 4000);
         check("webp: RIFF size", le32(out, 4) == out.length - 8);
         check("webp: VP8X first, EXIF flag", new String(out, 12, 4).equals("VP8X") && le32(out, 16) == 10 && (out[20] & 0x08) != 0);
         int cw = (out[24] & 255) | (out[25] & 255) << 8 | (out[26] & 255) << 16, ch = (out[27] & 255) | (out[28] & 255) << 8 | (out[29] & 255) << 16;
@@ -155,12 +129,12 @@ public final class CompressionTest {
         check("webp: EXIF chunk holds the TIFF part", new String(out, e, 4).equals("EXIF") && le32(out, e + 4) == exif.length - 6
                 && out[e + 8] == 'I' && out[e + 9] == 'I');
         check("webp: total length", out.length == e + 8 + (exif.length - 6) + ((exif.length - 6) & 1));
-        byte[] again = com.storageplanner.core.WebpMeta.withExif(out, Exif.minimal("Other"), 1848, 4000);
+        byte[] again = com.storageplanner.tools.WebpMeta.withExif(out, Exif.minimal("Other"), 1848, 4000);
         check("webp: second EXIF replaces the first", le32(again, 4) == again.length - 8
                 && new String(again).indexOf("Cam") < 0 && new String(again).indexOf("Other") > 0
                 && new String(again).indexOf("EXIF") == new String(again).lastIndexOf("EXIF"));
         boolean threw = false;
-        try { com.storageplanner.core.WebpMeta.withExif("not webp at all".getBytes(), exif, 1, 1); } catch (IllegalArgumentException x) { threw = true; }
+        try { com.storageplanner.tools.WebpMeta.withExif("not webp at all".getBytes(), exif, 1, 1); } catch (IllegalArgumentException x) { threw = true; }
         check("webp: rejects other files", threw);
     }
 

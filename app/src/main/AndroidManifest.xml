@@ -2,12 +2,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Shared storage (Android 11+: "All files access"). The analysis only reads. Compressing images
-         writes a copy next to each original; originals are removed only after the user confirms. -->
+    <!-- Read-only access to shared storage (Android 11+: "All files access") -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <!-- Android 8-10: save the report to Downloads, write compressed copies, delete confirmed originals -->
+    <!-- Only used to save the report and Lab files to Downloads on Android 8-10 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <!-- App sizes, caches and last-used dates (the user grants it in Settings > Usage access) -->
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -43,11 +42,6 @@
         <!-- Runs the (read-only) analysis of local files; dataSync covers local file processing -->
         <service
             android:name="com.storageplanner.app.AnalysisService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
-        <!-- Compresses images the user chose, in the background; originals are left for the user to remove -->
-        <service
-            android:name="com.storageplanner.app.CompressionService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
         <!-- Read-only, private: lets an app the user picks (Open with / Share) read that one file -->

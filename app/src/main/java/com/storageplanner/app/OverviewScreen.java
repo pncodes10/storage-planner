@@ -51,7 +51,6 @@ public final class OverviewScreen extends Screen {
         content.removeAllViews();
         modeToggle();
         summaryCard();
-        compressionCard();
 
         Ui.add(content, Ui.heading(a, "Recommendations", 20), 24);
         Ui.add(content, Ui.text(a, "Lowest risk first. Tap one to review every file it flags and keep anything you want.", 14, Ui.text2, false), 4);
@@ -98,20 +97,6 @@ public final class OverviewScreen extends Screen {
         row.addView(save, lp); row.addView(share);
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(24);
         content.addView(row, rl);
-    }
-
-    /** While images are being compressed, or originals wait to be moved to the trash: one tap to that screen. */
-    private void compressionCard() {
-        List<Originals.Pair> ps = CompressionState.running ? new ArrayList<Originals.Pair>() : Originals.pending(a);
-        if (!CompressionState.running && ps.isEmpty()) return;
-        String label = CompressionState.running
-                ? "Compressing " + com.storageplanner.core.Compression.noun(CompressionState.technique, 2) + ": " + CompressionState.done + " of " + CompressionState.total
-                : ps.size() + (ps.size() == 1 ? " original is" : " originals are") + " waiting for the trash · frees " + Report.size(Originals.savedBytes(ps));
-        Button b = Ui.button(a, label, false);
-        b.setContentDescription(label + ". Double tap to open.");
-        b.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new CompressScreen(a, null)); } });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(12);
-        content.addView(b, lp);
     }
 
     /** "Your pictures": every category with its count and size, and a search over the text read in pictures. */

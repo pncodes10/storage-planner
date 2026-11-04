@@ -11,6 +11,7 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 
+import com.storageplanner.tools.ImageCompressor;
 import com.storageplanner.core.Report;
 
 import java.io.File;

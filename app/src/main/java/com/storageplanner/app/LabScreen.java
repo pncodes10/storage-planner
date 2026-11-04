@@ -19,6 +19,10 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.storageplanner.tools.CopyPaths;
+import com.storageplanner.tools.Guard;
+import com.storageplanner.tools.HeifEncoder;
+import com.storageplanner.tools.ImageCompressor;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Lab;
 
@@ -305,9 +309,8 @@ public final class LabScreen extends Screen {
 
     // ------------------------------------------------------------------ compression test
     /** "Treat as" decides the kind: screenshots become lossless WebP, everything else HEIC or WebP (chat images like photos). */
-    private static String techniqueFor(Lab.Pic p) {
-        return "screenshot".equals(p.area) ? com.storageplanner.core.Techniques.SCREENSHOTS
-                : "wa_image".equals(p.area) ? com.storageplanner.core.Techniques.CHAT_IMAGES : com.storageplanner.core.Techniques.PHOTOS;
+    private static ImageCompressor.Kind kindFor(Lab.Pic p) {
+        return "screenshot".equals(p.area) ? ImageCompressor.Kind.LOSSLESS : ImageCompressor.Kind.PHOTO;
     }
 
     /**
@@ -317,17 +320,18 @@ public final class LabScreen extends Screen {
      * run would keep and why the others would not be.
      */
     private void compress(final Lab.Pic p, Lab.Out o) throws Exception {
-        String tech = techniqueFor(p);
-        boolean lossless = com.storageplanner.core.Compression.lossless(tech);
-        o.line("Compress " + p.name + " (treated as " + tech + ") to " + (lossless ? "lossless WebP" : "HEIC and WebP, keeping the smallest that passes"));
+        ImageCompressor.Kind kind = kindFor(p);
+        boolean lossless = kind == ImageCompressor.Kind.LOSSLESS;
+        o.line("Compress " + p.name + " (treated as " + p.area + ") with the compression tools (tools/README.md) to "
+                + (lossless ? "lossless WebP" : "HEIC and WebP, keeping the smallest that passes"));
         if (!lossless) o.line("  encoders on this phone:\n" + HeifEncoder.survey().replaceAll("\\s+$", ""));
-        if (!ImageCompressor.available(tech)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(tech)); return; }
-        String stem = new File(com.storageplanner.core.Compression.base("/" + p.name)).getName();
+        if (!ImageCompressor.available(kind)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(kind)); return; }
+        String stem = new File(CopyPaths.base("/" + p.name)).getName();
         File dir = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
                 "StoragePlanner/compressed/" + stem + "-" + new java.text.SimpleDateFormat("HHmmss", Locale.US).format(new java.util.Date()));
         for (int k = 2; dir.exists(); k++) dir = new File(dir.getParentFile(), dir.getName().replaceAll("(-\\d+)?$", "") + "-" + k);
         if (!dir.mkdirs()) throw new Exception("cannot create " + dir);
-        final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), tech, new File(dir, stem).getPath(), new File(a.getCacheDir(), "compress"));
+        final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), kind, new File(dir, stem).getPath(), new File(a.getCacheDir(), "compress"));
         for (String t : r.trace) o.line("  " + t);
         if (!r.ok) { o.line("  not compressed: " + r.skipped + String.format(Locale.US, " (%d ms)", r.ms)); return; }
         final List<Compressed> made = new ArrayList<Compressed>();
@@ -351,7 +355,7 @@ public final class LabScreen extends Screen {
         o.line(String.format(Locale.US, "  %s -> %s (%s) as %s; %d ms", com.storageplanner.core.Report.size(r.before),
                 com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.format, r.ms));
         if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f)",
-                r.ssim, Calibrator.SSIM_MIN, r.psnr, Calibrator.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT));
+                r.ssim, Guard.SSIM_MIN, r.psnr, Guard.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT));
         o.line(r.wouldSkip == null ? "  A real run would keep the " + r.format + " copy." : "  A real run would NOT keep any copy: " + r.wouldSkip + ".");
         o.line("  Saved in Download/StoragePlanner/compressed/" + dir.getName() + "/");
         try { android.media.MediaScannerConnection.scanFile(a, scan.toArray(new String[0]), null, null); } catch (Throwable ignored) {}

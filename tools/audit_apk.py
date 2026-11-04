@@ -50,11 +50,11 @@ launchers = [attr(c, "name") for c in acts
 check("single exported launcher activity", [attr(c, "name") for c in acts] == ["com.storageplanner.app.MainActivity"]
       and launchers == ["com.storageplanner.app.MainActivity"] and a.get_activities() == ["com.storageplanner.app.MainActivity"],
       str(a.get_activities()))
-# the analysis, and (new) image compression the user starts
-SERVICES = ["com.storageplanner.app.AnalysisService", "com.storageplanner.app.CompressionService"]
+# only the analysis (the compression tools have no service: nothing in the app runs them in the background)
+SERVICES = ["com.storageplanner.app.AnalysisService"]
 fgs = [attr(c, "foregroundServiceType") for c in svcs]
 provs = [c for c in app_el if c.tag == "provider"]
-check("exactly the analysis and compression services: non-exported, dataSync; no receivers",
+check("exactly one non-exported dataSync service (the analysis), no receivers",
       sorted(attr(c, "name") for c in svcs) == SERVICES
       and sorted(a.get_services()) == SERVICES
       and all(attr(c, "exported") in ("false", "0") for c in svcs)
@@ -141,12 +141,12 @@ web_users = sorted(set(c.get_name() for c in d.get_classes() for m in c.get_meth
                        for ins in m.get_code().get_bc().get_instructions() if ins.get_name().startswith("invoke") and "Landroid/webkit/WebView;" in ins.get_output()
                        and "getCurrentWebViewPackage" not in ins.get_output()))   # reading the WebView version for the Lab log is allowed
 check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/app/OcrEngine") for n in web_users), ", ".join(web_users))
-# Image compression (new) is the only code that removes or renames files: ImageCompressor deletes its own work
-# files and renames a checked copy into place; MainActivity deletes originals the user confirmed (Android 8-10,
-# no trash there). Anywhere else is a failure.
+# The compression tools (com.storageplanner.tools) are the only code that removes or renames files: ImageCompressor
+# deletes its own work files and renames a checked copy into place. Today only the Algorithm Lab calls them, writing
+# test copies to Download/StoragePlanner/compressed. Originals are never deleted. Anywhere else is a failure.
 ALLOWED = {"deletes / renames files": {
-    "Ljava/io/File;->delete()Z": {"Lcom/storageplanner/app/ImageCompressor;", "Lcom/storageplanner/app/MainActivity;"},
-    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": {"Lcom/storageplanner/app/ImageCompressor;"},
+    "Ljava/io/File;->delete()Z": {"Lcom/storageplanner/tools/ImageCompressor;"},
+    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": {"Lcom/storageplanner/tools/ImageCompressor;"},
 }}
 for k, pat in BAD.items():
     allowed = ALLOWED.get(k, {})
@@ -154,11 +154,8 @@ for k, pat in BAD.items():
             and not (r in allowed and callers.get(r, set()) <= allowed[r])]
     check(f"no code that {k}" + (" (except image compression)" if allowed else ""), not hits,
           "; ".join(r + " from " + ", ".join(sorted(callers.get(r, ()))) for r in hits[:5]))
-trash = sorted(r for r in ext if "MediaStore;->createTrashRequest" in r or "MediaStore;->createDeleteRequest" in r)
-trash_callers = set().union(*[callers[r] for r in trash]) if trash else set()
-check("originals go to the trash only through Android's confirmation, from MainActivity",
-      all("createTrashRequest" in r for r in trash) and trash_callers <= {"Lcom/storageplanner/app/MainActivity;"},
-      "; ".join(trash) + " from " + ", ".join(sorted(trash_callers)))
+trash = sorted(r for r in ext if re.search(r"MediaStore;->create(Trash|Delete|Write)Request", r))
+check("no MediaStore trash / delete / write requests (the app never removes originals)", not trash, "; ".join(trash))
 writes = [r for r in ext if re.search(r"FileOutputStream;-><init>|RandomAccessFile;-><init>", r)]
 report["file writes (expected: report export, compressed copies)"] = {"pass": True, "detail": "; ".join(writes)}
 report["external API calls"] = {"pass": True, "detail": f"{len(ext)} distinct"}

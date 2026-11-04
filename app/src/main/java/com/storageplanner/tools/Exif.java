@@ -1,4 +1,4 @@
-package com.storageplanner.core;
+package com.storageplanner.tools;
 
 import java.util.Arrays;
 
