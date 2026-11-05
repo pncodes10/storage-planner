@@ -1,6 +1,6 @@
 # Storage Planner
 
-An Android app that scans your phone and builds a plan to reach a storage target (by default 70 GB on a 128 GB phone), using the lowest-risk steps first. It runs the same algorithm as the 128 → 70 GB study. It only **reads**: nothing is deleted or changed, and it has no internet permission.
+An Android app that scans your phone and builds a plan to reach a storage target (by default 70 GB on a 128 GB phone), using the lowest-risk steps first. It runs the same algorithm as the 128 → 70 GB study. It only **reads**: nothing is deleted or changed, and it has no internet permission. The only files it writes are the report, the Lab log and the Lab's test copies, all in `Download/StoragePlanner/`.
 
 ## Install
 
@@ -78,6 +78,24 @@ What you can do:
 TalkBack users get Keep / Accept / View actions on each card. Decisions are remembered across scans; see them under "You approved N items" and "You chose to keep N items" on the overview.
 
 Accepting doesn't delete anything. Storage Planner stays read-only: act on approved items with Open with, Show in folder, or an app's settings.
+
+## Tools (for the action taker)
+
+The plan only **decides** what to do. A later phase, the **action taker**, will carry the plan out using
+**tools**: code that changes files. The tools live in their own folder,
+`app/src/main/java/com/storageplanner/tools/`. The planner never calls them.
+
+The first tools compress images, and they are tested on a Galaxy S23 FE:
+- **Photos and chat images** become HEIC or WebP, whichever passes the study's "looks identical" check
+  (SSIM ≥ 0.98, PSNR ≥ 38 dB, no colour shift) and is smallest. EXIF is kept.
+- **Screenshots** become pixel-identical lossless WebP.
+
+Today only the Algorithm Lab uses them (**Compress (test copy)**, see below), and it never touches originals.
+
+**Read [`app/src/main/java/com/storageplanner/tools/README.md`](app/src/main/java/com/storageplanner/tools/README.md)
+before using or changing a tool.** It covers how to call them, what the caller must do (for example, removing
+originals only through Android's trash with the user's confirmation), how they work, and the lessons from
+testing on a phone.
 
 ## Choose which copies to delete (new in 1.5)
 
@@ -270,6 +288,7 @@ building in another photo.
 | Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
+| Compress (test copy) | Compresses the picture with the compression tools ([tools README](app/src/main/java/com/storageplanner/tools/README.md)), with the same checks a real run would use, once per way of saving (each HEIC encoder, and WebP), and shows which copy a real run would keep (★). **Treat as** picks the kind: Screenshot becomes lossless WebP, anything else HEIC or WebP. Logs every quality tried with its worst SSIM, PSNR and colour shift, the size before and after, the time taken, and whether a real run would keep the copy. The copies go to their own folder under `Download/StoragePlanner/compressed/`. Every copy is kept, even ones a real run would throw away, so you can see why. Originals are never touched |
 
 3. **Run on all picked pictures:**
 
@@ -278,10 +297,15 @@ building in another photo.
 | Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
 | Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
 | Exact duplicate check | SHA-256 of each file |
+| Compress all (test copies) | Compress (test copy) for every picked picture |
 
-4. **Log.**
+4. **Compare original vs compressed.** Each test copy gets a **Compare** button under the results. The compare screen has three modes:
+   - **Side by side:** stacked for landscape pictures, zooming together.
+   - **Flip:** one picture at a time at the same zoom and spot. Switching back and forth makes any change jump out.
+   - **Difference:** the change per pixel, amplified 8×, so black means identical. It also gives the average and largest change, and the share of pixels that changed.
+5. **Log.**
    - Every line, with the phone model, Android and WebView versions and the app version, is written to a log in the app's private storage.
-   - **Save log** copies it to `Download/StoragePlanner/lab-log-<time>.txt`, **Share log** sends that copy, and **Clear log** starts a new one.
+   - **Save log** copies it to `Download/StoragePlanner/lab-log-<time>.txt`, **Share log** sends that copy, **Copy log** puts it on the clipboard so you can paste it into a message (a very long log is cut to its newest 200,000 characters, with a note), and **Clear log** starts a new one.
    - Picked pictures are copied into the app's cache (20 slots, reused); the originals are not touched.
 
 The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the scan's numbers. `LabTest` runs every tool on real pictures on the desktop.
@@ -298,8 +322,8 @@ The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the 
 
 The app also contains one private, read-only file provider. It isn't exported, and it only hands one file at a time to an app you pick under Open with or Share, through a temporary read grant.
 
-- **All files access** (`MANAGE_EXTERNAL_STORAGE`; `READ_EXTERNAL_STORAGE` up to Android 12): read photos, videos, downloads and WhatsApp media. Read only.
-- **`WRITE_EXTERNAL_STORAGE`** (Android 8-10 only): save the report to Download.
+- **All files access** (`MANAGE_EXTERNAL_STORAGE`; `READ_EXTERNAL_STORAGE` up to Android 12): read photos, videos, downloads and WhatsApp media. Read only, except the Lab's test copies in `Download/StoragePlanner/`.
+- **`WRITE_EXTERNAL_STORAGE`** (Android 8-10 only): save the report, the Lab log and the Lab's test copies to Download.
 - **Usage access** (`PACKAGE_USAGE_STATS`, optional) and **`QUERY_ALL_PACKAGES`**: app sizes, caches and last-used dates for every installed app.
 - **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** (new in 1.2): run the analysis as a foreground service of type *dataSync* (local file processing) so it is not stopped when you switch apps.
 - **`POST_NOTIFICATIONS`** (new in 1.2, asked on Android 13+): show the progress and "plan is ready" notifications. Optional.
@@ -327,6 +351,8 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 
 **Android Studio:** open this folder, let it sync (AGP 8.5, JDK 17), then **Build → Build APK(s)**. The project has no dependencies beyond the Android framework.
 
+**On GitHub (no setup):** the **Build APK** workflow (`.github/workflows/build-apk.yml`) runs `tools/build_offline.sh` on every push, and on demand from the Actions tab. It runs the image-compression tests first and the APK audit after. Download the APK from the run's **Artifacts**. Android installs a new APK as an update only when it's signed with the same key. The workflow takes that key from two repository secrets (Settings → Secrets and variables → Actions): `SIGNING_KEY_PEM` (contents of `key.pem`) and `SIGNING_CERT_DER_B64` (`base64 -w0 cert.der`). Use the key the released 1.8.1 was signed with, so builds also install over that release. Without the secrets, each APK is signed with a one-off key and installs only after uninstalling the app. Each run's summary shows its certificate fingerprint. The key is never kept in the Actions cache: in a public repository, a fork's pull request could restore it. The Python packages the job installs are pinned by hash in `tools/ci-requirements.txt`, and the APK is uploaded only after it passes the audit.
+
 **Without Android Studio:** `tools/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
 
 ## Layout
@@ -352,8 +378,10 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **Ssim:** matches scikit-image to 1e-14.
   - **MainActivity:** the UI, back stack and its restore after process death.
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
+  - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
+- `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest) and Algorithm Lab (LabTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
@@ -375,4 +403,5 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - The first scan with sorting on takes noticeably longer. Estimated from desktop timings, not measured on a phone: about a quarter of a second per picture, plus one to three seconds for each picture whose text is read.
   - Only English letters are read, so Hindi and other scripts are not.
   - Greeting images are often missed.
+- **The compression tools are tested on one phone only** (Galaxy S23 FE, Android 16). The HEIC writer depends on each phone's encoders. The path through a dedicated HEIC encoder hasn't run on a phone yet. See the [tools README](app/src/main/java/com/storageplanner/tools/README.md).
 - **Cache clearing is manual.** Android doesn't let one app clear another app's cache, so you do it from each app's settings page.

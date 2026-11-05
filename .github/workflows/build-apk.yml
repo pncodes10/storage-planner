@@ -1,0 +1,119 @@
+name: Build APK
+
+# Builds the installable APK on every push (and on demand from the Actions tab),
+# with the same offline script as the released APKs (tools/build_offline.sh), using the Android SDK
+# that comes with GitHub's Ubuntu runners. Download it from the run's "Artifacts" section.
+#
+# Signing: Android only installs a new APK as an update when it is signed with the same key as the installed
+# one. The key comes only from these repository secrets (Settings > Secrets and variables > Actions), which
+# GitHub never hands to pull requests from forks; with the key the released 1.8.1 APK was signed with, builds
+# also install over that release:
+#   SIGNING_KEY_PEM       contents of key.pem
+#   SIGNING_CERT_DER_B64  cert.der as base64 (base64 -w0 cert.der)
+# Without them the APK is signed with a one-off key made for that run and thrown away: it installs only after
+# uninstalling the app. (The key is never kept in the Actions cache: in a public repository any workflow run,
+# including one from a fork's pull request, can restore the default branch's caches.)
+# No pull_request trigger: those runs get no secrets. Pushes to a pull request's branch are built anyway.
+
+on:
+  push:
+    paths: ["app/**", "tools/**", "jvmtest/**", ".github/workflows/build-apk.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python packages (signer, audit)
+        run: |
+          pip install --require-hashes --only-binary=:all: -r tools/ci-requirements.txt
+
+      - name: Core tests (compression tools, plain-Java parts)
+        run: |
+          mkdir -p "$RUNNER_TEMP/jvm"
+          T=app/src/main/java/com/storageplanner/tools
+          javac -encoding UTF-8 -nowarn -d "$RUNNER_TEMP/jvm" \
+            $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
+            $T/Exif.java $T/Extras.java $T/WebpMeta.java $T/CopyPaths.java $T/Ssim.java app/src/main/java/com/storageplanner/app/Ssim.java \
+            jvmtest/com/storageplanner/test/CompressionTest.java
+          java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.CompressionTest
+
+      - name: Android SDK parts
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-34" "platforms;android-29" "build-tools;34.0.0" > /dev/null
+          TC="$RUNNER_TEMP/toolchain"; mkdir -p "$TC"
+          ln -s "$SDK/platforms/android-34/android.jar" "$TC/android-34.jar"
+          ln -s "$SDK/platforms/android-29/android.jar" "$TC/android-29.jar"
+          ln -s "$SDK/build-tools/34.0.0/lib/d8.jar" "$TC/r8.jar"          # d8.jar is the R8 jar (contains D8)
+          ln -s "$SDK/build-tools/34.0.0/aapt2" "$TC/aapt2"
+          ln -s "$JAVA_HOME" "$TC/java17"
+          echo "TOOLCHAIN=$TC" >> "$GITHUB_ENV"
+
+      - name: Signing key
+        env:
+          KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+          CERT_B64: ${{ secrets.SIGNING_CERT_DER_B64 }}
+        run: |
+          KS="$RUNNER_TEMP/keystore"; mkdir -p "$KS"; chmod 700 "$KS"
+          if [ -n "$KEY_PEM" ] && [ -n "$CERT_B64" ]; then
+            printf '%s\n' "$KEY_PEM" > "$KS/key.pem"
+            printf '%s' "$CERT_B64" | base64 -d > "$KS/cert.der"
+            echo "SIGNED=the key from the repository secrets (installs as an update)" >> "$GITHUB_ENV"
+          else
+            # apkbuild.py makes a key in the empty folder; it is gone when the run ends
+            echo "::warning::No SIGNING_KEY_PEM / SIGNING_CERT_DER_B64 secrets: this APK is signed with a one-off key, so the app must be uninstalled before installing it. Add the secrets (see the top of this file) for APKs that install as updates."
+            echo "SIGNED=a one-off key for this run only (uninstall the app before installing; add the signing secrets to fix)" >> "$GITHUB_ENV"
+          fi
+          echo "KEYSTORE_DIR=$KS" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          VC=$(sed -n "s/.*versionCode \([0-9]*\).*/\1/p" app/build.gradle)
+          VN=$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" app/build.gradle)
+          SHA=$(git rev-parse --short HEAD)
+          export VERSION_CODE="$VC" VERSION_NAME="$VN-$SHA"
+          bash tools/build_offline.sh
+          NAME="StoragePlanner-$VN-$SHA.apk"
+          cp build/offline/StoragePlanner.apk "build/offline/$NAME"
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+          {
+            echo "### $NAME"
+            echo "- version $VN-$SHA (code $VC)"
+            echo "- signed with: $SIGNED"
+            echo "- signing certificate SHA-256: \`$(sha256sum "$KEYSTORE_DIR/cert.der" | cut -d' ' -f1)\` (the same for every APK that installs as an update)"
+            echo "- size: $(du -h "build/offline/$NAME" | cut -f1)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Audit the APK
+        run: python3 tools/audit_apk.py "build/offline/$APK_NAME" build/offline/classes
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keystore"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APK_NAME }}
+          path: build/offline/${{ env.APK_NAME }}
+          if-no-files-found: error
+          retention-days: 30

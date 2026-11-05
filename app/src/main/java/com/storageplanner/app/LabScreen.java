@@ -19,6 +19,10 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.storageplanner.tools.CopyPaths;
+import com.storageplanner.tools.Guard;
+import com.storageplanner.tools.HeifEncoder;
+import com.storageplanner.tools.ImageCompressor;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Lab;
 
@@ -53,6 +57,17 @@ public final class LabScreen extends Screen {
     private Button areaBtn;
     private final List<Button> runButtons = new ArrayList<Button>();
     private final StringBuilder shown = new StringBuilder();
+    /** Test copies made with "Compress", newest last: one per way of saving for each picture. */
+    private final List<Compressed> compressed = new ArrayList<Compressed>();
+    private LinearLayout compareBox;
+
+    private static final class Compressed {
+        final Lab.Pic pic; final String path, label, facts; final long before, after; final boolean chosen, skipped;
+        Compressed(Lab.Pic pic, String path, String label, String facts, long before, long after, boolean chosen, boolean skipped) {
+            this.pic = pic; this.path = path; this.label = label; this.facts = facts; this.before = before; this.after = after;
+            this.chosen = chosen; this.skipped = skipped;
+        }
+    }
 
     public LabScreen(MainActivity a) { super(a); }
 
@@ -85,7 +100,9 @@ public final class LabScreen extends Screen {
         Button pick = Ui.button(a, "Pick pictures", true);
         pick.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.pickImages(LabScreen.this); } });
         Button clear = Ui.button(a, "Clear", false);
-        clear.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { pics.clear(); current = 0; showPics(); } });
+        clear.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { pics.clear(); current = 0; compressed.clear(); showCompared(); showPics(); }   // slots are reused by the next picks
+        });
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(0, -2, 1); pl.rightMargin = dp(8);
         pickRow.addView(pick, pl); pickRow.addView(clear, new LinearLayout.LayoutParams(-2, -2));
         add(root, pickRow, 10);
@@ -138,6 +155,7 @@ public final class LabScreen extends Screen {
         addRun("Picture category", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.category(pf(), pic(), System.currentTimeMillis(), o)); } });
         addRun("QR code / barcode", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.codes(pf(), pic(), o); } });
         addRun("Read text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.text(pf(), pic(), System.currentTimeMillis(), o); } });
+        addRun("Compress (test copy)", false, new Job() { public void run(Lab.Out o) throws Exception { compress(pic(), o); } });
         Ui.add(root, Ui.heading(a, "Run on all picked pictures", 17), 14);
         LinearLayout groupButtons = new LinearLayout(a);
         groupButtons.setOrientation(LinearLayout.VERTICAL);
@@ -147,6 +165,9 @@ public final class LabScreen extends Screen {
         addRun("Best shot among them", true, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o)); } });
         addRun("Near-duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.nearDuplicates(pf(), new ArrayList<Lab.Pic>(pics), o); } });
         addRun("Exact duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.exactDuplicates(new ArrayList<Lab.Pic>(pics), o); } });
+        addRun("Compress all (test copies)", false, new Job() {
+            public void run(Lab.Out o) throws Exception { for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) compress(p, o); }
+        });
         buttons = keep;
 
         Ui.add(root, Ui.heading(a, "Results", 17), 14);
@@ -157,6 +178,10 @@ public final class LabScreen extends Screen {
         out.setPadding(dp(10), dp(8), dp(10), dp(8));
         out.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         add(root, out, 6);
+        compareBox = new LinearLayout(a);
+        compareBox.setOrientation(LinearLayout.VERTICAL);
+        add(root, compareBox, 6);
+        showCompared();
 
         Ui.add(root, Ui.heading(a, "Log", 17), 14);
         logInfo = Ui.text(a, "", 13, Ui.text2, false);
@@ -169,10 +194,16 @@ public final class LabScreen extends Screen {
         share.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { saveLog(true); } });
         Button clearLog = Ui.button(a, "Clear log", false);
         clearLog.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { LabLog.clear(a); headerWritten = false; updateLogInfo(); } });
+        Button copy = Ui.button(a, "Copy log", false);
+        copy.setContentDescription("Copy the log to the clipboard, to paste it into a message");
+        copy.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { copyLog(); } });
         LinearLayout.LayoutParams l1 = new LinearLayout.LayoutParams(0, -2, 1); l1.rightMargin = dp(8);
-        LinearLayout.LayoutParams l2 = new LinearLayout.LayoutParams(-2, -2); l2.rightMargin = dp(8);
-        logRow.addView(save, l1); logRow.addView(share, l2); logRow.addView(clearLog, new LinearLayout.LayoutParams(-2, -2));
+        logRow.addView(save, l1); logRow.addView(share, new LinearLayout.LayoutParams(0, -2, 1));
         add(root, logRow, 6);
+        LinearLayout logRow2 = Ui.row(a);
+        LinearLayout.LayoutParams l3 = new LinearLayout.LayoutParams(0, -2, 1); l3.rightMargin = dp(8);
+        logRow2.addView(copy, l3); logRow2.addView(clearLog, new LinearLayout.LayoutParams(0, -2, 1));
+        add(root, logRow2, 6);
         showPics();
         updateLogInfo();
         return sv;
@@ -276,11 +307,151 @@ public final class LabScreen extends Screen {
         });
     }
 
+    // ------------------------------------------------------------------ compression test
+    /** "Treat as" decides the kind: screenshots become lossless WebP, everything else HEIC or WebP (chat images like photos). */
+    private static ImageCompressor.Kind kindFor(Lab.Pic p) {
+        return "screenshot".equals(p.area) ? ImageCompressor.Kind.LOSSLESS : ImageCompressor.Kind.PHOTO;
+    }
+
+    /**
+     * Compresses the Lab's copy of a picture with the same code and checks as a real run, once per way of saving
+     * (each HEIC encoder and WebP), into its own folder Download/StoragePlanner/compressed/<name>-<time>/. Every
+     * copy is kept, even ones a real run would throw away, so they can be compared; the log says which one a real
+     * run would keep and why the others would not be.
+     */
+    private void compress(final Lab.Pic p, Lab.Out o) throws Exception {
+        ImageCompressor.Kind kind = kindFor(p);
+        boolean lossless = kind == ImageCompressor.Kind.LOSSLESS;
+        o.line("Compress " + p.name + " (treated as " + p.area + ") with the compression tools (tools/README.md) to "
+                + (lossless ? "lossless WebP" : "HEIC and WebP, keeping the smallest that passes"));
+        if (!lossless) o.line("  encoders on this phone:\n" + HeifEncoder.survey().replaceAll("\\s+$", ""));
+        if (!ImageCompressor.available(kind)) { o.line("  not possible on this phone: " + ImageCompressor.unavailableReason(kind)); return; }
+        String stem = new File(CopyPaths.base("/" + p.name)).getName();
+        File parent = new File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "StoragePlanner/compressed");
+        String dirName = stem + "-" + new java.text.SimpleDateFormat("HHmmss", Locale.US).format(new java.util.Date());
+        File dir = new File(parent, dirName);
+        for (int k = 2; dir.exists(); k++) dir = new File(parent, dirName + "-" + k);
+        if (!dir.mkdirs()) throw new Exception("cannot create " + dir);
+        final ImageCompressor.Outcome r = ImageCompressor.compressForLab(new File(p.path), kind, new File(dir, stem).getPath(), new File(a.getCacheDir(), "compress"));
+        for (String t : r.trace) o.line("  " + t);
+        if (!r.ok) { o.line("  not compressed: " + r.skipped + String.format(Locale.US, " (%d ms)", r.ms)); return; }
+        final List<Compressed> made = new ArrayList<Compressed>();
+        List<String> scan = new ArrayList<String>();
+        if (r.attempts.isEmpty()) {                                // lossless: one copy
+            made.add(new Compressed(p, r.output, r.format, facts(r.format, r.before, r.after, -1, null, r.identicalPixels, r.wouldSkip),
+                    r.before, r.after, r.wouldSkip == null, r.wouldSkip != null));
+            scan.add(r.output);
+        } else {
+            o.line("  every way, at full size:");
+            for (ImageCompressor.Attempt t : r.attempts) {
+                boolean best = t.path != null && t.path.equals(r.output), chosen = best && r.wouldSkip == null;
+                o.line(String.format(Locale.US, "    %s: quality %d, %s (%s)%s%s", t.label, t.quality, com.storageplanner.core.Report.size(t.bytes),
+                        change(r.before, t.bytes), t.score != null ? String.format(Locale.US, ", worst SSIM %.4f, PSNR %.1f dB", t.score.ssim, t.score.psnr) : "",
+                        chosen ? "  <- a real run keeps this" : best ? "  <- the best copy, but a real run would not compress this picture"
+                                : t.note != null ? "  (" + t.note + ")" : "  (passes, but another way is smaller, or HEIC is not 5% smaller than WebP)"));
+                if (t.path == null) continue;
+                made.add(new Compressed(p, t.path, t.label, facts(t.label, r.before, t.bytes, t.quality, t.score, false, t.note), r.before, t.bytes, chosen, t.note != null));
+                scan.add(t.path);
+            }
+        }
+        o.line(String.format(Locale.US, "  %s -> %s (%s) as %s; %d ms", com.storageplanner.core.Report.size(r.before),
+                com.storageplanner.core.Report.size(r.after), change(r.before, r.after), r.format, r.ms));
+        if (r.pictureBytes > 0 && r.before - r.pictureBytes >= 64 * 1024 && r.after > 0)   // more than a small trailer
+            o.line(String.format(Locale.US, "  the picture itself is %s of the file's %s (the rest is data after it); against the picture alone: %s",
+                    com.storageplanner.core.Report.size(r.pictureBytes), com.storageplanner.core.Report.size(r.before), change(r.pictureBytes, r.after)));
+        if (r.ssim >= 0) o.line(String.format(Locale.US, "  worst checked region: SSIM %.4f (need %.2f), PSNR %.1f dB (need %.0f), colour shift %.1f (max %.0f), colour PSNR %.1f dB (need %.0f)",
+                r.ssim, Guard.SSIM_MIN, r.psnr, Guard.PSNR_MIN, r.shift, ImageCompressor.MAX_COLOR_SHIFT, r.chromaPsnr, ImageCompressor.CHROMA_PSNR_MIN));
+        o.line(r.wouldSkip == null ? "  A real run would keep the " + r.format + " copy." : "  A real run would NOT keep any copy: " + r.wouldSkip + ".");
+        o.line("  Saved in Download/StoragePlanner/compressed/" + dir.getName() + "/");
+        try { android.media.MediaScannerConnection.scanFile(a, scan.toArray(new String[0]), null, null); } catch (Throwable ignored) {}
+        ui.post(new Runnable() {
+            public void run() {
+                for (java.util.Iterator<Compressed> it = compressed.iterator(); it.hasNext(); ) if (it.next().pic == p) it.remove();
+                compressed.addAll(made);
+                showCompared();
+            }
+        });
+    }
+
+    /** One "Compare" button per test copy. */
+    private void showCompared() {
+        if (compareBox == null) return;
+        compareBox.removeAllViews();
+        if (compressed.isEmpty()) return;
+        Ui.add(compareBox, Ui.text(a, "Compare original vs compressed", 15, Ui.text, true), 4);
+        for (int i = compressed.size() - 1; i >= 0; i--) {
+            final Compressed c = compressed.get(i);
+            Button b = Ui.button(a, (c.chosen ? "★ " : "") + c.pic.name + " · " + shortLabel(c.label) + " · " + com.storageplanner.core.Report.size(c.after)
+                    + " (" + change(c.before, c.after) + ")" + (c.skipped ? " · would be skipped" : ""), c.chosen);
+            b.setContentDescription("Compare " + c.pic.name + " with its " + c.label + " copy" + (c.chosen ? ", the one a real run keeps" : "") + ". " + c.facts);
+            b.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    if (!new File(c.path).isFile() || !new File(c.pic.path).isFile()) { a.toast("The picture or its copy is no longer there."); return; }
+                    a.push(new CompressCompareScreen(a, c.pic.path, c.path, c.pic.name + " · " + shortLabel(c.label), c.facts));
+                }
+            });
+            LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(-1, -2); l.topMargin = dp(6);
+            compareBox.addView(b, l);
+        }
+        Ui.add(compareBox, Ui.text(a, "★ = the copy a real run would keep.", 12, Ui.text2, false), 4);
+    }
+
+    /** "HEIC hardware tiles", "HEIC software", "WebP", ... for buttons. */
+    private static String shortLabel(String label) {
+        if (label == null) return "";
+        if (label.startsWith("WebP")) return "WebP";
+        if (label.startsWith("lossless")) return "lossless WebP";
+        if (label.contains("HEIC encoder")) return "HEIC (HEIC encoder)";
+        return label.contains("software") ? "HEIC (software tiles)" : "HEIC (hardware tiles)";
+    }
+
+    /** "55% smaller" or "3% larger". */
+    static String change(long before, long after) {
+        double pct = 100.0 * (before - after) / Math.max(1, before);
+        return pct >= 0 ? String.format(Locale.US, "%.0f%% smaller", pct) : String.format(Locale.US, "%.0f%% larger", -pct);
+    }
+
+    private static String facts(String label, long before, long after, int quality, ImageCompressor.Score sc, boolean identical, String note) {
+        StringBuilder s = new StringBuilder();
+        s.append(label).append(": ").append(com.storageplanner.core.Report.size(before)).append(" → ").append(com.storageplanner.core.Report.size(after))
+         .append(" (").append(change(before, after)).append(")");
+        if (quality >= 0) s.append(" · quality ").append(quality);
+        else s.append(identical ? " · pixel-identical" : " · NOT pixel-identical");
+        if (sc != null) s.append(String.format(Locale.US, " · SSIM %.4f · PSNR %.1f dB · colour shift %.1f · colour PSNR %.1f dB", sc.ssim, sc.psnr, sc.shift, sc.chromaPsnr));
+        if (note != null) s.append(" · a real run would skip it: ").append(note);
+        return s.toString();
+    }
+
     private void setEnabled(boolean on) { for (Button b : runButtons) b.setEnabled(on); }
 
     private void updateLogInfo() {
         long n = LabLog.size(a);
-        logInfo.setText("Log: " + (n < 1024 ? n + " bytes" : (n / 1024) + " KB") + ". Save copies it to Download/StoragePlanner; Share sends that copy.");
+        logInfo.setText("Log: " + (n < 1024 ? n + " bytes" : (n / 1024) + " KB") + ". Save copies it to Download/StoragePlanner; Share sends that copy; Copy puts it on the clipboard.");
+    }
+
+    /** Puts the log on the clipboard (read on the worker thread; a long log is cut to its newest part). */
+    private void copyLog() {
+        worker.execute(new Runnable() {
+            public void run() {
+                final String text = LabLog.text(a, 200_000);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (text.isEmpty()) { a.toast("The log is empty."); return; }
+                        try {
+                            android.content.ClipboardManager cm = (android.content.ClipboardManager) a.getSystemService(android.content.Context.CLIPBOARD_SERVICE);
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("Storage Planner Lab log", text));
+                            boolean cut = text.startsWith("(earlier lines left out");
+                            // Android 13+ shows its own "copied" confirmation; say more only when part was left out
+                            if (cut || android.os.Build.VERSION.SDK_INT < 33)
+                                a.toast(cut ? "Copied the newest part of the log. Save log has all of it." : "Log copied.");
+                            logInfo.announceForAccessibility("Log copied to the clipboard");
+                        } catch (Throwable t) {
+                            a.toast("Could not copy the log: " + t.getMessage());
+                        }
+                    }
+                });
+            }
+        });
     }
 
     private void saveLog(boolean share) {
