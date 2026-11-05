@@ -276,6 +276,14 @@ building in another photo.
 **Algorithm Lab (debug)** is on the start screen and at the bottom of the plan. On the compare screen,
 **Debug this choice in the Algorithm Lab** opens the Lab with every copy of that group already loaded.
 
+**Video compression** (the first button in the Lab) opens the **Video Lab**. Pick one video, then compress test
+copies at **All five levels** or one level (Looks identical, High, Balanced, Space saver, Maximum; see the
+[tools README](app/src/main/java/com/storageplanner/tools/README.md#videos-videocompressor)). It logs the encoder,
+every sample bitrate tried with its worst SSIM / PSNR, the size before and after and the time taken, and says
+whether a real run would keep each copy. **Play copy**, **Play the original** and **Compare worst frame** show the
+result. Copies go to `Download/StoragePlanner/compressed/`; the original is never touched. Keep the app open while
+it runs.
+
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
    **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
 2. **Run on the selected picture:**
