@@ -1,7 +1,8 @@
 # Tools
 
 This folder holds **tools**: code that changes files on the phone, so that a future **action taker** can carry
-out what the plan recommends. Today it holds the image compression tools: HEIC, WebP, and lossless WebP.
+out what the plan recommends. Today it holds the image compression tools (HEIC, WebP, and lossless WebP) and the
+video compression tool (HEVC at five levels, see [Videos](#videos-videocompressor)).
 
 ## Ground rules
 
@@ -14,11 +15,13 @@ out what the plan recommends. Today it holds the image compression tools: HEIC, 
   reused and tested on their own.
 - **Today the only caller is the Algorithm Lab** (`app/LabScreen.java`): **Compress (test copy)** and
   **Compress all (test copies)**. It writes test copies to `Download/StoragePlanner/compressed/<name>-<time>/`.
-  It never touches the original. Original vs compressed is shown by `app/CompressCompareScreen.java`.
+  It never touches the original. Original vs compressed is shown by `app/CompressCompareScreen.java`. Videos:
+  **Video compression (test copies)** in the Lab opens `app/VideoLabScreen.java`, which works the same way.
 - **A tool never deletes or changes an original.** It writes a new file next to it. Removing originals is the
   action taker's job (see [Removing originals](#removing-originals-not-built-yet)).
 - **The APK audit enforces this** (`tools/audit_apk.py`, run by CI):
-  - only `tools/ImageCompressor` may call `File.delete` / `File.renameTo` (on its own work files);
+  - only `tools/ImageCompressor` and `tools/VideoCompressor` may call `File.delete` / `File.renameTo` (on their
+    own work files and samples);
   - there must be no MediaStore trash / delete / write requests anywhere.
   A new tool or caller that needs more must update that allowlist on purpose, and say why.
 
@@ -34,9 +37,15 @@ out what the plan recommends. Today it holds the image compression tools: HEIC, 
 | `Extras.java` | Finds what a JPEG holds that a copy would lose (Motion Photo video, gain map, depth map), so it is not compressed. | no |
 | `WebpMeta.java` | Adds an EXIF chunk to a WebP file (Android's WebP encoder writes none). | no |
 | `CopyPaths.java` | Where a copy goes (`IMG_1.jpg` → `IMG_1.heic` / `.webp`) and its hidden work file. | no |
+| `VideoCompressor.java` | **The entry point for videos.** Makes one checked copy of one video at a `VideoLevel`. | yes |
+| `VideoTranscoder.java` | Re-encodes a video or a stretch of it: `MediaExtractor` → decoder → OpenGL (scaling) → encoder → `MediaMuxer`, audio copied or re-encoded. | yes |
+| `VideoSearch.java` | The decisions: what is refused, the copy's size and frame rate, and the bitrate search over samples. | no |
+| `VideoLevel.java` | The five levels: quality targets, size and frame-rate limits, audio. | no |
+| `Mp4.java` | Reads an MP4's boxes (tracks, user data, trailer, slow-motion marker, dates) and writes the original dates into a copy. | no |
+| `FrameScore.java` | Scores one video frame against the original (SSIM, PSNR, colour PSNR, colour shift). | no |
 
-The plain-Java files are tested on a desktop by `jvmtest/com/storageplanner/test/CompressionTest.java`. CI
-runs it before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
+The plain-Java files are tested on a desktop by `jvmtest/com/storageplanner/test/CompressionTest.java` and
+`VideoTest.java`. CI runs both before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
 
 ## How to use
 
@@ -106,6 +115,77 @@ What the earlier version did, and what to keep:
   - Google Photos and other backup apps will upload the copies again.
   - WhatsApp can't find copies of chat images. Once the originals are gone, those images show as missing
     inside the chats.
+
+## Videos (`VideoCompressor`)
+
+The research behind it (options, measurements, why these choices) is in
+[`docs/video-compression-research.md`](../../../../../../../docs/video-compression-research.md).
+
+```java
+import com.storageplanner.tools.VideoCompressor;
+import com.storageplanner.tools.VideoLevel;
+
+File work = new File(context.getCacheDir(), "video-work");      // samples, deleted as they are scored
+VideoCompressor.Outcome o = VideoCompressor.compress(new File(path), VideoLevel.HIGH, new File(outPath), work);
+if (o.ok) {
+    // o.output == outPath: checked, dates, rotation and location kept; o.before / o.after in bytes
+    // o.search.bitrate, o.search.score (worst frame), o.encoder, o.audio, o.lost (what the copy does not keep)
+} else {
+    // o.skipped: why (nothing was written; the original is untouched). o.trace: every step, for a log.
+}
+```
+
+- `outPath` must not exist (the tool never replaces a file). Pick a name the action taker can rename to the
+  original's name after the original is in the trash, for example `.sp-VID_1.mp4` next to it.
+- **Levels** (`VideoLevel`): each is a quality target for the *worst* checked frame, not a percentage.
+
+  | Level | Size / frame rate | Worst frame must reach | Audio |
+  |---|---|---|---|
+  | 1 Looks identical | kept | SSIM 0.985, PSNR 40 dB at half size | copied |
+  | 2 High | kept | SSIM 0.97, PSNR 37 dB at half size | copied |
+  | 3 Balanced | ≤ 1080p, ≤ 30 fps | SSIM 0.95, PSNR 34 dB | copied |
+  | 4 Space saver | ≤ 720p, ≤ 30 fps | SSIM 0.93, PSNR 32 dB | AAC 96 kbps |
+  | 5 Maximum | ≤ 480p, ≤ 30 fps | SSIM 0.90, PSNR 29 dB | AAC 64 kbps |
+
+  Levels 1–2 compare at half size (sensor grain, which no encoder keeps, averages out there); 3–5 compare at the
+  copy's size, so they measure the encoding, and the smaller size is the level's chosen loss. Every level also
+  needs colour PSNR ≥ its limit and a colour shift ≤ 3. **The thresholds are first guesses: calibrate them in the
+  Video Lab on real phone videos.**
+- **How a copy is made:**
+  1. **Refuse first** (`VideoSearch.refuse`): no video track, unreadable MP4, HDR (PQ, HLG, Dolby Vision, 10-bit
+     HEVC), more than one video track, under a second (these the Lab can't override); slow motion (Android's
+     `com.android.capture.fps` marker) or over 61 fps, a second audio track, any other track (subtitles, sensor
+     data), 64 KB or more after the video (Samsung's `SEFT` trailer).
+  2. **Plan** (`VideoSearch.plan`): the copy's size (even numbers) and frame rate (frames dropped by 1/fps slots,
+     never re-timed), a bitrate range (from the level's bits per pixel; at most 85% of the original's video
+     bitrate, so "already small" videos are skipped without encoding), and where to sample: the whole video up to
+     20 s; otherwise the busiest 2 s (most bytes) plus 2 s at 10/35/60/85%.
+  3. **Search** (`VideoSearch.run`): encode the samples at a bitrate, score 3 frames per sample (after its first
+     half second), up to 4 rounds of a geometric binary search for the lowest bitrate whose worst frame passes.
+  4. **Encode the whole video** at that bitrate + 10% and **verify** it on up to 24 frames spread over the video,
+     none of them a frame the search used. If it fails, try once more at +30%.
+  5. Keep it only if it passes and saves at least 10%. Write the original's dates into `mvhd`/`tkhd`/`mdhd`
+     (`Mp4.writeTimes`) and its last-modified time, then rename the work file into place.
+- **Encoder:** the hardware HEVC encoder (`isHardwareAccelerated`, or not `OMX.google.*`/`c2.android.*` before
+  Android 10), H.264 when there is no HEVC encoder for the size, software only as a last resort. VBR when offered;
+  keyframe every 3 s; `KEY_PRIORITY` 1 (not real time).
+- **Kept:** every frame's own time (variable frame rate), rotation (as a flag, pixels not turned), location
+  (`©xyz`), the creation and modified dates, the audio as it is (levels 1–3). **Not kept:** the file's other user
+  data (Samsung's `smta` and similar boxes: `o.lost` lists them), a small trailer, HDR (refused instead).
+- **Lab:** `compressForLab` makes the copy even when a real run would refuse the video or drop the copy (unless
+  nothing meaningful can be made), and says why in `o.wouldSkip`.
+
+### Testing the video tool
+
+- `jvmtest/.../VideoTest.java` (CI): MP4 reading and date writing on hand-built files, refusals, plans, the
+  search with a fake encoder, frame scores.
+- `jvmtest/.../VideoDesktop.java` (by hand, needs ffmpeg): runs the real `VideoSearch` on real files, with
+  ffmpeg's x265 in a "hardware-like" setting (fastest preset, one-pass VBR, no look-ahead, no B-frames) as the
+  encoder and the same `FrameScore`:
+  `javac -d /tmp/vt app/src/main/java/com/storageplanner/tools/{Mp4,FrameScore,VideoLevel,VideoSearch,Ssim}.java jvmtest/com/storageplanner/test/VideoDesktop.java`
+  then `java -cp /tmp/vt com.storageplanner.test.VideoDesktop OUT_DIR video.mp4 ...`.
+- On the phone: Algorithm Lab → **Video compression (test copies)**. It logs the encoder, its rate modes, every
+  sample's bitrate and scores, and the time taken; **Compare worst frame** shows the frame the check scored worst.
 
 ## How it works
 

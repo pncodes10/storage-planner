@@ -177,6 +177,7 @@ public final class MainActivity extends Activity {
             return f != null ? new ViewerScreen(this, f) : null;
         }
         if (d.equals("lab")) return new LabScreen(this);
+        if (d.equals("videolab")) return new VideoLabScreen(this);
         if (d.startsWith("pics:")) return Session.pictures.containsKey(d.substring(5)) ? PicturesScreen.category(this, d.substring(5)) : null;
         if (d.startsWith("search:")) return PicturesScreen.search(this, d.substring(7));
         if (d.startsWith("compare:")) {
@@ -330,8 +331,28 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private static final int REQ_PICK_VIDEO = 4712;
+    private VideoLabScreen pickingVideo;
+
+    void pickVideo(VideoLabScreen s) {
+        pickingVideo = s;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*");
+        try { startActivityForResult(i, REQ_PICK_VIDEO); }
+        catch (Throwable t) {
+            try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("video/*"), REQ_PICK_VIDEO); }
+            catch (Throwable t2) { toast("No file picker on this phone."); }
+        }
+    }
+
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_PICK_VIDEO) {
+            VideoLabScreen v = pickingVideo;
+            if (v == null && !stack.isEmpty() && top() instanceof VideoLabScreen) v = (VideoLabScreen) top();   // the app was restarted meanwhile
+            pickingVideo = null;
+            if (v != null && res == RESULT_OK && data != null && data.getData() != null) v.picked(data.getData());
+            return;
+        }
         if (req != REQ_PICK || res != RESULT_OK || data == null) return;
         java.util.List<android.net.Uri> uris = new ArrayList<android.net.Uri>();
         if (data.getClipData() != null)

@@ -170,6 +170,12 @@ public final class LabScreen extends Screen {
         });
         buttons = keep;
 
+        Ui.add(root, Ui.heading(a, "Videos", 17), 14);
+        Button videoLab = Ui.button(a, "Video compression (test copies)", false);
+        videoLab.setContentDescription("Open the Video Lab: compress test copies of a video at each level");
+        videoLab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new VideoLabScreen(a)); } });
+        add(root, videoLab, 6);
+
         Ui.add(root, Ui.heading(a, "Results", 17), 14);
         out = Ui.text(a, "Pick a picture and run an algorithm.", 12, Ui.text, false);
         out.setTypeface(Typeface.MONOSPACE);
