@@ -56,6 +56,8 @@ final class VideoTranscoder {
         /** Source time of the copy's time 0 (stretches start at their first drawn frame). */
         long baseUs;
         String audio = "none";
+        /** The decoder's output buffer: size and crop (a 1088-row buffer cropped to 1080 is common), for the Lab. */
+        String decoderOutput;
     }
 
     static Result run(Job j) throws IOException {
@@ -120,6 +122,7 @@ final class VideoTranscoder {
                 }
                 if (!decDone) {
                     int ox = dec.dequeueOutputBuffer(di, TIMEOUT_US);
+                    if (ox == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) r.decoderOutput = describe(dec.getOutputFormat());
                     if (ox >= 0) {
                         long pts = di.presentationTimeUs;
                         boolean draw = di.size > 0 && pts >= j.fromUs && pts < j.toUs && j.plan.keeps(pts);
@@ -171,6 +174,18 @@ final class VideoTranscoder {
         r.ms = System.currentTimeMillis() - t0;
         r.bytes = j.out.length();
         return r;
+    }
+
+    static String describe(MediaFormat f) {
+        StringBuilder s = new StringBuilder();
+        s.append(f.containsKey(MediaFormat.KEY_WIDTH) ? f.getInteger(MediaFormat.KEY_WIDTH) : -1).append('x')
+         .append(f.containsKey(MediaFormat.KEY_HEIGHT) ? f.getInteger(MediaFormat.KEY_HEIGHT) : -1);
+        if (f.containsKey("crop-left") && f.containsKey("crop-bottom"))
+            s.append(" crop ").append(f.getInteger("crop-left")).append(',').append(f.getInteger("crop-top")).append('-')
+             .append(f.getInteger("crop-right")).append(',').append(f.getInteger("crop-bottom"));
+        if (f.containsKey(MediaFormat.KEY_COLOR_RANGE)) s.append(", range ").append(f.getInteger(MediaFormat.KEY_COLOR_RANGE) == MediaFormat.COLOR_RANGE_FULL ? "full" : "limited");
+        if (f.containsKey(MediaFormat.KEY_COLOR_STANDARD)) s.append(", standard ").append(f.getInteger(MediaFormat.KEY_COLOR_STANDARD));
+        return s.toString();
     }
 
     static int track(MediaExtractor x, String prefix) {

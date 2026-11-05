@@ -170,7 +170,11 @@ public final class VideoTest {
         p = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.MAXIMUM, false);
         check("1080p at Maximum -> 854x480 (even)", p.width == 852 || p.width == 854);
         check("sizes are even", p.width % 2 == 0 && p.height % 2 == 0);
-        check("downscaled levels compare at the copy's size", p.compareWidth == p.width && p.compareHeight == p.height);
+        check("480p copy compared at its own size", p.compareWidth == p.width && p.compareHeight == p.height);
+        p = VideoSearch.plan(facts(3840, 2160, 30, 60, 48_000_000), VideoLevel.BALANCED, false);
+        check("1080p copy of 4K compared at half the copy's size", p.compareWidth == 960 && p.compareHeight == 540);
+        p = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.BALANCED, false);
+        check("Balanced 1080p compared at half size, like Looks identical", p.compareWidth == 960 && p.compareHeight == 540);
         p = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.IDENTICAL, false);
         check("Looks identical keeps the size", p.width == 1920 && p.height == 1080);
         check("Looks identical compares 1080p at half size", p.compareWidth == 960 && p.compareHeight == 540);
@@ -287,6 +291,18 @@ public final class VideoTest {
         check("score: identical frames", same.ssim > 0.9999 && same.psnr == 99 && same.shift == 0);
         FrameScore red = FrameScore.of(a, c, w, h);
         check("score: a red cast is a colour shift", red.shift > 9 && !red.passes(VideoLevel.MAXIMUM));
+        // alignment: a copy moved down by one row is found, an aligned one is not
+        int W = 96, H = 72;
+        int[] img = new int[W * H], down = new int[W * H];
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            int v = (int) (128 + 60 * Math.sin(x * 0.7) * Math.cos(y * 0.9));
+            img[y * W + x] = 0xFF000000 | v << 16 | v << 8 | v;
+        }
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) down[y * W + x] = img[Math.max(0, y - 1) * W + x];
+        String al = FrameScore.alignment(img, img, W, H);
+        check("alignment: aligned copy -> (0,0) everywhere", al.contains("top (0,0)") && al.contains("middle (0,0)") && al.contains("bottom (0,0)"));
+        String sh = FrameScore.alignment(img, down, W, H);
+        check("alignment: copy one row down -> (0,1) found", sh.contains("middle (0,1)") && sh.contains("top (0,1)"));
         FrameScore all = new FrameScore();
         all.worst(same, 1000); all.worst(red, 2000);
         check("score: worst kept, and where", all.ssim == red.ssim && all.worstAtUs == 2000 && all.frames == 2);

@@ -99,6 +99,7 @@ public final class VideoCompressor {
             VideoSearch.Outcome s = VideoSearch.run(f, p, e);
             o.search = s;
             o.trace.addAll(s.trace);
+            if (e.decoderOutput != null) o.trace.add("decoder output: " + e.decoderOutput);
             o.audio = e.audio;
             if (s.copy == null) { o.skipped = s.skipped; return o; }
             // dates: MediaMuxer writes "now"; write the original's back, and its modified time
@@ -267,7 +268,7 @@ public final class VideoCompressor {
         final VideoSearch.Facts f;
         final String encoder, mime;
         final float[] location;
-        String audio;
+        String audio, decoderOutput;
         int n;
         final java.util.Map<String, Long> base = new java.util.HashMap<String, Long>();
 
@@ -283,6 +284,7 @@ public final class VideoCompressor {
             j.out = j.whole() ? out : new File(work, "sample-" + (n++) + ".mp4");
             VideoTranscoder.Result r = VideoTranscoder.run(j);
             if (j.whole()) audio = r.audio;
+            if (decoderOutput == null) decoderOutput = r.decoderOutput;
             VideoSearch.Copy c = new VideoSearch.Copy();
             c.path = j.out.getPath(); c.bytes = r.bytes; c.ms = r.ms;
             base.put(c.path, r.baseUs);
@@ -291,6 +293,8 @@ public final class VideoCompressor {
 
         public FrameScore score(VideoSearch.Plan p, VideoSearch.Copy c, long fromUs, long[] sourceUs) throws Exception {
             FrameScore all = new FrameScore();
+            int[] worstA = null, worstB = null;
+            int ww = 0, wh = 0;
             long b = base.containsKey(c.path) ? base.get(c.path) : 0;
             MediaMetadataRetriever a = new MediaMetadataRetriever(), m = new MediaMetadataRetriever();
             try {
@@ -306,8 +310,11 @@ public final class VideoCompressor {
                     int h = w == p.compareWidth ? p.compareHeight : p.compareWidth;
                     int[] px = pixels(x, w, h), py = pixels(y, w, h);
                     x.recycle(); y.recycle();   // frames can be 33 MB each at 4K; free them now
-                    all.worst(FrameScore.of(px, py, w, h), us);
+                    FrameScore one = FrameScore.of(px, py, w, h);
+                    if (worstA == null || one.ssim < all.ssim) { worstA = px; worstB = py; ww = w; wh = h; }
+                    all.worst(one, us);
                 }
+                if (worstA != null) all.note = FrameScore.alignment(worstA, worstB, ww, wh);
             } finally {
                 a.release();
                 m.release();

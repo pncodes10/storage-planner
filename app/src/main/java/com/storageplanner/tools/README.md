@@ -141,14 +141,16 @@ if (o.ok) {
 
   | Level | Size / frame rate | Worst frame must reach | Audio |
   |---|---|---|---|
-  | 1 Looks identical | kept | SSIM 0.985, PSNR 40 dB at half size | copied |
-  | 2 High | kept | SSIM 0.97, PSNR 37 dB at half size | copied |
+  | 1 Looks identical | kept | SSIM 0.985, PSNR 40 dB | copied |
+  | 2 High | kept | SSIM 0.97, PSNR 37 dB | copied |
   | 3 Balanced | ≤ 1080p, ≤ 30 fps | SSIM 0.95, PSNR 34 dB | copied |
   | 4 Space saver | ≤ 720p, ≤ 30 fps | SSIM 0.93, PSNR 32 dB | AAC 96 kbps |
   | 5 Maximum | ≤ 480p, ≤ 30 fps | SSIM 0.90, PSNR 29 dB | AAC 64 kbps |
 
-  Levels 1–2 compare at half size (sensor grain, which no encoder keeps, averages out there); 3–5 compare at the
-  copy's size, so they measure the encoding, and the smaller size is the level's chosen loss. Every level also
+  Every level compares at the copy's size, halved when the copy is above 720p: sensor grain, which no encoder
+  keeps, averages out at half size. (Comparing a 1080p night video at full size kept PSNR at 32.6 dB even at 85% of
+  the original's bitrate, on the S23 FE.) Levels 3–5 compare against the original scaled to the copy's size, so
+  they measure the encoding, and the smaller size is the level's chosen loss. Every level also
   needs colour PSNR ≥ its limit and a colour shift ≤ 3. **The thresholds are first guesses: calibrate them in the
   Video Lab on real phone videos.**
 - **How a copy is made:**
@@ -184,8 +186,11 @@ if (o.ok) {
   encoder and the same `FrameScore`:
   `javac -d /tmp/vt app/src/main/java/com/storageplanner/tools/{Mp4,FrameScore,VideoLevel,VideoSearch,Ssim}.java jvmtest/com/storageplanner/test/VideoDesktop.java`
   then `java -cp /tmp/vt com.storageplanner.test.VideoDesktop OUT_DIR video.mp4 ...`.
-- On the phone: Algorithm Lab → **Video compression (test copies)**. It logs the encoder, its rate modes, every
-  sample's bitrate and scores, and the time taken; **Compare worst frame** shows the frame the check scored worst.
+- On the phone: Algorithm Lab → **Video compression** (the first button). It logs the encoder, its rate modes, every
+  sample's bitrate and scores, the time taken, the decoder's output buffer (size, crop, colour range), and for each
+  worst frame an alignment check: the shift of the copy (±2 px) that matches the original best in the top, middle
+  and bottom third. Anything but `(0,0)` there means the copy is moved or stretched, which no bitrate fixes.
+  **Compare worst frame** shows the frame the check scored worst.
 
 ## How it works
 

@@ -15,6 +15,8 @@ public final class FrameScore {
     /** Source time of the worst frame, microseconds (-1 = not set). */
     public long worstAtUs = -1;
     public int frames;
+    /** Lab: what the worst frame's alignment check found (see {@link #alignment}), or null. */
+    public String note;
 
     public static FrameScore of(int[] a, int[] b, int w, int h) {
         int n = w * h;
@@ -56,7 +58,44 @@ public final class FrameScore {
     }
 
     @Override public String toString() {
-        return String.format(Locale.US, "worst of %d frames: SSIM %.4f, PSNR %.1f dB, colour PSNR %.1f dB, colour shift %.1f", frames, ssim, psnr, chromaPsnr, shift);
+        return String.format(Locale.US, "worst of %d frames: SSIM %.4f, PSNR %.1f dB, colour PSNR %.1f dB, colour shift %.1f", frames, ssim, psnr, chromaPsnr, shift)
+                + (note != null ? " [" + note + "]" : "");
+    }
+
+    /**
+     * Whether the copy sits a pixel or two off the original (a picture moved or stretched by the decoder -> OpenGL path,
+     * which no bitrate fixes): for the top, middle and bottom third, the shift of the copy (-2..2 px each way) that
+     * matches best, and how many dB of brightness PSNR that shift gains over no shift. All "(0,0)" = aligned.
+     */
+    public static String alignment(int[] a, int[] b, int w, int h) {
+        double[] ya = luma(a), yb = luma(b);
+        StringBuilder s = new StringBuilder("best shift");
+        String[] names = {"top", "middle", "bottom"};
+        for (int band = 0; band < 3; band++) {
+            int y0 = Math.max(2, band * h / 3), y1 = Math.min(h - 2, (band + 1) * h / 3);
+            double base = 0, best = Double.MAX_VALUE;
+            int bx = 0, by = 0;
+            for (int dy = -2; dy <= 2; dy++)
+                for (int dx = -2; dx <= 2; dx++) {
+                    double se = 0; long n = 0;
+                    for (int y = y0; y < y1; y++)
+                        for (int x = 2; x < w - 2; x++) {
+                            double d = ya[y * w + x] - yb[(y + dy) * w + x + dx];
+                            se += d * d; n++;
+                        }
+                    double mse = se / Math.max(1, n);
+                    if (dx == 0 && dy == 0) base = mse;
+                    if (mse < best - 1e-9) { best = mse; bx = dx; by = dy; }
+                }
+            s.append(String.format(Locale.US, "%s %s (%d,%d) %+.1f dB", band == 0 ? ":" : ",", names[band], bx, by, psnr(best) - psnr(base)));
+        }
+        return s.toString();
+    }
+
+    private static double[] luma(int[] px) {
+        double[] y = new double[px.length];
+        for (int i = 0; i < px.length; i++) { int p = px[i]; y[i] = 0.299 * ((p >> 16) & 255) + 0.587 * ((p >> 8) & 255) + 0.114 * (p & 255); }
+        return y;
     }
 
 }

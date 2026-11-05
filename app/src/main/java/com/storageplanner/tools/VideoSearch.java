@@ -119,10 +119,12 @@ public final class VideoSearch {
             w = even(w * s); h = even(h * s);
         }
         p.width = even(w); p.height = even(h);
-        if (l.keepsSize()) {
-            double s = shortSide > 720 ? 0.5 : 1.0;
-            p.compareWidth = even(f.width * s); p.compareHeight = even(f.height * s);
-        } else { p.compareWidth = p.width; p.compareHeight = p.height; }
+        // Compare at the copy's size, halved when that is above 720p: sensor grain, which no encoder keeps,
+        // averages out at half size (measured: full-size scores of a grainy video stay low at any bitrate).
+        {
+            double s = Math.min(p.width, p.height) > 720 ? 0.5 : 1.0;
+            p.compareWidth = even(p.width * s); p.compareHeight = even(p.height * s);
+        }
 
         double fps = f.fps();
         p.fps = fps;
