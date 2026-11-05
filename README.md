@@ -97,6 +97,9 @@ before using or changing a tool.** It covers how to call them, what the caller m
 originals only through Android's trash with the user's confirmation), how they work, and the lessons from
 testing on a phone.
 
+Video compression is next. The research, desktop measurements and the proposed five quality levels are in
+[`docs/video-compression-research.md`](docs/video-compression-research.md) (benchmark script: `tools/video_bench.py`).
+
 ## Choose which copies to delete (new in 1.5)
 
 Some cards are about a file that has copies: exact duplicates, near-identical shots of the same moment, or
