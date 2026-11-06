@@ -97,8 +97,10 @@ before using or changing a tool.** It covers how to call them, what the caller m
 originals only through Android's trash with the user's confirmation), how they work, and the lessons from
 testing on a phone.
 
-Video compression is next. The research, desktop measurements and the proposed five quality levels are in
+Video compression: the research, desktop measurements and the five quality levels are in
 [`docs/video-compression-research.md`](docs/video-compression-research.md) (benchmark script: `tools/video_bench.py`).
+Zip archives: `ZipCompressor` puts any files into one checked `.zip` at four levels (see the
+[tools README](app/src/main/java/com/storageplanner/tools/README.md#zip-archives-zipcompressor)).
 
 ## Choose which copies to delete (new in 1.5)
 
@@ -283,6 +285,11 @@ every sample bitrate tried with its worst SSIM / PSNR, the size before and after
 whether a real run would keep each copy. **Play copy**, **Play the original** and **Compare worst frame** show the
 result. Copies go to `Download/StoragePlanner/compressed/`; the original is never touched. Keep the app open while
 it runs.
+
+**Zip compression** (the second button) opens the **Zip Lab**. Pick any files (more than one at a time), then zip
+them at **All four levels** or one (Store only, Fast, Balanced, Maximum). It logs each file's size before and after,
+whether it was compressed or stored as it is, and the archive's total saving and time. **Share this zip** sends an
+archive. Archives go to `Download/StoragePlanner/compressed/zip-<time>/`; the picked files are only read.
 
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
    **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.

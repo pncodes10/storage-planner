@@ -54,10 +54,12 @@ jobs:
           javac -encoding UTF-8 -nowarn -d "$RUNNER_TEMP/jvm" \
             $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
             $T/Exif.java $T/Extras.java $T/WebpMeta.java $T/CopyPaths.java $T/Ssim.java app/src/main/java/com/storageplanner/app/Ssim.java \
-            $T/Mp4.java $T/FrameScore.java $T/VideoLevel.java $T/VideoSearch.java \
-            jvmtest/com/storageplanner/test/CompressionTest.java jvmtest/com/storageplanner/test/VideoTest.java
+            $T/Mp4.java $T/FrameScore.java $T/VideoLevel.java $T/VideoSearch.java $T/ZipCompressor.java \
+            jvmtest/com/storageplanner/test/CompressionTest.java jvmtest/com/storageplanner/test/VideoTest.java \
+            jvmtest/com/storageplanner/test/ZipTest.java
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.CompressionTest
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.VideoTest
+          java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.ZipTest
 
       - name: Android SDK parts
         run: |

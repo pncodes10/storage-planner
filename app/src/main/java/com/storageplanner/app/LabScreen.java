@@ -96,11 +96,15 @@ public final class LabScreen extends Screen {
         Ui.add(root, Ui.text(a, "Debug tool. Pick one or more pictures, then run any algorithm the app uses. Results are the same as in a scan; "
                 + "everything is written to a log you can save and send.", 14, Ui.text2, false), 0);
 
-        // videos have their own screen: no pictures need to be picked for it
+        // videos and zips have their own screens: no pictures need to be picked for them
         Button videoLab = Ui.button(a, "Video compression: pick a video (test copies at 5 levels)", true);
         videoLab.setContentDescription("Open the Video Lab: compress test copies of a video at each of the five levels");
         videoLab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new VideoLabScreen(a)); } });
         add(root, videoLab, 10);
+        Button zipLab = Ui.button(a, "Zip compression: pick files (test archives at 4 levels)", true);
+        zipLab.setContentDescription("Open the Zip Lab: put picked files into a test zip archive at each of the four levels");
+        zipLab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new ZipLabScreen(a)); } });
+        add(root, zipLab, 6);
 
         Ui.add(root, Ui.heading(a, "Pictures", 17), 14);
         LinearLayout pickRow = Ui.row(a);

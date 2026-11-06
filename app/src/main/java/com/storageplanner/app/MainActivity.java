@@ -178,6 +178,7 @@ public final class MainActivity extends Activity {
         }
         if (d.equals("lab")) return new LabScreen(this);
         if (d.equals("videolab")) return new VideoLabScreen(this);
+        if (d.equals("ziplab")) return new ZipLabScreen(this);
         if (d.startsWith("pics:")) return Session.pictures.containsKey(d.substring(5)) ? PicturesScreen.category(this, d.substring(5)) : null;
         if (d.startsWith("search:")) return PicturesScreen.search(this, d.substring(7));
         if (d.startsWith("compare:")) {
@@ -344,8 +345,35 @@ public final class MainActivity extends Activity {
         }
     }
 
+    private static final int REQ_PICK_FILES = 4713;
+    private ZipLabScreen pickingFiles;
+
+    void pickFiles(ZipLabScreen s) {
+        pickingFiles = s;
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        try { startActivityForResult(i, REQ_PICK_FILES); }
+        catch (Throwable t) {
+            try { startActivityForResult(new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+                    .putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true), REQ_PICK_FILES); }
+            catch (Throwable t2) { toast("No file picker on this phone."); }
+        }
+    }
+
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == REQ_PICK_FILES) {
+            ZipLabScreen z = pickingFiles;
+            if (z == null && !stack.isEmpty() && top() instanceof ZipLabScreen) z = (ZipLabScreen) top();   // the app was restarted meanwhile
+            pickingFiles = null;
+            if (z == null || res != RESULT_OK || data == null) return;
+            java.util.List<android.net.Uri> got = new ArrayList<android.net.Uri>();
+            if (data.getClipData() != null)
+                for (int i = 0; i < data.getClipData().getItemCount(); i++) got.add(data.getClipData().getItemAt(i).getUri());
+            else if (data.getData() != null) got.add(data.getData());
+            if (!got.isEmpty()) z.picked(got);
+            return;
+        }
         if (req == REQ_PICK_VIDEO) {
             VideoLabScreen v = pickingVideo;
             if (v == null && !stack.isEmpty() && top() instanceof VideoLabScreen) v = (VideoLabScreen) top();   // the app was restarted meanwhile
