@@ -51,7 +51,7 @@ public final class ZipCompressor {
         public int number() { return ordinal(); }
     }
 
-    /** A file to put into the archive. {@link #open()} may be called more than once (test, CRC, write passes). */
+    /** A file to put into the archive. {@link #open()} is called at most three times: the test, a CRC pass (stored files only), the write. */
     public interface Source {
         /** Path inside the archive, '/' separated (cleaned by {@link #entryName}). */
         String name();
@@ -160,14 +160,48 @@ public final class ZipCompressor {
         return b.length() == 0 ? "file" : b.toString();
     }
 
-    /** {@code name}, or "name (2).ext", "name (3).ext"... when the name is taken (ignoring case, as Windows does). */
-    public static String unique(String name, Set<String> taken) {
-        String n = name;
-        int slash = name.lastIndexOf('/'), dot = name.lastIndexOf('.');
-        String stem = dot > slash + 1 ? name.substring(0, dot) : name, ext = dot > slash + 1 ? name.substring(dot) : "";
-        for (int k = 2; taken.contains(n.toLowerCase(Locale.ROOT)); k++) n = stem + " (" + k + ")" + ext;
-        taken.add(n.toLowerCase(Locale.ROOT));
-        return n;
+    /**
+     * Gives every entry a name that unzips cleanly, ignoring case as Windows does: a second {@code IMG.jpg} becomes
+     * {@code IMG (2).jpg}; a file whose name is already a folder in the archive ({@code a} after {@code a/b.txt})
+     * becomes {@code a (2)}; and a path whose folder is already a file ({@code a/b.txt} after a file {@code a}) goes
+     * under {@code a (2)/}, the same renamed folder for every later path under it.
+     */
+    public static final class Names {
+        private final Set<String> files = new HashSet<String>(), dirs = new HashSet<String>();
+        /** Folder as given (lower case) -> the folder it was renamed to. */
+        private final java.util.Map<String, String> moved = new java.util.HashMap<String, String>();
+
+        /** The name to use for {@code name} (a cleaned {@link #entryName}), and remembers it. */
+        public String add(String name) {
+            String[] parts = name.split("/");
+            StringBuilder dir = new StringBuilder();          // the folder path as it will be written
+            StringBuilder given = new StringBuilder();        // the folder path as it was given
+            for (int i = 0; i < parts.length - 1; i++) {
+                if (given.length() > 0) given.append('/');
+                given.append(parts[i]);
+                String g = key(given.toString());
+                String d = moved.get(g);
+                if (d == null) {
+                    String want = (dir.length() > 0 ? dir + "/" : "") + parts[i];
+                    d = want;
+                    for (int k = 2; files.contains(key(d)); k++) d = want + " (" + k + ")";
+                    moved.put(g, d);
+                    dirs.add(key(d));
+                }
+                dir.setLength(0);
+                dir.append(d);
+            }
+            String leaf = parts[parts.length - 1];
+            int dot = leaf.lastIndexOf('.');
+            String stem = dot > 0 ? leaf.substring(0, dot) : leaf, ext = dot > 0 ? leaf.substring(dot) : "";
+            String base = dir.length() > 0 ? dir + "/" : "";
+            String n = base + leaf;
+            for (int k = 2; files.contains(key(n)) || dirs.contains(key(n)); k++) n = base + stem + " (" + k + ")" + ext;
+            files.add(key(n));
+            return n;
+        }
+
+        private static String key(String s) { return s.toLowerCase(Locale.ROOT); }
     }
 
     // ------------------------------------------------------------------ zip
@@ -191,14 +225,14 @@ public final class ZipCompressor {
 
             tmp = new File(CopyPaths.tempPath(out.getAbsolutePath()));
             if (tmp.exists() && !tmp.delete()) { o.skipped = "cannot remove an old work file " + tmp; tmp = null; return o; }
-            Set<String> taken = new HashSet<String>();
+            Names names = new Names();
             ZipOutputStream z = new ZipOutputStream(new FileOutputStream(tmp));
             try {
                 z.setLevel(level == Level.STORE ? Deflater.NO_COMPRESSION : level.deflate);
                 for (int i = 0; i < sources.size(); i++) {
                     Source s = sources.get(i);
                     if (progress != null && !progress.onFile(i, sources.size(), s.name())) throw new Stop("stopped");
-                    o.entries.add(add(z, s, unique(entryName(s.name()), taken), level, o.trace));
+                    o.entries.add(add(z, s, names.add(entryName(s.name())), level, o.trace));
                 }
             } finally {
                 z.close();
@@ -278,28 +312,28 @@ public final class ZipCompressor {
         return e;
     }
 
-    /** Saving of Deflate at {@code level} on the first and the middle {@link #TEST_BYTES} of the file. */
+    /** Saving of Deflate at {@code level} on the first and the middle {@link #TEST_BYTES} of the file (one open). */
     static double testSaving(Source s, long size, int level) throws IOException {
-        long in = 0, outBytes = 0;
+        long in = 0, outBytes = 0, pos = 0;
         long[] at = size > 2L * TEST_BYTES ? new long[]{0, size / 2} : new long[]{0};
         byte[] buf = new byte[TEST_BYTES], dst = new byte[1 << 16];
-        for (long start : at) {
-            InputStream is = s.open();
-            int got = 0;
-            try {
-                skipFully(is, start);
-                int k;
+        InputStream is = s.open();
+        try {
+            for (long start : at) {
+                skipFully(is, start - pos);
+                int got = 0, k;
                 while (got < buf.length && (k = is.read(buf, got, buf.length - got)) > 0) got += k;
-            } finally { is.close(); }
-            if (got == 0) continue;
-            Deflater d = new Deflater(level, true);
-            try {
-                d.setInput(buf, 0, got);
-                d.finish();
-                while (!d.finished()) outBytes += d.deflate(dst);
-            } finally { d.end(); }
-            in += got;
-        }
+                pos = start + got;
+                if (got == 0) break;
+                Deflater d = new Deflater(level, true);
+                try {
+                    d.setInput(buf, 0, got);
+                    d.finish();
+                    while (!d.finished()) outBytes += d.deflate(dst);
+                } finally { d.end(); }
+                in += got;
+            }
+        } finally { is.close(); }
         return in == 0 ? 1.0 : 1.0 - (double) outBytes / in;     // an empty file "saves" everything: deflate it
     }
 

@@ -12,10 +12,8 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
-import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -36,6 +34,8 @@ public final class ZipTest {
             folder(dir);
             refusals(dir);
             changing(dir);
+            clashes(dir);
+            opens(dir);
         } finally {
             rm(dir);
         }
@@ -92,12 +92,20 @@ public final class ZipTest {
         check("control characters replaced", ZipCompressor.entryName("a\nb\u0000.txt").equals("a_b_.txt"));
         check("empty name gets one", ZipCompressor.entryName("../").equals("file") && ZipCompressor.entryName(null).equals("file"));
         check("unicode kept", ZipCompressor.entryName("फोटो é.jpg").equals("फोटो é.jpg"));
-        Set<String> t = new HashSet<String>();
-        check("first name unique", ZipCompressor.unique("IMG.jpg", t).equals("IMG.jpg"));
-        check("second gets (2)", ZipCompressor.unique("IMG.jpg", t).equals("IMG (2).jpg"));
-        check("case-insensitive duplicate gets (3)", ZipCompressor.unique("img.JPG", t).equals("img (3).JPG"));
-        check("no extension", ZipCompressor.unique("README", t).equals("README") && ZipCompressor.unique("README", t).equals("README (2)"));
-        check("dot in folder is not an extension", ZipCompressor.unique("a.b/c", t).equals("a.b/c") && ZipCompressor.unique("a.b/c", t).equals("a.b/c (2)"));
+        ZipCompressor.Names t = new ZipCompressor.Names();
+        check("first name unique", t.add("IMG.jpg").equals("IMG.jpg"));
+        check("second gets (2)", t.add("IMG.jpg").equals("IMG (2).jpg"));
+        check("case-insensitive duplicate gets (3)", t.add("img.JPG").equals("img (3).JPG"));
+        check("no extension", t.add("README").equals("README") && t.add("README").equals("README (2)"));
+        check("dot in folder is not an extension", t.add("a.b/c").equals("a.b/c") && t.add("a.b/c").equals("a.b/c (2)"));
+        ZipCompressor.Names u = new ZipCompressor.Names();
+        check("file a kept", u.add("a").equals("a"));
+        check("folder clashing with file a goes under a (2)/", u.add("a/b.txt").equals("a (2)/b.txt"));
+        check("later paths under a use the same a (2)/", u.add("A/c/d.txt").equals("a (2)/c/d.txt"));
+        ZipCompressor.Names v = new ZipCompressor.Names();
+        check("folder first: Trip/x", v.add("Trip/x.jpg").equals("Trip/x.jpg"));
+        check("file clashing with folder Trip becomes Trip (2)", v.add("trip").equals("trip (2)"));
+        check("same folder still shared", v.add("Trip/y.jpg").equals("Trip/y.jpg"));
     }
 
     // ------------------------------------------------------------------ round trip
@@ -236,6 +244,53 @@ public final class ZipTest {
         check("size change while deflating is caught: " + o.skipped, !o.ok && o.skipped.contains("changed") && !new File(d, "b.zip").exists() && noWorkFiles(d));
         o = ZipCompressor.zip(Collections.<ZipCompressor.Source>singletonList(new Changing(false)), new File(d, "c.zip"), ZipCompressor.Level.BALANCED);
         check("a stream source (no file) zips: " + o.skipped, o.ok && o.entries.get(0).size == 1000 && !o.entries.get(0).stored);
+    }
+
+    // ------------------------------------------------------------------ file vs folder names
+    static void clashes(File dir) throws Exception {
+        File a = write(new File(dir, "cl/a"), text(500));
+        File b = write(new File(dir, "cl/b.txt"), text(600));
+        File out = new File(dir, "cl.zip");
+        ZipCompressor.Outcome o = ZipCompressor.zip(Arrays.asList(ZipCompressor.file(a), ZipCompressor.file(b, "a/b.txt")), out, ZipCompressor.Level.BALANCED);
+        check("file + same-named folder ok: " + o.skipped, o.ok);
+        List<String> names = new ArrayList<String>();
+        ZipFile z = new ZipFile(out);
+        try { for (ZipEntry e : Collections.list(z.entries())) names.add(e.getName()); } finally { z.close(); }
+        check("no entry is both a file and a folder: " + names, names.equals(Arrays.asList("a", "a (2)/b.txt")));
+        // and it really unzips (into a fresh folder, as any unzip would)
+        File x = new File(dir, "cl-x");
+        x.mkdirs();
+        z = new ZipFile(out);
+        boolean all = true;
+        try {
+            for (ZipEntry e : Collections.list(z.entries())) {
+                File f = new File(x, e.getName());
+                f.getParentFile().mkdirs();
+                if (f.getParentFile().isFile() || f.exists()) { all = false; continue; }
+                write(f, read(z, e));
+            }
+        } finally { z.close(); }
+        check("unzips fully", all && new File(x, "a").isFile() && new File(x, "a (2)/b.txt").isFile());
+    }
+
+    // ------------------------------------------------------------------ how often a source is opened
+    static final class Counting implements ZipCompressor.Source {
+        int opens;
+        final byte[] data;
+        Counting(byte[] d) { data = d; }
+        public String name() { return "c.bin"; }
+        public long size() { return data.length; }
+        public long modified() { return 0; }
+        public InputStream open() { opens++; return new ByteArrayInputStream(data); }
+        public File file() { return null; }
+    }
+
+    static void opens(File dir) throws Exception {
+        Counting stored = new Counting(random(3_000_000, 3)), deflated = new Counting(text(3_000_000));
+        ZipCompressor.Outcome o = ZipCompressor.zip(Arrays.<ZipCompressor.Source>asList(stored, deflated), new File(dir, "op.zip"), ZipCompressor.Level.BALANCED);
+        check("large stored file opened at most 3 times: " + stored.opens, o.ok && o.entries.get(0).stored && stored.opens == 3);
+        check("large deflated file opened twice: " + deflated.opens, !o.entries.get(1).stored && deflated.opens == 2);
+        check("middle sample still tested (text saves a lot)", o.entries.get(1).tested > 0.5);
     }
 
     /** First open (CRC pass) and second (write pass) see different bytes. */

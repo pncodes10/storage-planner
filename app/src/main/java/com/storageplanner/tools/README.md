@@ -272,7 +272,8 @@ if (o.ok) {
 ```
 
 A file that is not on disk (a picked `content://` document, a download) is a `Source` you write yourself: name, size
-(-1 if unknown), modified time (0 if unknown), `open()` (may be called up to three times), and `file()` returning
+(-1 if unknown), modified time (0 if unknown), `open()` (called at most three times: one test pass over the first and middle megabyte, a CRC pass for a file that
+is stored, and the write), and `file()` returning
 null. `ZipLabScreen.UriSource` is one. To stop a long run, pass a `Progress` and return false from `onFile`.
 
 **Levels** (`ZipCompressor.Level`):
@@ -297,8 +298,10 @@ photos and videos does not save space. Use the image and video tools for those.
    would be one of the sources; less free space than the sources' total + 0.2% + 16 MB.
 2. **For each file, in the order given:**
    - **Name:** `entryName` makes the name safe: `/` separators, no leading `/`, drive letter, `.` or `..` parts and no
-     control characters, so unzipping can never write outside its folder. `unique` renames a duplicate (ignoring
-     case, as Windows does) to `name (2).ext`. Names are UTF-8 (the zip's language flag is set), so any language works.
+     control characters, so unzipping can never write outside its folder. `Names` renames clashes, ignoring case
+     as Windows does: a duplicate becomes `name (2).ext`; a file named like a folder already in the archive becomes
+     `a (2)`; paths under a folder named like a file already in the archive go under `a (2)/`. So every entry
+     unzips. Names are UTF-8 (the zip's language flag is set), so any language works.
    - **Test:** Deflate the first and the middle megabyte (`TEST_BYTES`). If that saves under 3%
      (`MIN_ENTRY_SAVING`), the file is **stored** as it is (a CRC pass first, as `STORED` needs it). Otherwise it is
      **deflated** at the level. `Level.STORE` stores every file without testing.
@@ -324,7 +327,7 @@ Empty folders are not added. `folder()` skips symbolic links that lead out of th
 | `ZipCompressor.file(File f)` / `file(File f, String nameInZip)` | A file on disk as a `Source`, named by its file name or by your path. |
 | `ZipCompressor.folder(File dir)` | Every file under `dir`, named `<dir>/<path>`, sorted. |
 | `ZipCompressor.Source` | Interface for anything else: `name()`, `size()`, `modified()`, `open()`, `file()`. |
-| `ZipCompressor.entryName(String)` / `unique(String, Set<String>)` | The name cleaning and duplicate renaming the tool uses. |
+| `ZipCompressor.entryName(String)` / `new Names().add(String)` | The name cleaning, and the renaming of duplicates and file/folder clashes, that the tool uses. |
 | `ZipCompressor.Level` | `STORE`, `FAST`, `BALANCED`, `MAXIMUM`; properties `label`, `deflate` (0-9), `number()` (0-3). |
 | `MIN_ENTRY_SAVING` (0.03), `TEST_BYTES` (1 MB), `SPARE_BYTES` (16 MB) | The limits described above. |
 
@@ -353,7 +356,8 @@ Empty folders are not added. `folder()` skips symbolic links that lead out of th
 ### Testing the zip tool
 
 - `jvmtest/.../ZipTest.java` (CI): every archive is read back with `java.util.zip.ZipFile` and compared byte for
-  byte. It covers names (`..`, `/`, `\`, drive letters, control characters, Unicode, duplicates), the four levels
+  byte. It covers names (`..`, `/`, `\`, drive letters, control characters, Unicode, duplicates, a file and a folder
+  with the same name), how often a source is opened, the four levels
   (random data stored, text deflated, Maximum ≤ Balanced ≤ Fast < Store), times kept, folders and links, refusals,
   stopping, and sources that change while they are zipped. Run it by hand:
   `javac -d /tmp/zt app/src/main/java/com/storageplanner/tools/{CopyPaths,ZipCompressor}.java jvmtest/com/storageplanner/test/ZipTest.java && java -cp /tmp/zt com.storageplanner.test.ZipTest`.
