@@ -1,8 +1,9 @@
 # Tools
 
 This folder holds **tools**: code that changes files on the phone, so that a future **action taker** can carry
-out what the plan recommends. Today it holds the image compression tools (HEIC, WebP, and lossless WebP) and the
-video compression tool (HEVC at five levels, see [Videos](#videos-videocompressor)).
+out what the plan recommends. Today it holds the image compression tools (HEIC, WebP, and lossless WebP), the
+video compression tool (HEVC at five levels, see [Videos](#videos-videocompressor)) and the zip tool (any files into
+one checked `.zip`, see [Zip archives](#zip-archives-zipcompressor)).
 
 ## Ground rules
 
@@ -16,12 +17,13 @@ video compression tool (HEVC at five levels, see [Videos](#videos-videocompresso
 - **Today the only caller is the Algorithm Lab** (`app/LabScreen.java`): **Compress (test copy)** and
   **Compress all (test copies)**. It writes test copies to `Download/StoragePlanner/compressed/<name>-<time>/`.
   It never touches the original. Original vs compressed is shown by `app/CompressCompareScreen.java`. Videos:
-  **Video compression (test copies)** in the Lab opens `app/VideoLabScreen.java`, which works the same way.
+  **Video compression (test copies)** in the Lab opens `app/VideoLabScreen.java`, which works the same way. Zips:
+  **Zip compression** opens `app/ZipLabScreen.java`, which writes test archives to the same folder.
 - **A tool never deletes or changes an original.** It writes a new file next to it. Removing originals is the
   action taker's job (see [Removing originals](#removing-originals-not-built-yet)).
 - **The APK audit enforces this** (`tools/audit_apk.py`, run by CI):
-  - only `tools/ImageCompressor` and `tools/VideoCompressor` may call `File.delete` / `File.renameTo` (on their
-    own work files and samples);
+  - only `tools/ImageCompressor`, `tools/VideoCompressor` and `tools/ZipCompressor` may call `File.delete` /
+    `File.renameTo` (on their own work files and samples);
   - there must be no MediaStore trash / delete / write requests anywhere.
   A new tool or caller that needs more must update that allowlist on purpose, and say why.
 
@@ -43,9 +45,10 @@ video compression tool (HEVC at five levels, see [Videos](#videos-videocompresso
 | `VideoLevel.java` | The five levels: quality targets, size and frame-rate limits, audio. | no |
 | `Mp4.java` | Reads an MP4's boxes (tracks, user data, trailer, slow-motion marker, dates) and writes the original dates into a copy. | no |
 | `FrameScore.java` | Scores one video frame against the original (SSIM, PSNR, colour PSNR, colour shift). | no |
+| `ZipCompressor.java` | **The entry point for zips.** Puts files (or a folder) into one `.zip`, reads every entry back to check it. | no (plain Java) |
 
-The plain-Java files are tested on a desktop by `jvmtest/com/storageplanner/test/CompressionTest.java` and
-`VideoTest.java`. CI runs both before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
+The plain-Java files are tested on a desktop by `jvmtest/com/storageplanner/test/CompressionTest.java`,
+`VideoTest.java` and `ZipTest.java`. CI runs all three before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
 
 ## How to use
 
@@ -244,6 +247,119 @@ starts, bits per pixel per frame), `audioKbps` (0 = copy the audio), `keepsSize(
   worst frame an alignment check: the shift of the copy (±2 px) that matches the original best in the top, middle
   and bottom third. Anything but `(0,0)` there means the copy is moved or stretched, which no bitrate fixes.
   **Compare worst frame** shows the frame the check scored worst.
+
+## Zip archives (`ZipCompressor`)
+
+Puts any files into one standard `.zip` that every phone and computer opens. Plain Java (`java.util.zip` only), so
+it runs the same on a desktop. The originals are only read: the tool never changes, moves or deletes them, and never
+replaces an existing file.
+
+```java
+import com.storageplanner.tools.ZipCompressor;
+
+List<ZipCompressor.Source> files = new ArrayList<>();
+files.add(ZipCompressor.file(new File("/sdcard/Documents/report.pdf")));          // named "report.pdf" in the zip
+files.add(ZipCompressor.file(new File("/sdcard/Notes/todo.txt"), "notes/todo.txt")); // your own path in the zip
+files.addAll(ZipCompressor.folder(new File("/sdcard/Documents/Trip")));             // "Trip/..." for every file under it
+
+ZipCompressor.Outcome o = ZipCompressor.zip(files, new File("/sdcard/Download/archive.zip"), ZipCompressor.Level.BALANCED);
+if (o.ok) {
+    // o.output: the archive, already read back and checked; o.before / o.after in bytes, o.saving() (0..1)
+    // o.entries: per file name in the zip, size, compressed size, CRC-32, stored or deflated
+} else {
+    // o.skipped: why there is no archive (nothing was left behind). o.trace: every step, for a log.
+}
+```
+
+A file that is not on disk (a picked `content://` document, a download) is a `Source` you write yourself: name, size
+(-1 if unknown), modified time (0 if unknown), `open()` (may be called up to three times), and `file()` returning
+null. `ZipLabScreen.UriSource` is one. To stop a long run, pass a `Progress` and return false from `onFile`.
+
+**Levels** (`ZipCompressor.Level`):
+
+| Level | Deflate | When |
+|---|---|---|
+| 0 Store only | none | Bundling files that are already compressed (photos, videos); fastest. |
+| 1 Fast | 1 | Large batches; most of the saving in about half the time of Balanced. |
+| 2 Balanced | 6 | The default: what `zip` and most apps use. |
+| 3 Maximum | 9 | Smallest archive; about 3-4 times slower than Balanced for under 1% more saving. |
+
+Measured on this repository's `app/` folder (240 files, 14.1 MB of code, models and pictures) on a desktop: Store
+14.2 MB (+0.4%, the headers), Fast 6.4 MB (−55%, 0.5 s), Balanced 5.8 MB (−59%, 1.0 s), Maximum 5.8 MB (−59%, 3.6 s).
+
+**What zip saves.** Text, documents (`.txt`, `.csv`, `.json`, `.log`, `.svg`, old `.doc`/`.xls`), databases, logs
+and uncompressed audio or pictures (`.wav`, `.bmp`) usually shrink by half or more. JPEG, HEIC, PNG, WebP, MP4,
+MP3, AAC, APK, and `.docx`/`.xlsx`/most `.pdf` (already zipped or compressed inside) usually shrink by 0-2%: zipping
+photos and videos does not save space. Use the image and video tools for those.
+
+**How an archive is made:**
+1. **Refuse first:** no files; `out` already exists; `out`'s folder is missing; a source that is not a file; `out`
+   would be one of the sources; less free space than the sources' total + 0.2% + 16 MB.
+2. **For each file, in the order given:**
+   - **Name:** `entryName` makes the name safe: `/` separators, no leading `/`, drive letter, `.` or `..` parts and no
+     control characters, so unzipping can never write outside its folder. `unique` renames a duplicate (ignoring
+     case, as Windows does) to `name (2).ext`. Names are UTF-8 (the zip's language flag is set), so any language works.
+   - **Test:** Deflate the first and the middle megabyte (`TEST_BYTES`). If that saves under 3%
+     (`MIN_ENTRY_SAVING`), the file is **stored** as it is (a CRC pass first, as `STORED` needs it). Otherwise it is
+     **deflated** at the level. `Level.STORE` stores every file without testing.
+   - **Write**, keeping the modified time (both the 2-second DOS time and the exact extended time).
+   - **Check the file did not change:** the bytes read must match the size given, and the size and modified time
+     must be the same after as before. Otherwise nothing is kept.
+3. **Verify:** reopen the work file and read every entry back: the same names in the same order, the same length and
+   CRC-32 as was read from each source.
+4. **Rename** the hidden work file (`.sp-<name>.tmp`, next to `out`) to `out`. On any failure or stop, the work file
+   is deleted and no archive is left.
+
+Files over 4 GB and archives of more than 65,535 files are written as Zip64 by `java.util.zip` (Android 7+).
+Empty folders are not added. `folder()` skips symbolic links that lead out of the folder or back into it.
+
+### Zip tool reference
+
+**Public API** (package `com.storageplanner.tools`, plain Java 8, no Android classes, no libraries):
+
+| Class / member | What it is |
+|---|---|
+| `ZipCompressor.zip(List<Source> files, File out, Level level)` | Makes one checked archive at `out`. Blocking: call it off the main thread. |
+| `ZipCompressor.zip(files, out, level, Progress p)` | The same, with `p.onFile(index, count, name)` called before each file; return false to stop (nothing is kept). |
+| `ZipCompressor.file(File f)` / `file(File f, String nameInZip)` | A file on disk as a `Source`, named by its file name or by your path. |
+| `ZipCompressor.folder(File dir)` | Every file under `dir`, named `<dir>/<path>`, sorted. |
+| `ZipCompressor.Source` | Interface for anything else: `name()`, `size()`, `modified()`, `open()`, `file()`. |
+| `ZipCompressor.entryName(String)` / `unique(String, Set<String>)` | The name cleaning and duplicate renaming the tool uses. |
+| `ZipCompressor.Level` | `STORE`, `FAST`, `BALANCED`, `MAXIMUM`; properties `label`, `deflate` (0-9), `number()` (0-3). |
+| `MIN_ENTRY_SAVING` (0.03), `TEST_BYTES` (1 MB), `SPARE_BYTES` (16 MB) | The limits described above. |
+
+**`ZipCompressor.Outcome`**, what a call returns:
+
+| Field | Meaning |
+|---|---|
+| `ok` | The archive is at `output` and every entry was read back and matched. |
+| `output` | Path of the archive (== `out`), or null. |
+| `skipped` | Why there is no archive (a refusal, `stopped`, a file changed, a check failed, an error). Null when `ok`. |
+| `level` | The level asked for. |
+| `before`, `after` | The sources' total size and the archive's size, in bytes. `saving()` = 1 − after/before (negative if bigger). |
+| `ms` | Time taken. |
+| `entries` | One `Entry` per file (empty unless `ok`): `name` in the zip, `source`, `size`, `compressed`, `crc`, `stored`, `tested` (the test's saving, or −1). `stored()` counts the stored ones. |
+| `trace` | Every step, one line each, for a log. |
+
+**What the caller (the action taker) must do:**
+1. Choose the files and where the archive goes; pick a name that does not exist yet.
+2. Run off the main thread, for many or large files in a foreground service (`dataSync`) with a partial wake lock,
+   and use `Progress` to stop when asked.
+3. Scan the archive with `MediaScannerConnection` if it is in shared storage, so file managers show it.
+4. Never remove the originals because they were zipped unless the user asked for that and confirmed it, the archive
+   still exists, and `o.ok` was true. Remove them only through Android's trash
+   ([Removing originals](#removing-originals-not-built-yet)). Tell the user a zip saves little on photos and videos.
+
+### Testing the zip tool
+
+- `jvmtest/.../ZipTest.java` (CI): every archive is read back with `java.util.zip.ZipFile` and compared byte for
+  byte. It covers names (`..`, `/`, `\`, drive letters, control characters, Unicode, duplicates), the four levels
+  (random data stored, text deflated, Maximum ≤ Balanced ≤ Fast < Store), times kept, folders and links, refusals,
+  stopping, and sources that change while they are zipped. Run it by hand:
+  `javac -d /tmp/zt app/src/main/java/com/storageplanner/tools/{CopyPaths,ZipCompressor}.java jvmtest/com/storageplanner/test/ZipTest.java && java -cp /tmp/zt com.storageplanner.test.ZipTest`.
+  The archives also pass `unzip -t` and Python's `zipfile.testzip()`.
+- On the phone: Algorithm Lab → **Zip compression** (the second button) → **Pick files** → **All four levels**. The
+  log shows each file's size before and after and whether it was stored, and each archive's total.
 
 ## How it works
 
