@@ -69,7 +69,13 @@ public final class VideoSearch {
         if (f.hdr != null) return new Refusal("it is an HDR video (" + f.hdr + "); a copy would lose the HDR look", true);
         if (m != null && m.count("vide") > 1) return new Refusal("it has " + m.count("vide") + " video tracks", true);
         if (f.durationUs < 1_000_000L) return new Refusal("it is shorter than a second", true);
-        if (m != null && m.captureFps) return new Refusal("it is a slow-motion video (its capture speed would be lost)", false);
+        if (m != null && m.captureFps) {
+            // Samsung writes the capture speed in every video; only a speed well above the playback rate is slow motion
+            double cap = m.captureFpsValue;
+            if (Double.isNaN(cap)) return new Refusal("it may be a slow-motion video (its capture speed could not be read)", false);
+            if (cap > f.fps() * 1.5)
+                return new Refusal(String.format(Locale.US, "it is a slow-motion video (captured at %.0f fps, played at %.0f), and a copy would lose that", cap, f.fps()), false);
+        }
         if (f.fps() > MAX_SOURCE_FPS) return new Refusal(String.format(Locale.US, "it has %.0f frames a second (slow motion or high-speed video)", f.fps()), false);
         if (m != null) {
             if (m.count("soun") > 1) return new Refusal("it has " + m.count("soun") + " audio tracks, and a copy keeps one", false);

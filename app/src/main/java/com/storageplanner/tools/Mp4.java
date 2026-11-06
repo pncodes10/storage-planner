@@ -43,8 +43,13 @@ public final class Mp4 {
         public long trailerBytes;
         /** The file ends with Samsung's "SEFT" trailer signature. */
         public boolean samsungTrailer;
-        /** Android's slow-motion marker (com.android.capture.fps) is in the metadata. */
+        /**
+         * Android's capture-speed key (com.android.capture.fps) is in the metadata. Samsung writes it in ordinary
+         * videos too (its value is then the playback rate), so the value decides whether it is slow motion.
+         */
         public boolean captureFps;
+        /** Its value in frames per second (NaN when the key is missing or its value could not be read). */
+        public double captureFpsValue = Double.NaN;
         /** Set when the file is not a readable MP4; everything else may be incomplete. */
         public String problem;
 
@@ -114,6 +119,7 @@ public final class Mp4 {
 
     private static void moov(byte[] b, Info info) {
         info.captureFps = indexOf(b, "com.android.capture.fps".getBytes(StandardCharsets.ISO_8859_1)) >= 0;
+        if (info.captureFps) info.captureFpsValue = metaValue(b, 0, b.length, "com.android.capture.fps", 0);
         for (int p = 0; p + 8 <= b.length; ) {
             int size = box(b, p);
             if (size <= 0) break;
@@ -147,6 +153,85 @@ public final class Mp4 {
             p += size;
         }
         return t;
+    }
+
+    /**
+     * The number stored for a key in an Apple-style metadata box (meta: hdlr 'mdta', keys, ilst), searched in moov,
+     * its udta and their meta boxes. NaN when not found. Values: float32 (type 23), float64 (24), big-endian
+     * integers (21, 22, 65-75) or a number written as text (1).
+     */
+    static double metaValue(byte[] b, int from, int to, String key, int depth) {
+        if (depth > 4) return Double.NaN;
+        for (int p = from; p + 8 <= to; ) {
+            int size = box(b, p);
+            if (size <= 0 || p + size > to) break;
+            String t = type(b, p + 4);
+            if (t.equals("meta")) {
+                int c = p + 8;
+                // ISO meta is a full box (4 bytes of version and flags); QuickTime's is not
+                if (c + 12 <= p + size && u32(b, c) == 0 && plausible(type(b, c + 8))) c += 4;
+                double v = keys(b, c, p + size, key);
+                if (!Double.isNaN(v)) return v;
+            } else if (t.equals("udta") || t.equals("trak")) {
+                double v = metaValue(b, p + 8, p + size, key, depth + 1);
+                if (!Double.isNaN(v)) return v;
+            }
+            p += size;
+        }
+        return Double.NaN;
+    }
+
+    private static double keys(byte[] b, int from, int to, String key) {
+        int index = -1;
+        for (int p = from; p + 8 <= to; ) {
+            int size = box(b, p);
+            if (size <= 0 || p + size > to) break;
+            String t = type(b, p + 4);
+            if (t.equals("keys") && p + 16 <= p + size) {
+                long n = u32(b, p + 12);
+                int q = p + 16;
+                for (int i = 1; i <= n && q + 8 <= p + size; i++) {
+                    int ks = (int) u32(b, q);
+                    if (ks < 8 || q + ks > p + size) break;
+                    if (new String(b, q + 8, ks - 8, StandardCharsets.ISO_8859_1).equals(key)) index = i;
+                    q += ks;
+                }
+            } else if (t.equals("ilst") && index > 0) {
+                for (int q = p + 8; q + 8 <= p + size; ) {
+                    int is = box(b, q);
+                    if (is <= 0 || q + is > p + size) break;
+                    if (u32(b, q + 4) == index) {
+                        for (int d = q + 8; d + 16 <= q + is; ) {
+                            int ds = box(b, d);
+                            if (ds <= 0 || d + ds > q + is) break;
+                            if (type(b, d + 4).equals("data")) return number(b, d + 16, ds - 16, (int) (u32(b, d + 8) & 0xFFFFFF));
+                            d += ds;
+                        }
+                    }
+                    q += is;
+                }
+            }
+            p += size;
+        }
+        return Double.NaN;
+    }
+
+    private static double number(byte[] b, int p, int n, int type) {
+        if (n <= 0 || p + n > b.length) return Double.NaN;
+        if (type == 23 && n == 4) return Float.intBitsToFloat((int) u32(b, p));
+        if (type == 24 && n == 8) return Double.longBitsToDouble(u64(b, p));
+        if (type == 21 || type == 22 || (type >= 65 && type <= 75)) {
+            if (n > 8) return Double.NaN;
+            long v = 0;
+            for (int i = 0; i < n; i++) v = (v << 8) | (b[p + i] & 0xFF);
+            if (type == 21 && n < 8 && (b[p] & 0x80) != 0) v -= 1L << (8 * n);
+            return v;
+        }
+        if (type == 1) {
+            try { return Double.parseDouble(new String(b, p, n, StandardCharsets.UTF_8).trim()); }
+            catch (NumberFormatException e) { return Double.NaN; }
+        }
+        return Double.NaN;
     }
 
     /** Creation and modification time of a full box (mvhd, tkhd, mdhd) whose body starts at p. */

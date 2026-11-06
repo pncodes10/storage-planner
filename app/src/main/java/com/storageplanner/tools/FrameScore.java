@@ -63,34 +63,47 @@ public final class FrameScore {
     }
 
     /**
-     * Whether the copy sits a pixel or two off the original (a picture moved or stretched by the decoder -> OpenGL path,
-     * which no bitrate fixes): for the top, middle and bottom third, the shift of the copy (-2..2 px each way) that
-     * matches best, and how many dB of brightness PSNR that shift gains over no shift. All "(0,0)" = aligned.
+     * Whether the copy sits off the original (a picture moved or stretched on the way through the decoder and OpenGL,
+     * which no bitrate fixes): for the top, middle and bottom third, the shift of the copy (-2..2 px each way, in
+     * half pixels) that matches best, and how many dB of brightness PSNR it gains over no shift. All "(0,0)" = aligned.
+     * A stretch shows as opposite shifts at the top and bottom.
      */
     public static String alignment(int[] a, int[] b, int w, int h) {
         double[] ya = luma(a), yb = luma(b);
         StringBuilder s = new StringBuilder("best shift");
         String[] names = {"top", "middle", "bottom"};
         for (int band = 0; band < 3; band++) {
-            int y0 = Math.max(2, band * h / 3), y1 = Math.min(h - 2, (band + 1) * h / 3);
+            int y0 = Math.max(3, band * h / 3), y1 = Math.min(h - 3, (band + 1) * h / 3);
             double base = 0, best = Double.MAX_VALUE;
-            int bx = 0, by = 0;
-            for (int dy = -2; dy <= 2; dy++)
-                for (int dx = -2; dx <= 2; dx++) {
-                    double se = 0; long n = 0;
-                    for (int y = y0; y < y1; y++)
-                        for (int x = 2; x < w - 2; x++) {
-                            double d = ya[y * w + x] - yb[(y + dy) * w + x + dx];
+            double bx = 0, by = 0;
+            for (int iy = -4; iy <= 4; iy++)
+                for (int ix = -4; ix <= 4; ix++) {
+                    double dx = ix / 2.0, dy = iy / 2.0, se = 0;
+                    long n = 0;
+                    for (int y = y0; y < y1; y += 2)              // every other row: enough to rank the shifts
+                        for (int x = 3; x < w - 3; x++) {
+                            double d = ya[y * w + x] - sample(yb, w, x + dx, y + dy);
                             se += d * d; n++;
                         }
                     double mse = se / Math.max(1, n);
-                    if (dx == 0 && dy == 0) base = mse;
+                    if (ix == 0 && iy == 0) base = mse;
                     if (mse < best - 1e-9) { best = mse; bx = dx; by = dy; }
                 }
-            s.append(String.format(Locale.US, "%s %s (%d,%d) %+.1f dB", band == 0 ? ":" : ",", names[band], bx, by, psnr(best) - psnr(base)));
+            s.append(String.format(Locale.US, "%s %s (%s,%s) %+.1f dB", band == 0 ? ":" : ",", names[band], num(bx), num(by), psnr(best) - psnr(base)));
         }
         return s.toString();
     }
+
+    /** Bilinear sample at a half-pixel position. */
+    private static double sample(double[] y, int w, double x, double yy) {
+        int x0 = (int) Math.floor(x), y0 = (int) Math.floor(yy);
+        double fx = x - x0, fy = yy - y0;
+        double a = y[y0 * w + x0], b = fx > 0 ? y[y0 * w + x0 + 1] : a;
+        double c = fy > 0 ? y[(y0 + 1) * w + x0] : a, d = fx > 0 && fy > 0 ? y[(y0 + 1) * w + x0 + 1] : fy > 0 ? c : b;
+        return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy;
+    }
+
+    private static String num(double v) { return v == Math.rint(v) ? String.valueOf((int) v) : String.valueOf(v); }
 
     private static double[] luma(int[] px) {
         double[] y = new double[px.length];

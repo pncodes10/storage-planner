@@ -106,7 +106,8 @@ final class VideoTranscoder {
             r.baseUs = j.whole() ? 0 : -1;
             long feedUntil = j.toUs == Long.MAX_VALUE ? Long.MAX_VALUE : j.toUs + 1_000_000L;   // decode order runs ahead of display order
             MediaCodec.BufferInfo di = new MediaCodec.BufferInfo(), eo = new MediaCodec.BufferInfo();
-            boolean inDone = false, decDone = false, encDone = false;
+            boolean inDone = false, decDone = false, encDone = false, trimNoted = false;
+            Trim trim = null;
             int vt = -1, at = -1;
             long lastVideoUs = 0;
             while (!encDone) {
@@ -122,7 +123,11 @@ final class VideoTranscoder {
                 }
                 if (!decDone) {
                     int ox = dec.dequeueOutputBuffer(di, TIMEOUT_US);
-                    if (ox == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) r.decoderOutput = describe(dec.getOutputFormat());
+                    if (ox == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                        MediaFormat of = dec.getOutputFormat();
+                        r.decoderOutput = describe(of);
+                        trim = Trim.of(of);
+                    }
                     if (ox >= 0) {
                         long pts = di.presentationTimeUs;
                         boolean draw = di.size > 0 && pts >= j.fromUs && pts < j.toUs && j.plan.keeps(pts);
@@ -130,7 +135,9 @@ final class VideoTranscoder {
                         if (draw) {
                             frames.await();
                             if (r.baseUs < 0) r.baseUs = pts;
-                            gl.draw(frames.texture());
+                            float[] st = frames.texture();
+                            if (trim != null && trim.undo(st) && !trimNoted) { r.decoderOutput += ", texture trim undone (" + trim + ")"; trimNoted = true; }
+                            gl.draw(st);
                             gl.present((pts - r.baseUs) * 1000L);
                             r.frames++;
                         }
@@ -174,6 +181,53 @@ final class VideoTranscoder {
         r.ms = System.currentTimeMillis() - t0;
         r.bytes = j.out.length();
         return r;
+    }
+
+    /**
+     * Android's SurfaceTexture, when the decoder's buffer is larger than the picture (1920x1088 holding 1920x1080),
+     * pulls the texture coordinates in by a texel on each cropped side so that filtering never reads the padding
+     * (GLConsumer's "shrink"). Drawn at the picture's size, that stretches it by 2 px: the copy sits up to a pixel off
+     * the original at the edges, which caps its PSNR at any bitrate (measured on the S23 FE: 34.2 dB at 6-14 Mbps).
+     * This puts the exact crop back. It only changes a matrix whose scale shows the trim (0.25-1.25 texels a side),
+     * so a phone that does not trim is left alone.
+     */
+    static final class Trim {
+        final int bufW, bufH, cropW, cropH;
+        float doneX, doneY;
+        Trim(int bufW, int bufH, int cropW, int cropH) { this.bufW = bufW; this.bufH = bufH; this.cropW = cropW; this.cropH = cropH; }
+
+        static Trim of(MediaFormat f) {
+            if (!f.containsKey(MediaFormat.KEY_WIDTH) || !f.containsKey(MediaFormat.KEY_HEIGHT) || !f.containsKey("crop-right") || !f.containsKey("crop-bottom")) return null;
+            int bw = f.getInteger(MediaFormat.KEY_WIDTH), bh = f.getInteger(MediaFormat.KEY_HEIGHT);
+            int cw = f.getInteger("crop-right") - (f.containsKey("crop-left") ? f.getInteger("crop-left") : 0) + 1;
+            int ch = f.getInteger("crop-bottom") - (f.containsKey("crop-top") ? f.getInteger("crop-top") : 0) + 1;
+            if (cw >= bw && ch >= bh) return null;
+            return new Trim(bw, bh, cw, ch);
+        }
+
+        /** Corrects a SurfaceTexture matrix in place; true when it changed something. */
+        boolean undo(float[] m) {
+            if (Math.abs(m[1]) > 1e-6 || Math.abs(m[4]) > 1e-6) return false;   // rotated: leave it
+            boolean x = fix(m, 0, 12, bufW, cropW, true), y = fix(m, 5, 13, bufH, cropH, false);
+            return x || y;
+        }
+
+        private boolean fix(float[] m, int scale, int offset, int buf, int crop, boolean isX) {
+            if (crop >= buf) return false;
+            double s = Math.abs(m[scale]) * buf;            // texels the picture spans now
+            double trimmed = (crop - s) / 2;                // texels taken off each side
+            if (trimmed < 0.25 || trimmed > 1.25) return false;
+            double centre = m[offset] + m[scale] * 0.5;
+            float ns = (float) Math.copySign((double) crop / buf, m[scale]);
+            m[scale] = ns;
+            m[offset] = (float) (centre - ns * 0.5);
+            if (isX) doneX = (float) trimmed; else doneY = (float) trimmed;
+            return true;
+        }
+
+        @Override public String toString() {
+            return String.format(java.util.Locale.US, "%dx%d in %dx%d, %.1f / %.1f texels a side", cropW, cropH, bufW, bufH, doneX, doneY);
+        }
     }
 
     static String describe(MediaFormat f) {

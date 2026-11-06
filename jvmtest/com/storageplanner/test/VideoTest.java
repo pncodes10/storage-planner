@@ -61,6 +61,32 @@ public final class VideoTest {
         return box("trak", timed("tkhd", version, created, created), box("mdia", timed("mdhd", version, created, created), hdlr(handler)));
     }
 
+    /** moov/meta (QuickTime) or moov/udta/meta (ISO, with version and flags) holding com.android.capture.fps = fps. */
+    static byte[] captureMeta(float fps, boolean iso) {
+        byte[] name = "com.android.capture.fps".getBytes(StandardCharsets.ISO_8859_1);
+        ByteArrayOutputStream k = new ByteArrayOutputStream();
+        put32(k, 0); put32(k, 2);                                  // version/flags, 2 keys
+        byte[] other = "com.android.version".getBytes(StandardCharsets.ISO_8859_1);
+        put32(k, 8 + other.length); k.write('m'); k.write('d'); k.write('t'); k.write('a'); k.write(other, 0, other.length);
+        put32(k, 8 + name.length); k.write('m'); k.write('d'); k.write('t'); k.write('a'); k.write(name, 0, name.length);
+        ByteArrayOutputStream d = new ByteArrayOutputStream();
+        put32(d, 23); put32(d, 0); put32(d, Float.floatToIntBits(fps));   // type float32, locale, value
+        ByteArrayOutputStream d1 = new ByteArrayOutputStream();
+        put32(d1, 1); put32(d1, 0); d1.write('1'); d1.write('4');
+        byte[] item1 = box("\0\0\0\1", box("data", d1.toByteArray()));
+        byte[] item2 = box("\0\0\0\2", box("data", d.toByteArray()));
+        byte[] hd = new byte[24];
+        System.arraycopy("mdta".getBytes(StandardCharsets.ISO_8859_1), 0, hd, 8, 4);
+        byte[] body = concat(box("hdlr", hd), box("keys", k.toByteArray()), box("ilst", item1, item2));
+        return iso ? box("udta", box("meta", new byte[4], body)) : box("meta", body);
+    }
+
+    static byte[] concat(byte[]... parts) {
+        ByteArrayOutputStream b = new ByteArrayOutputStream();
+        for (byte[] p : parts) b.write(p, 0, p.length);
+        return b.toByteArray();
+    }
+
     static void put32(ByteArrayOutputStream b, long v) { b.write((int) (v >>> 24)); b.write((int) (v >>> 16)); b.write((int) (v >>> 8)); b.write((int) v); }
     static void put64(ByteArrayOutputStream b, long v) { put32(b, v >>> 32); put32(b, v); }
 
@@ -111,9 +137,15 @@ public final class VideoTest {
         byte[] small = new byte[300]; small[0] = 7;
         check("trailer: small data counted", Mp4.read(file(ftyp, moov, mdat, small)).trailerBytes == 1);
 
-        // slow motion marker, broken files
-        byte[] keys = box("meta", "....com.android.capture.fps....".getBytes(StandardCharsets.ISO_8859_1));
-        check("slow motion marker found", Mp4.read(file(ftyp, box("moov", timed("mvhd", 0, t, t), trak("vide", 0, t), keys), mdat)).captureFps);
+        // capture speed: the key with its value (QuickTime meta: hdlr, keys, ilst), as Android and Samsung write it
+        Mp4.Info normal = Mp4.read(file(ftyp, box("moov", timed("mvhd", 0, t, t), trak("vide", 0, t), captureMeta(30f, false)), mdat));
+        check("capture speed key found", normal.captureFps);
+        check("capture speed 30 read (float)", Math.abs(normal.captureFpsValue - 30) < 1e-6);
+        Mp4.Info slowMo = Mp4.read(file(ftyp, box("moov", timed("mvhd", 0, t, t), trak("vide", 0, t), captureMeta(120f, true)), mdat));
+        check("capture speed 120 read (ISO meta in udta)", Math.abs(slowMo.captureFpsValue - 120) < 1e-6);
+        byte[] bare = box("meta", "....com.android.capture.fps....".getBytes(StandardCharsets.ISO_8859_1));
+        Mp4.Info unread = Mp4.read(file(ftyp, box("moov", timed("mvhd", 0, t, t), trak("vide", 0, t), bare), mdat));
+        check("capture speed key without a readable value: found, value unknown", unread.captureFps && Double.isNaN(unread.captureFpsValue));
         check("no moov: a problem", Mp4.read(file(ftyp, mdat)).problem != null);
         byte[] cut = new byte[moov.length - 30];
         System.arraycopy(moov, 0, cut, 0, cut.length);
@@ -144,8 +176,12 @@ public final class VideoTest {
         check("HDR refused, hard", VideoSearch.refuse(hdr) != null && VideoSearch.refuse(hdr).hard);
         check("120 fps refused", VideoSearch.refuse(facts(1920, 1080, 120, 10, 40_000_000)) != null);
         check("60 fps accepted", VideoSearch.refuse(facts(1920, 1080, 59.94, 10, 27_000_000)) == null);
-        VideoSearch.Facts slow = facts(1920, 1080, 30, 10, 17_000_000); slow.mp4.captureFps = true;
-        check("slow-motion marker refused", VideoSearch.refuse(slow) != null && VideoSearch.refuse(slow).why.contains("slow-motion"));
+        VideoSearch.Facts slow = facts(1920, 1080, 30, 10, 17_000_000); slow.mp4.captureFps = true; slow.mp4.captureFpsValue = 120;
+        check("captured at 120, played at 30: refused", VideoSearch.refuse(slow) != null && VideoSearch.refuse(slow).why.contains("slow-motion"));
+        VideoSearch.Facts samsung = facts(1920, 1080, 29.98, 10, 17_000_000); samsung.mp4.captureFps = true; samsung.mp4.captureFpsValue = 30;
+        check("Samsung's capture speed 30 on a 30 fps video: accepted", VideoSearch.refuse(samsung) == null);
+        VideoSearch.Facts unknown = facts(1920, 1080, 30, 10, 17_000_000); unknown.mp4.captureFps = true;
+        check("capture speed unreadable: refused to be safe", VideoSearch.refuse(unknown) != null);
         VideoSearch.Facts meta = facts(1920, 1080, 30, 10, 17_000_000);
         Mp4.Track m = new Mp4.Track(); m.handler = "meta"; meta.mp4.tracks.add(m);
         check("extra data track refused", VideoSearch.refuse(meta) != null && VideoSearch.refuse(meta).why.contains("'meta'"));
@@ -303,6 +339,13 @@ public final class VideoTest {
         check("alignment: aligned copy -> (0,0) everywhere", al.contains("top (0,0)") && al.contains("middle (0,0)") && al.contains("bottom (0,0)"));
         String sh = FrameScore.alignment(img, down, W, H);
         check("alignment: copy one row down -> (0,1) found", sh.contains("middle (0,1)") && sh.contains("top (0,1)"));
+        int[] half = new int[W * H];
+        for (int y = 0; y < H; y++) for (int x = 0; x < W; x++) {
+            int v = ((img[Math.max(0, y - 1) * W + x] & 255) + (img[y * W + x] & 255) + 1) / 2;
+            half[y * W + x] = 0xFF000000 | v << 16 | v << 8 | v;
+        }
+        String hs = FrameScore.alignment(img, half, W, H);
+        check("alignment: copy half a row down -> (0,0.5) found", hs.contains("middle (0,0.5)"));
         FrameScore all = new FrameScore();
         all.worst(same, 1000); all.worst(red, 2000);
         check("score: worst kept, and where", all.ssim == red.ssim && all.worstAtUs == 2000 && all.frames == 2);

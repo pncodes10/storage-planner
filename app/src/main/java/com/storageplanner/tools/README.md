@@ -156,7 +156,8 @@ if (o.ok) {
 - **How a copy is made:**
   1. **Refuse first** (`VideoSearch.refuse`): no video track, unreadable MP4, HDR (PQ, HLG, Dolby Vision, 10-bit
      HEVC), more than one video track, under a second (these the Lab can't override); slow motion (Android's
-     `com.android.capture.fps` marker) or over 61 fps, a second audio track, any other track (subtitles, sensor
+     `com.android.capture.fps` key well above the playback rate, or unreadable; Samsung writes it in every video,
+     with the playback rate as its value) or over 61 fps, a second audio track, any other track (subtitles, sensor
      data), 64 KB or more after the video (Samsung's `SEFT` trailer).
   2. **Plan** (`VideoSearch.plan`): the copy's size (even numbers) and frame rate (frames dropped by 1/fps slots,
      never re-timed), a bitrate range (from the level's bits per pixel; at most 85% of the original's video
@@ -171,6 +172,10 @@ if (o.ok) {
 - **Encoder:** the hardware HEVC encoder (`isHardwareAccelerated`, or not `OMX.google.*`/`c2.android.*` before
   Android 10), H.264 when there is no HEVC encoder for the size, software only as a last resort. VBR when offered;
   keyframe every 3 s; `KEY_PRIORITY` 1 (not real time).
+- **Cropped decoder buffers:** a 1080p decoder hands over 1920x1088 frames cropped to 1080. Android's
+  SurfaceTexture then pulls the texture in by a texel on each cropped side (so filtering never reads the padding),
+  which stretched the copy by 2 px and capped PSNR at 34.2 dB at any bitrate on the S23 FE. `VideoTranscoder.Trim`
+  puts the exact crop back when the matrix shows that trim; the Lab log says "texture trim undone".
 - **Kept:** every frame's own time (variable frame rate), rotation (as a flag, pixels not turned), location
   (`©xyz`), the creation and modified dates, the audio as it is (levels 1–3). **Not kept:** the file's other user
   data (Samsung's `smta` and similar boxes: `o.lost` lists them), a small trailer, HDR (refused instead).

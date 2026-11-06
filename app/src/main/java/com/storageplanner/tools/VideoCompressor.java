@@ -208,7 +208,8 @@ public final class VideoCompressor {
     static String describe(VideoSearch.Facts f) {
         return String.format(Locale.US, "source: %s, %d KB, %.1f s, %dx%d (rotation %d), %.2f fps, %s %d kbps, audio %s %d kbps %d ch; boxes %s, tracks %s, user data %s",
                 f.mp4.problem == null ? "MP4" : "unreadable MP4", f.fileBytes >> 10, f.durationUs / 1e6, f.width, f.height, f.rotation, f.fps(), f.videoMime,
-                f.videoBitrate / 1000, f.audioMime, f.audioBitrate / 1000, f.channels, f.mp4.top, handlers(f.mp4), f.mp4.udta);
+                f.videoBitrate / 1000, f.audioMime, f.audioBitrate / 1000, f.channels, f.mp4.top, handlers(f.mp4), f.mp4.udta)
+                + (f.mp4.captureFps ? String.format(Locale.US, "; capture speed %.2f fps", f.mp4.captureFpsValue) : "");
     }
 
     private static String handlers(Mp4.Info m) {
@@ -292,16 +293,68 @@ public final class VideoCompressor {
         }
 
         public FrameScore score(VideoSearch.Plan p, VideoSearch.Copy c, long fromUs, long[] sourceUs) throws Exception {
-            FrameScore all = new FrameScore();
-            int[] worstA = null, worstB = null;
-            int ww = 0, wh = 0;
             long b = base.containsKey(c.path) ? base.get(c.path) : 0;
             long[] kept = p.keptUs != null ? p.keptUs : f.frameUs;
             MediaMetadataRetriever a = new MediaMetadataRetriever(), m = new MediaMetadataRetriever();
             try {
                 a.setDataSource(src.getPath());
                 m.setDataSource(c.path);
-                int shift = timelineShift(a, m, p, kept, b, sourceUs);
+                int shift = 0;
+                FrameScore first = scoreAll(a, m, p, kept, b, sourceUs, 0);
+                // the worst frame is where a timeline off by a frame shows most (motion): try its neighbours
+                String timing = null;
+                if (first.worstAtUs >= 0) {
+                    double[] ps = neighbours(a, m, p, kept, b, first.worstAtUs);
+                    if (ps != null) {
+                        StringBuilder t = new StringBuilder("worst frame vs the copy's frames -2..+2:");
+                        int bestD = 0;
+                        for (int d = -2; d <= 2; d++) {
+                            t.append(Double.isNaN(ps[d + 2]) ? " -" : String.format(Locale.US, " %.1f", ps[d + 2]));
+                            if (!Double.isNaN(ps[d + 2]) && ps[d + 2] > ps[2] + 1.0 && ps[d + 2] > ps[bestD + 2]) bestD = d;
+                        }
+                        timing = t.append(" dB").toString();
+                        shift = bestD;
+                    }
+                }
+                if (shift == 0) { first.note = join(timing, first.note); return first; }
+                FrameScore again = scoreAll(a, m, p, kept, b, sourceUs, shift);
+                again.note = join("copy's timeline is " + shift + " frame(s) off the original's, corrected; " + timing, again.note);
+                return again;
+            } finally {
+                a.release();
+                m.release();
+            }
+        }
+
+        private static String join(String x, String y) { return x == null ? y : y == null ? x : x + "; " + y; }
+
+        /** PSNR of the source frame at us against the copy's frames -2..+2 around it (NaN where there is none). */
+        private static double[] neighbours(MediaMetadataRetriever a, MediaMetadataRetriever m, VideoSearch.Plan p, long[] kept, long b, long us) {
+            int i = Arrays.binarySearch(kept, us);
+            if (i < 0) return null;
+            Bitmap x = a.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST);
+            if (x == null) return null;
+            int[] wh = size(x, p);
+            int[] px = pixels(x, wh[0], wh[1]);
+            x.recycle();
+            double[] r = new double[5];
+            for (int d = -2; d <= 2; d++) {
+                r[d + 2] = Double.NaN;
+                if (i + d < 0 || i + d >= kept.length || kept[i + d] - b < 0) continue;
+                Bitmap y = m.getFrameAtTime(kept[i + d] - b, MediaMetadataRetriever.OPTION_CLOSEST);
+                if (y == null) continue;
+                int[] py = pixels(y, wh[0], wh[1]);
+                y.recycle();
+                r[d + 2] = FrameScore.of(px, py, wh[0], wh[1]).psnr;
+            }
+            return r;
+        }
+
+        private FrameScore scoreAll(MediaMetadataRetriever a, MediaMetadataRetriever m, VideoSearch.Plan p, long[] kept, long b, long[] sourceUs, int shift) throws IOException {
+            FrameScore all = new FrameScore();
+            int[] worstA = null, worstB = null;
+            int ww = 0, wh = 0;
+            {
                 for (long us : sourceUs) {
                     Bitmap x = a.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST);
                     Bitmap y = m.getFrameAtTime(copyTime(kept, us, shift, b), MediaMetadataRetriever.OPTION_CLOSEST);
@@ -314,12 +367,7 @@ public final class VideoCompressor {
                     if (worstA == null || one.ssim < all.ssim) { worstA = px; worstB = py; ww = w; wh = h; }
                     all.worst(one, us);
                 }
-                String n = worstA != null ? FrameScore.alignment(worstA, worstB, ww, wh) : null;
-                if (shift != 0) n = "copy's timeline is " + shift + " frame(s) off the original's, corrected" + (n != null ? "; " + n : "");
-                all.note = n;
-            } finally {
-                a.release();
-                m.release();
+                all.note = worstA != null ? FrameScore.alignment(worstA, worstB, ww, wh) : null;
             }
             return all;
         }
@@ -329,36 +377,6 @@ public final class VideoCompressor {
             int i = java.util.Arrays.binarySearch(kept, us);
             if (i < 0 || shift == 0 || i + shift < 0 || i + shift >= kept.length) return us - b;
             return kept[i + shift] - b;
-        }
-
-        /**
-         * The source and the copy may number their frames differently (a Samsung file can start with an edit-list
-         * offset the copy does not have), which would compare neighbouring frames. Tries the copy's frames -2..+2 around
-         * the first checked frame and returns the shift that matches clearly best (0 unless another is 1 dB better).
-         */
-        private static int timelineShift(MediaMetadataRetriever a, MediaMetadataRetriever m, VideoSearch.Plan p, long[] kept, long b, long[] sourceUs) {
-            if (sourceUs.length == 0) return 0;
-            long us = sourceUs[sourceUs.length / 2];
-            int i = java.util.Arrays.binarySearch(kept, us);
-            if (i < 0) return 0;
-            Bitmap x = a.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST);
-            if (x == null) return 0;
-            int[] wh = size(x, p);
-            int[] px = pixels(x, wh[0], wh[1]);
-            x.recycle();
-            double at0 = -1, best = -1;
-            int shift = 0;
-            for (int d : new int[]{0, -1, 1, -2, 2}) {
-                if (i + d < 0 || i + d >= kept.length || kept[i + d] - b < 0) continue;
-                Bitmap y = m.getFrameAtTime(kept[i + d] - b, MediaMetadataRetriever.OPTION_CLOSEST);
-                if (y == null) continue;
-                int[] py = pixels(y, wh[0], wh[1]);
-                y.recycle();
-                double ps = FrameScore.of(px, py, wh[0], wh[1]).psnr;
-                if (d == 0) { at0 = ps; best = ps; }
-                else if (ps > best && ps > at0 + 1.0) { best = ps; shift = d; }
-            }
-            return shift;
         }
 
         /** The retriever may turn frames upright: compare both at the same orientation. */
