@@ -296,30 +296,77 @@ public final class VideoCompressor {
             int[] worstA = null, worstB = null;
             int ww = 0, wh = 0;
             long b = base.containsKey(c.path) ? base.get(c.path) : 0;
+            long[] kept = p.keptUs != null ? p.keptUs : f.frameUs;
             MediaMetadataRetriever a = new MediaMetadataRetriever(), m = new MediaMetadataRetriever();
             try {
                 a.setDataSource(src.getPath());
                 m.setDataSource(c.path);
+                int shift = timelineShift(a, m, p, kept, b, sourceUs);
                 for (long us : sourceUs) {
                     Bitmap x = a.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST);
-                    Bitmap y = m.getFrameAtTime(us - b, MediaMetadataRetriever.OPTION_CLOSEST);
+                    Bitmap y = m.getFrameAtTime(copyTime(kept, us, shift, b), MediaMetadataRetriever.OPTION_CLOSEST);
                     if (x == null || y == null) throw new IOException("no frame at " + us / 1000 + " ms");
-                    // the retriever may turn frames upright: compare both at the same orientation
-                    boolean wide = x.getWidth() >= x.getHeight();
-                    int w = wide == (p.compareWidth >= p.compareHeight) ? p.compareWidth : p.compareHeight;
-                    int h = w == p.compareWidth ? p.compareHeight : p.compareWidth;
+                    int[] wh2 = size(x, p);
+                    int w = wh2[0], h = wh2[1];
                     int[] px = pixels(x, w, h), py = pixels(y, w, h);
                     x.recycle(); y.recycle();   // frames can be 33 MB each at 4K; free them now
                     FrameScore one = FrameScore.of(px, py, w, h);
                     if (worstA == null || one.ssim < all.ssim) { worstA = px; worstB = py; ww = w; wh = h; }
                     all.worst(one, us);
                 }
-                if (worstA != null) all.note = FrameScore.alignment(worstA, worstB, ww, wh);
+                String n = worstA != null ? FrameScore.alignment(worstA, worstB, ww, wh) : null;
+                if (shift != 0) n = "copy's timeline is " + shift + " frame(s) off the original's, corrected" + (n != null ? "; " + n : "");
+                all.note = n;
             } finally {
                 a.release();
                 m.release();
             }
             return all;
+        }
+
+        /** The copy's time for the source frame shown at us, moved by `shift` frames. */
+        private static long copyTime(long[] kept, long us, int shift, long b) {
+            int i = java.util.Arrays.binarySearch(kept, us);
+            if (i < 0 || shift == 0 || i + shift < 0 || i + shift >= kept.length) return us - b;
+            return kept[i + shift] - b;
+        }
+
+        /**
+         * The source and the copy may number their frames differently (a Samsung file can start with an edit-list
+         * offset the copy does not have), which would compare neighbouring frames. Tries the copy's frames -2..+2 around
+         * the first checked frame and returns the shift that matches clearly best (0 unless another is 1 dB better).
+         */
+        private static int timelineShift(MediaMetadataRetriever a, MediaMetadataRetriever m, VideoSearch.Plan p, long[] kept, long b, long[] sourceUs) {
+            if (sourceUs.length == 0) return 0;
+            long us = sourceUs[sourceUs.length / 2];
+            int i = java.util.Arrays.binarySearch(kept, us);
+            if (i < 0) return 0;
+            Bitmap x = a.getFrameAtTime(us, MediaMetadataRetriever.OPTION_CLOSEST);
+            if (x == null) return 0;
+            int[] wh = size(x, p);
+            int[] px = pixels(x, wh[0], wh[1]);
+            x.recycle();
+            double at0 = -1, best = -1;
+            int shift = 0;
+            for (int d : new int[]{0, -1, 1, -2, 2}) {
+                if (i + d < 0 || i + d >= kept.length || kept[i + d] - b < 0) continue;
+                Bitmap y = m.getFrameAtTime(kept[i + d] - b, MediaMetadataRetriever.OPTION_CLOSEST);
+                if (y == null) continue;
+                int[] py = pixels(y, wh[0], wh[1]);
+                y.recycle();
+                double ps = FrameScore.of(px, py, wh[0], wh[1]).psnr;
+                if (d == 0) { at0 = ps; best = ps; }
+                else if (ps > best && ps > at0 + 1.0) { best = ps; shift = d; }
+            }
+            return shift;
+        }
+
+        /** The retriever may turn frames upright: compare both at the same orientation. */
+        private static int[] size(Bitmap x, VideoSearch.Plan p) {
+            boolean wide = x.getWidth() >= x.getHeight();
+            int w = wide == (p.compareWidth >= p.compareHeight) ? p.compareWidth : p.compareHeight;
+            int h = w == p.compareWidth ? p.compareHeight : p.compareWidth;
+            return new int[]{w, h};
         }
 
         public void discard(VideoSearch.Copy c) { new File(c.path).delete(); base.remove(c.path); }

@@ -147,7 +147,8 @@ final class VideoLabScreen extends Screen {
                             if (mi >= 0 && !c.isNull(mi)) modified = c.getLong(mi);
                         }
                     } finally { c.close(); }
-                    File dir = new File(a.getCacheDir(), "videolab");
+                    // not the cache: Android deletes cache files whenever storage runs low, which it did mid-run
+                    File dir = new File(a.getNoBackupFilesDir(), "videolab");
                     dir.mkdirs();
                     dst = new File(dir, "source.video");     // overwritten by the next pick (the app itself deletes nothing)
                     InputStream in = a.getContentResolver().openInputStream(u);
@@ -206,7 +207,17 @@ final class VideoLabScreen extends Screen {
                         if (only != null && l != only) continue;
                         line(String.format(Locale.US, "Level %d (%s) …", l.number(), l.label));
                         File outFile = new File(dir, stem + "-L" + l.number() + ".mp4");
-                        VideoCompressor.Outcome o = VideoCompressor.compressForLab(src, l, outFile, new File(a.getCacheDir(), "videolab/work"));
+                        if (!src.isFile()) {
+                            line("  stopped: the Lab's copy of the video is gone (" + src + "). Pick the video again.");
+                            break;
+                        }
+                        long free = dir.getUsableSpace();
+                        if (free < src.length() * 2 + (200L << 20)) {
+                            line(String.format(Locale.US, "  stopped: only %s free; a test copy needs up to twice the video's size (%s) plus room for samples.",
+                                    Report.size(free), Report.size(src.length())));
+                            break;
+                        }
+                        VideoCompressor.Outcome o = VideoCompressor.compressForLab(src, l, outFile, new File(a.getNoBackupFilesDir(), "videolab/work"));
                         report(o, outFile, dir);
                     }
                     line("Saved in Download/StoragePlanner/compressed/" + dir.getName() + "/");
@@ -229,8 +240,8 @@ final class VideoLabScreen extends Screen {
     }
 
     private void report(VideoCompressor.Outcome o, File outFile, File dir) {
-        for (String t : o.trace) LabLog.line(a, "    " + t);
-        if (!o.lost.isEmpty()) LabLog.line(a, "    a copy does not keep: " + o.lost);
+        for (String t : o.trace) line("    " + t);      // on screen too: the steps are what a pasted result needs
+        if (!o.lost.isEmpty()) line("    a copy does not keep: " + o.lost);
         if (o.output == null) {
             line(String.format(Locale.US, "  not compressed: %s (%.0f s)", o.skipped, o.ms / 1000.0));
             return;
