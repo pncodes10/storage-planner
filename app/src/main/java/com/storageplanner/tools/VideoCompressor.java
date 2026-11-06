@@ -97,7 +97,9 @@ public final class VideoCompressor {
             if (enc == null) { o.skipped = "this phone has no video encoder for the copy's size (" + size.width + "x" + size.height + ")"; return o; }
             o.encoder = enc[0] + (avc ? " (H.264)" : " (HEVC)");
             VideoSearch.Plan p = avc ? VideoSearch.plan(f, level, true) : size;
-            p.width = Integer.parseInt(enc[2]); p.height = Integer.parseInt(enc[3]);   // the size the encoder accepts
+            int pw = p.width, ph = p.height;
+            if (p.resize(Integer.parseInt(enc[2]), Integer.parseInt(enc[3])))     // the size the encoder accepts
+                o.trace.add("size " + pw + "x" + ph + " trimmed to " + p.width + "x" + p.height + " for the encoder's alignment");
             clampToEncoder(p, enc[0], avc ? AVC : HEVC);
             o.plan = p;
             o.trace.add("encoder " + o.encoder + (enc[1] != null ? ", " + enc[1] : ""));

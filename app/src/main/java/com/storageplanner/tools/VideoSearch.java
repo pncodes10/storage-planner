@@ -106,6 +106,27 @@ public final class VideoSearch {
         public final List<long[]> sampleFrames = new ArrayList<long[]>();
         public long[] verifyUs;
 
+        /**
+         * Compare at the copy's size, halved when that is above 720p: sensor grain, which no encoder keeps, averages out
+         * at half size (measured: full-size scores of a grainy video stay low at any bitrate).
+         */
+        void compareSize() {
+            double s = Math.min(width, height) > 720 ? 0.5 : 1.0;
+            compareWidth = even(width * s); compareHeight = even(height * s);
+        }
+
+        /**
+         * Changes the copy's size to the one the encoder accepts (e.g. 852x480 trimmed to 848x480 for 16-pixel
+         * alignment) and the size it is compared at with it: a comparison at the old size would rescale every copy
+         * frame and lower its scores at any bitrate. Returns whether the size changed.
+         */
+        public boolean resize(int w, int h) {
+            if (w == width && h == height) return false;
+            width = w; height = h;
+            compareSize();
+            return true;
+        }
+
         /** Whether the copy keeps the source frame shown at this time. */
         public boolean keeps(long us) { return keptUs == null || Arrays.binarySearch(keptUs, us) >= 0; }
 
@@ -125,12 +146,7 @@ public final class VideoSearch {
             w = even(w * s); h = even(h * s);
         }
         p.width = even(w); p.height = even(h);
-        // Compare at the copy's size, halved when that is above 720p: sensor grain, which no encoder keeps,
-        // averages out at half size (measured: full-size scores of a grainy video stay low at any bitrate).
-        {
-            double s = Math.min(p.width, p.height) > 720 ? 0.5 : 1.0;
-            p.compareWidth = even(p.width * s); p.compareHeight = even(p.height * s);
-        }
+        p.compareSize();
 
         double fps = f.fps();
         p.fps = fps;

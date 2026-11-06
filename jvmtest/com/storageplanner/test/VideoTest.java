@@ -211,6 +211,13 @@ public final class VideoTest {
         check("1080p copy of 4K compared at half the copy's size", p.compareWidth == 960 && p.compareHeight == 540);
         p = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.BALANCED, false);
         check("Balanced 1080p compared at half size, like Looks identical", p.compareWidth == 960 && p.compareHeight == 540);
+        VideoSearch.Plan trim = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.MAXIMUM, false);
+        check("resize to the encoder's aligned size: changed", trim.resize(848, 480));
+        check("resize: comparison follows the copy's new size", trim.width == 848 && trim.compareWidth == 848 && trim.compareHeight == 480);
+        check("resize to the same size: no change", !trim.resize(848, 480));
+        VideoSearch.Plan big = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.HIGH, false);
+        big.resize(1920, 1072);
+        check("resize above 720p: compared at half the new size", big.compareWidth == 960 && big.compareHeight == 536);
         p = VideoSearch.plan(facts(1920, 1080, 30, 60, 17_000_000), VideoLevel.IDENTICAL, false);
         check("Looks identical keeps the size", p.width == 1920 && p.height == 1080);
         check("Looks identical compares 1080p at half size", p.compareWidth == 960 && p.compareHeight == 540);
