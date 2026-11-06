@@ -142,11 +142,13 @@ web_users = sorted(set(c.get_name() for c in d.get_classes() for m in c.get_meth
                        and "getCurrentWebViewPackage" not in ins.get_output()))   # reading the WebView version for the Lab log is allowed
 check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/app/OcrEngine") for n in web_users), ", ".join(web_users))
 # The compression tools (com.storageplanner.tools) are the only code that removes or renames files: ImageCompressor
-# deletes its own work files and renames a checked copy into place. Today only the Algorithm Lab calls them, writing
-# test copies to Download/StoragePlanner/compressed. Originals are never deleted. Anywhere else is a failure.
+# and VideoCompressor delete their own work files (and the video tool its sample encodes) and rename a checked copy
+# into place. Today only the Algorithm Lab and the Video Lab call them, writing test copies to
+# Download/StoragePlanner/compressed. Originals are never deleted. Anywhere else is a failure.
+COMPRESSORS = {"Lcom/storageplanner/tools/ImageCompressor;", "Lcom/storageplanner/tools/VideoCompressor;"}
 ALLOWED = {"deletes / renames files": {
-    "Ljava/io/File;->delete()Z": {"Lcom/storageplanner/tools/ImageCompressor;"},
-    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": {"Lcom/storageplanner/tools/ImageCompressor;"},
+    "Ljava/io/File;->delete()Z": COMPRESSORS,
+    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": COMPRESSORS,
 }}
 for k, pat in BAD.items():
     allowed = ALLOWED.get(k, {})
