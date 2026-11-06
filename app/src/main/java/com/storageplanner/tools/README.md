@@ -182,6 +182,53 @@ if (o.ok) {
 - **Lab:** `compressForLab` makes the copy even when a real run would refuse the video or drop the copy (unless
   nothing meaningful can be made), and says why in `o.wouldSkip`.
 
+### Video tool reference
+
+**Public API** (package `com.storageplanner.tools`; Android framework only, minSdk 26, no libraries):
+
+| Class / member | What it is |
+|---|---|
+| `VideoCompressor.compress(File src, VideoLevel level, File out, File work)` | Makes one checked copy at `out`. Never touches `src`, never replaces an existing file. Blocking: call it off the main thread. |
+| `VideoCompressor.compressForLab(...)` | The same, but also makes the copy when a real run would refuse the video or drop the copy (`wouldSkip` says why). Lab only. |
+| `VideoLevel` | `IDENTICAL`, `HIGH`, `BALANCED`, `SAVER`, `MAXIMUM`, see the table above. |
+| `VideoSearch` | The decisions, plain Java: `refuse(Facts)`, `plan(Facts, VideoLevel, boolean avc)`, `run(Facts, Plan, Engine)`. Use it to test the logic with your own `Engine`. |
+| `Mp4.read(File)` / `Mp4.writeTimes(File, created, modified)` | Reads tracks, user data, trailer, capture speed and dates; writes dates into a copy in place. Plain Java. |
+| `FrameScore.of(int[] a, int[] b, w, h)` | Scores one frame (ARGB pixels) against the original. Plain Java. |
+
+**`VideoCompressor.Outcome`**, what a call returns:
+
+| Field | Meaning |
+|---|---|
+| `ok` | The copy passed its level and saves at least 10% (`VideoSearch.MIN_SAVING`). Only then is it at `output` in a real run. |
+| `output` | Path of the copy (== `out`), or null. |
+| `skipped` | Why there is no copy (refused, already small, no bitrate passed, too little saving, an error). Null when `ok`. |
+| `wouldSkip` | Lab only: why a real run would not have kept this copy. |
+| `before`, `after` | Sizes in bytes of the original and the copy. |
+| `ms` | Time taken, all samples included. |
+| `level` | The level asked for. |
+| `encoder` | The encoder used, e.g. `c2.exynos.hevc.encoder (HEVC)`. |
+| `audio` | `copied`, `AAC 96 kbps`, or `copied (re-encoding failed: ...)`. |
+| `facts` | What was read from the original (`VideoSearch.Facts`: size, duration, frame rate, bitrates, every frame's time and size, HDR, MP4 boxes). |
+| `plan` | The copy's size and frame rate, the bitrate range, the samples and the frames checked (`VideoSearch.Plan`). |
+| `search` | The search's result: `bitrate` used, `score` of the worst checked frame (`FrameScore`: `ssim`, `psnr`, `chromaPsnr`, `shift`, `worstAtUs`, `note`). |
+| `lost` | What the copy does not keep (Samsung's `smta`, `SDLN`, ... user data, a small trailer). Show it to the user. |
+| `trace` | Every step, one line each, for a log. |
+
+**`VideoLevel` properties:** `label`, `number()` (1-5), `maxShortSide` (0 = keep the size), `maxFps` (0 = keep),
+`ssimMin`, `psnrMin`, `chromaPsnrMin` (what the worst checked frame must reach), `startBpp` (where the bitrate search
+starts, bits per pixel per frame), `audioKbps` (0 = copy the audio), `keepsSize()`.
+
+**What the caller (the action taker) must do**, as for photos:
+1. Choose the videos and the level; check each file is still the one the plan means (size and modified time).
+2. Run off the main thread, for many files in a foreground service (`dataSync`) with a partial wake lock, and stop
+   between files when asked. A minute of 1080p takes about 1-2 minutes per level on the S23 FE (samples included).
+3. Check free space first: the copy and the samples need up to twice the video's size. Keep `work` out of the cache
+   if storage is low (Android clears cache files under pressure; the Lab lost its copy that way).
+4. Pause when the phone gets hot (`PowerManager.getCurrentThermalStatus()` >= `THERMAL_STATUS_SEVERE`, API 29+).
+5. Scan the copy with `MediaScannerConnection` so galleries show it.
+6. Never remove an original unless its copy still exists and is not empty, the user confirmed it, and the user knows
+   what `lost` lists. Remove it only through Android's trash ([Removing originals](#removing-originals-not-built-yet)).
+
 ### Testing the video tool
 
 - `jvmtest/.../VideoTest.java` (CI): MP4 reading and date writing on hand-built files, refusals, plans, the
