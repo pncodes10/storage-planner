@@ -68,6 +68,8 @@ final class VideoTranscoder {
         MediaMuxer mux = null;
         Gl gl = null;
         Frames frames = null;
+        Audio audio = null;
+        Surface input = null;
         boolean muxStarted = false;
         try {
             vx.setDataSource(j.src.getPath());
@@ -89,7 +91,8 @@ final class VideoTranscoder {
             if (enc.getCodecInfo().getCapabilitiesForType(j.mime).getEncoderCapabilities().isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR))
                 ef.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
             enc.configure(ef, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
-            gl = new Gl(enc.createInputSurface(), j.width, j.height, in.getInteger(MediaFormat.KEY_WIDTH), in.getInteger(MediaFormat.KEY_HEIGHT));
+            input = enc.createInputSurface();
+            gl = new Gl(input, j.width, j.height, in.getInteger(MediaFormat.KEY_WIDTH), in.getInteger(MediaFormat.KEY_HEIGHT));
             enc.start();
             frames = new Frames(gl.texture);
             dec = MediaCodec.createDecoderByType(in.getString(MediaFormat.KEY_MIME));
@@ -99,7 +102,7 @@ final class VideoTranscoder {
             mux = new MediaMuxer(j.out.getPath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
             if (j.rotation != 0) mux.setOrientationHint(j.rotation);
             if (j.location != null) try { mux.setLocation(j.location[0], j.location[1]); } catch (IllegalArgumentException ignored) {}
-            Audio audio = j.whole() ? Audio.open(j) : null;
+            audio = j.whole() ? Audio.open(j) : null;
             r.audio = audio == null ? "none" : audio.what;
 
             if (!j.whole()) vx.seekTo(j.fromUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC);
@@ -168,7 +171,7 @@ final class VideoTranscoder {
                 }
             }
             if (!muxStarted) throw new IOException("the encoder produced no output");
-            if (audio != null) { audio.writeUpTo(mux, at, Long.MAX_VALUE); audio.close(); }
+            if (audio != null) audio.writeUpTo(mux, at, Long.MAX_VALUE);
             mux.stop();
         } finally {
             vx.release();
@@ -177,6 +180,8 @@ final class VideoTranscoder {
             if (mux != null) try { mux.release(); } catch (Throwable ignored) {}
             if (frames != null) frames.release();
             if (gl != null) gl.release();
+            else if (input != null) input.release();      // Gl was never made: its Surface is still ours
+            if (audio != null) audio.close();
         }
         r.ms = System.currentTimeMillis() - t0;
         r.bytes = j.out.length();
@@ -262,8 +267,7 @@ final class VideoTranscoder {
         int next;
 
         static Audio open(Job j) throws IOException {
-            MediaExtractor x = new MediaExtractor();
-            x.setDataSource(j.src.getPath());
+            MediaExtractor x = extractor(j.src);
             int ai = track(x, "audio/");
             if (ai < 0) { x.release(); return null; }
             MediaFormat f = x.getTrackFormat(ai);
@@ -277,8 +281,7 @@ final class VideoTranscoder {
                     return a;
                 } catch (Throwable t) {
                     x.release();
-                    x = new MediaExtractor();
-                    x.setDataSource(j.src.getPath());
+                    x = extractor(j.src);
                     a.what = "copied (re-encoding failed: " + t.getMessage() + ")";
                 }
             } else a.what = "copied";
@@ -287,6 +290,14 @@ final class VideoTranscoder {
             a.format = f;
             a.buf = ByteBuffer.allocateDirect(f.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE) ? Math.max(64 * 1024, f.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)) : 1 << 20);
             return a;
+        }
+
+        /** An extractor on the file, released again if opening it fails. */
+        static MediaExtractor extractor(File f) throws IOException {
+            MediaExtractor x = new MediaExtractor();
+            try { x.setDataSource(f.getPath()); }
+            catch (IOException | RuntimeException e) { x.release(); throw e; }
+            return x;
         }
 
         void writeUpTo(MediaMuxer mux, int track, long us) {
@@ -456,6 +467,14 @@ final class VideoTranscoder {
             encoderSurface = s; this.width = width; this.height = height;
             // a 4-tap average over each output pixel's footprint when shrinking (plain bilinear would alias)
             stepX = srcW > width * 1.2f ? 0.5f / width : 0; stepY = srcH > height * 1.2f ? 0.5f / height : 0;
+            float[] q = {-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1};   // x, y, s, t
+            quad = ByteBuffer.allocateDirect(q.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
+            quad.put(q).position(0);
+            // a failure part-way must not leave an EGL context current on this thread or the encoder's Surface open
+            try { setUp(s); } catch (IOException | RuntimeException e) { release(); throw e; }
+        }
+
+        private void setUp(Surface s) throws IOException {
             display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
             int[] v = new int[2];
             if (!EGL14.eglInitialize(display, v, 0, v, 1)) throw new IOException("EGL init failed");
@@ -486,9 +505,6 @@ final class VideoTranscoder {
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-            float[] q = {-1, -1, 0, 0, 1, -1, 1, 0, -1, 1, 0, 1, 1, 1, 1, 1};   // x, y, s, t
-            quad = ByteBuffer.allocateDirect(q.length * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
-            quad.put(q).position(0);
         }
 
         void draw(float[] st) {

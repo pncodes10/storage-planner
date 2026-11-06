@@ -169,8 +169,9 @@ if (o.ok) {
      none of them a frame the search used. If it fails, try once more at +30%.
   5. Keep it only if it passes and saves at least 10%. Write the original's dates into `mvhd`/`tkhd`/`mdhd`
      (`Mp4.writeTimes`) and its last-modified time, then rename the work file into place.
-- **Encoder:** the hardware HEVC encoder (`isHardwareAccelerated`, or not `OMX.google.*`/`c2.android.*` before
-  Android 10), H.264 when there is no HEVC encoder for the size, software only as a last resort. VBR when offered;
+- **Encoder:** the first that accepts the copy's size exactly as it will be configured (trimmed to the encoder's
+  alignment if needed), in this order: hardware HEVC, hardware H.264, software HEVC, software H.264. Hardware means
+  `isHardwareAccelerated` (Android 10+), or not `OMX.google.*`/`c2.android.*` before. VBR when offered;
   keyframe every 3 s; `KEY_PRIORITY` 1 (not real time).
 - **Cropped decoder buffers:** a 1080p decoder hands over 1920x1088 frames cropped to 1080. Android's
   SurfaceTexture then pulls the texture in by a texel on each cropped side (so filtering never reads the padding),

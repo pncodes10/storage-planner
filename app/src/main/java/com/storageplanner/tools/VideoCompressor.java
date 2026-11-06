@@ -86,12 +86,18 @@ public final class VideoCompressor {
                 o.wouldSkip = r.why;
                 o.trace.add("a real run would not compress this video: " + r.why);
             }
-            String[] enc = encoder(HEVC, f.width, f.height);
+            // the encoder must take the copy's size (levels 3-5 shrink it), as configured: not the source's, not turned
+            VideoSearch.Plan size = VideoSearch.plan(f, level, false);
+            String[] enc = null;
             boolean avc = false;
-            if (enc == null) { enc = encoder(AVC, f.width, f.height); avc = true; }
-            if (enc == null) { o.skipped = "this phone has no video encoder for its size (" + f.width + "x" + f.height + ")"; return o; }
+            for (int k = 0; k < 4 && enc == null; k++) {     // hardware HEVC, hardware H.264, software HEVC, software H.264
+                avc = (k & 1) == 1;
+                enc = encoder(avc ? AVC : HEVC, size.width, size.height, k < 2);
+            }
+            if (enc == null) { o.skipped = "this phone has no video encoder for the copy's size (" + size.width + "x" + size.height + ")"; return o; }
             o.encoder = enc[0] + (avc ? " (H.264)" : " (HEVC)");
-            VideoSearch.Plan p = VideoSearch.plan(f, level, avc);
+            VideoSearch.Plan p = avc ? VideoSearch.plan(f, level, true) : size;
+            p.width = Integer.parseInt(enc[2]); p.height = Integer.parseInt(enc[3]);   // the size the encoder accepts
             clampToEncoder(p, enc[0], avc ? AVC : HEVC);
             o.plan = p;
             o.trace.add("encoder " + o.encoder + (enc[1] != null ? ", " + enc[1] : ""));
@@ -219,17 +225,24 @@ public final class VideoCompressor {
     }
 
     // ------------------------------------------------------------------ encoder
-    /** {name, note}: the hardware encoder for this type and size (a software one when there is none), or null. */
-    static String[] encoder(String mime, int w, int h) {
-        MediaCodecInfo soft = null;
+    /**
+     * {name, note}: an encoder for this type that accepts exactly w x h (the size it will be configured with), a hardware
+     * one when {@code hardware}, else a software one; null when there is none. The caller tries hardware HEVC, hardware
+     * H.264, then software, so a slow software encoder is only a last resort.
+     */
+    static String[] encoder(String mime, int w, int h, boolean hardware) {
         for (MediaCodecInfo c : new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos()) {
-            if (!c.isEncoder() || !Arrays.asList(c.getSupportedTypes()).contains(mime)) continue;
+            if (!c.isEncoder() || hardware(c) != hardware || !Arrays.asList(c.getSupportedTypes()).contains(mime)) continue;
             MediaCodecInfo.VideoCapabilities v = c.getCapabilitiesForType(mime).getVideoCapabilities();
-            if (v == null || !(v.isSizeSupported(w, h) || v.isSizeSupported(h, w))) continue;
-            if (hardware(c)) return new String[]{c.getName(), modes(c, mime)};
-            if (soft == null) soft = c;
+            if (v == null) continue;
+            int cw = w, ch = h;
+            if (!v.isSizeSupported(cw, ch)) {                 // e.g. 852x480 on an encoder that wants multiples of 16
+                cw -= cw % v.getWidthAlignment(); ch -= ch % v.getHeightAlignment();
+                if (!v.isSizeSupported(cw, ch)) continue;
+            }
+            return new String[]{c.getName(), (hardware ? "" : "software encoder, ") + modes(c, mime), String.valueOf(cw), String.valueOf(ch)};
         }
-        return soft == null ? null : new String[]{soft.getName(), "software encoder, " + modes(soft, mime)};
+        return null;
     }
 
     static boolean hardware(MediaCodecInfo c) {
@@ -247,17 +260,13 @@ public final class VideoCompressor {
         return s.toString();
     }
 
-    /** Keeps the search inside what the encoder accepts (sizes, bitrates). */
+    /** Keeps the bitrate search inside what the encoder accepts (the size was chosen with the encoder). */
     static void clampToEncoder(VideoSearch.Plan p, String name, String mime) {
         try {
             MediaCodecInfo.VideoCapabilities v = null;
             for (MediaCodecInfo c : new MediaCodecList(MediaCodecList.REGULAR_CODECS).getCodecInfos())
                 if (c.getName().equals(name)) v = c.getCapabilitiesForType(mime).getVideoCapabilities();
             if (v == null) return;
-            if (!v.isSizeSupported(p.width, p.height)) {
-                int a = v.getWidthAlignment(), b = v.getHeightAlignment();
-                p.width -= p.width % a; p.height -= p.height % b;
-            }
             int lo = v.getBitrateRange().getLower(), hi = v.getBitrateRange().getUpper();
             p.loBps = Math.max(p.loBps, lo); p.hiBps = Math.min(p.hiBps, hi); p.startBps = Math.max(p.loBps, Math.min(p.hiBps, p.startBps));
         } catch (Throwable ignored) {}
@@ -283,7 +292,13 @@ public final class VideoCompressor {
             j.src = src; j.plan = p; j.fromUs = fromUs; j.toUs = toUs; j.encoder = encoder; j.mime = mime;
             j.width = p.width; j.height = p.height; j.bitrate = bitrate; j.rotation = f.rotation; j.location = location;
             j.out = j.whole() ? out : new File(work, "sample-" + (n++) + ".mp4");
-            VideoTranscoder.Result r = VideoTranscoder.run(j);
+            VideoTranscoder.Result r;
+            try {
+                r = VideoTranscoder.run(j);
+            } catch (Exception ex) {
+                if (!j.whole()) j.out.delete();   // a half-written sample (the whole-video work file is removed by make())
+                throw ex;
+            }
             if (j.whole()) audio = r.audio;
             if (decoderOutput == null) decoderOutput = r.decoderOutput;
             VideoSearch.Copy c = new VideoSearch.Copy();

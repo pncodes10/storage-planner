@@ -136,14 +136,16 @@ final class VideoLabScreen extends Screen {
         info.setText("Copying the video into the Lab…");
         worker.execute(new Runnable() {
             public void run() {
-                String n = "video.mp4"; long modified = 0;
+                String n = "video.mp4"; long modified = 0, size = -1;
                 File dst = null;
                 try {
                     Cursor c = a.getContentResolver().query(u, null, null, null, null);
                     if (c != null) try {
                         if (c.moveToFirst()) {
-                            int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), mi = c.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED);
+                            int ni = c.getColumnIndex(OpenableColumns.DISPLAY_NAME), mi = c.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                                si = c.getColumnIndex(OpenableColumns.SIZE);
                             if (ni >= 0 && !c.isNull(ni)) n = c.getString(ni);
+                            if (si >= 0 && !c.isNull(si)) size = c.getLong(si);
                             if (mi >= 0 && !c.isNull(mi)) modified = c.getLong(mi);
                         }
                     } finally { c.close(); }
@@ -158,6 +160,7 @@ final class VideoLabScreen extends Screen {
                         byte[] buf = new byte[1 << 20]; int k;
                         while ((k = in.read(buf)) > 0) o.write(buf, 0, k);
                     } finally { in.close(); o.close(); }
+                    if (size >= 0 && dst.length() != size) throw new Exception("copied " + dst.length() + " of " + size + " bytes");
                     if (modified > 0) dst.setLastModified(modified);
                     LabLog.line(a, String.format(Locale.US, "\nvideo lab: picked %s (%d bytes, modified %d)", n, dst.length(), modified));
                 } catch (Throwable t) {
@@ -168,7 +171,14 @@ final class VideoLabScreen extends Screen {
                 ui.post(new Runnable() {
                     public void run() {
                         spinner.setVisibility(View.GONE);
-                        if (got == null) { a.toast("The video could not be opened."); showInfo(); return; }
+                        if (got == null) {
+                            // the failed copy has already overwritten the previous video's: never keep using it
+                            video = null; picked = null; name = null;
+                            synchronized (made) { made.clear(); }
+                            showMade(); showInfo();
+                            a.toast("The video could not be copied into the Lab. Pick it again.");
+                            return;
+                        }
                         video = got; picked = u; name = gotName; made.clear(); showMade();
                         showInfo();
                     }
