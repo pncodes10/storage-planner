@@ -284,14 +284,15 @@ final class MotionLabScreen extends Screen {
     }
 
     /** Runs {@code r} with the photo open: from its file when readable, else through the picker's descriptor. */
-    private interface WithChannel<T> { T run(java.nio.channels.FileChannel ch) throws Exception; }
+    /** Gets the open photo as a FileInputStream on its file or descriptor (seekable, so ExifInterface reads HEIC too). */
+    private interface WithChannel<T> { T run(FileInputStream in) throws Exception; }
 
     private <T> T open(Picked p, WithChannel<T> r) throws Exception {
         if (p.file != null) {                                   // a path read: exact when location access is granted
             p.exact = locationAccess();
             p.how = "file path";
             FileInputStream in = new FileInputStream(p.file);
-            try { return r.run(in.getChannel()); } finally { in.close(); }
+            try { return r.run(in); } finally { in.close(); }
         }
         ParcelFileDescriptor pfd = null;
         if (p.media != null && Build.VERSION.SDK_INT >= 29 && locationAccess()) {
@@ -306,7 +307,7 @@ final class MotionLabScreen extends Screen {
         if (pfd == null) throw new java.io.IOException("cannot open " + p.name);
         try {
             FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
-            try { return r.run(in.getChannel()); } finally { in.close(); }
+            try { return r.run(in); } finally { in.close(); }
         } finally { pfd.close(); }
     }
 
@@ -320,7 +321,7 @@ final class MotionLabScreen extends Screen {
                     MotionPhoto.Found f;
                     try {
                         f = open(p, new WithChannel<MotionPhoto.Found>() {
-                            public MotionPhoto.Found run(java.nio.channels.FileChannel ch) throws Exception { return MotionPhoto.find(ch); }
+                            public MotionPhoto.Found run(FileInputStream in) throws Exception { return MotionPhoto.find(in.getChannel()); }
                         });
                     } catch (Throwable t) { line(p.name + ": cannot read: " + t.getMessage()); continue; }
                     line(describe(p.name, f));
@@ -364,7 +365,7 @@ final class MotionLabScreen extends Screen {
                     MotionPhoto.Outcome o;
                     try {
                         o = open(p, new WithChannel<MotionPhoto.Outcome>() {
-                            public MotionPhoto.Outcome run(java.nio.channels.FileChannel ch) { return MotionPhoto.strip(ch, p.modified, outFile, vidFile); }
+                            public MotionPhoto.Outcome run(FileInputStream in) { return MotionPhoto.strip(in.getChannel(), p.modified, outFile, vidFile); }
                         });
                     } catch (Throwable t) { line(p.name + ": cannot read: " + t.getMessage()); continue; }
                     if (!o.ok) {
@@ -401,8 +402,8 @@ final class MotionLabScreen extends Screen {
         String orig, cp;
         try {
             orig = open(p, new WithChannel<String>() {
-                public String run(java.nio.channels.FileChannel ch) throws Exception {
-                    return latLong(new android.media.ExifInterface(java.nio.channels.Channels.newInputStream(ch)));
+                public String run(FileInputStream in) throws Exception {
+                    return latLong(new android.media.ExifInterface(in.getFD()));   // seekable: works for HEIC as well as JPEG
                 }
             });
         } catch (Throwable t) { orig = "unreadable (" + t.getMessage() + ")"; }
