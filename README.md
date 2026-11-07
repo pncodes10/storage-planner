@@ -354,6 +354,7 @@ The app also contains one private, read-only file provider. It isn't exported, a
 - **`FOREGROUND_SERVICE`** and **`FOREGROUND_SERVICE_DATA_SYNC`** (new in 1.2): run the analysis as a foreground service of type *dataSync* (local file processing) so it is not stopped when you switch apps.
 - **`POST_NOTIFICATIONS`** (new in 1.2, asked on Android 13+): show the progress and "plan is ready" notifications. Optional.
 - **`WAKE_LOCK`** (new in 1.2): keep the processor awake during the scan when the screen turns off (released when done, at most 60 minutes).
+- **`ACCESS_MEDIA_LOCATION`** (new with the Motion Photo Lab, asked on Android 10+ when the Lab opens): without it Android hides the GPS location inside photos from the app, so a Motion Photo copy would silently lose it. It only lets the app read the location already stored in your photos; nothing is sent anywhere. Optional: without it the Lab warns that copies may lack the location.
 - **No `INTERNET`.** The app cannot send anything off the phone.
 
 ## What the plan contains

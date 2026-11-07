@@ -165,7 +165,7 @@ public final class MotionPhoto {
         if (mpvd >= 0) {                                        // HEIC Motion Photo 1.0
             long[] b = box(ch, mpvd, f.size);
             long start = mpvd + b[1];
-            long e = mp4End(ch, start, mpvdEnd);
+            long e = mp4End(ch, start, mpvdEnd, false);
             if (e < 0) { f.why = "its mpvd box does not hold an MP4 video"; return f; }
             if (!zeros(ch, e, mpvdEnd)) { f.why = "its mpvd box holds data after the video"; return f; }
             if (end < mpvdEnd) { f.why = "Samsung's records overlap the video (mpvd) box"; return f; }
@@ -181,19 +181,20 @@ public final class MotionPhoto {
             if (bad != null) { f.why = bad; return f; }
             f.kind = "Samsung Motion Photo";
         } else {                                                // Google JPEG (Motion Photo 1.0 or MicroVideo)
-            List<long[]> cands = new ArrayList<long[]>();      // {start, how}
-            for (long l : info.videoLengths) { cands.add(new long[]{f.size - l, 0}); if (end != f.size) cands.add(new long[]{end - l, 0}); }
-            if (info.videoAfter >= 0) cands.add(new long[]{f.imageEnd + info.videoAfter, 0});
-            for (long o : info.microOffsets) { cands.add(new long[]{f.size - o, 1}); if (end != f.size) cands.add(new long[]{end - o, 1}); }
+            // {start, how, length}: the video must end exactly where its declared length says
+            List<long[]> cands = new ArrayList<long[]>();
+            for (long l : info.videoLengths) { cands.add(new long[]{f.size - l, 0, l}); if (end != f.size) cands.add(new long[]{end - l, 0, l}); }
+            if (info.videoAfter >= 0) cands.add(new long[]{f.imageEnd + info.videoAfter, 0, info.videoAfterLength});
+            for (long o : info.microOffsets) { cands.add(new long[]{f.size - o, 1, o}); if (end != f.size) cands.add(new long[]{end - o, 1, o}); }
             long start = -1, e = -1, how = 0;
             for (long[] c : cands) {
                 if (c[0] < f.imageEnd || c[0] >= end) continue;
-                long x = mp4End(ch, c[0], end);
-                if (x > 0) { start = c[0]; e = x; how = c[1]; break; }
+                long x = mp4End(ch, c[0], end, false);
+                if (x > 0 && x == c[0] + c[2]) { start = c[0]; e = x; how = c[1]; break; }
             }
             if (start < 0 && (info.flagged || info.videoLengths.size() > 0)) {   // the numbers are off: look for it
                 for (long p = indexOf(ch, f.imageEnd + 4, end, "ftyp"); p >= 0; p = indexOf(ch, p + 1, end, "ftyp")) {
-                    long x = mp4End(ch, p - 4, end);
+                    long x = mp4End(ch, p - 4, end, true);         // no declared length: known MP4 boxes only
                     if (x > 0) { start = p - 4; e = x; how = 2; break; }
                 }
             }
@@ -397,7 +398,7 @@ public final class MotionPhoto {
     private static void checkVideo(File v, long size, long crc) throws IOException {
         if (v.length() != size || crc(v) != crc) throw new Stop("check failed: the video reads back different from what was written");
         RandomAccessFile r = new RandomAccessFile(v, "r");
-        try { if (mp4End(r.getChannel(), 0, size) != size) throw new Stop("check failed: the saved video is not a whole MP4"); }
+        try { if (mp4End(r.getChannel(), 0, size, false) != size) throw new Stop("check failed: the saved video is not a whole MP4"); }
         finally { r.close(); }
     }
 
@@ -514,8 +515,8 @@ public final class MotionPhoto {
     private static final class XmpInfo {
         boolean flagged;
         final List<Long> videoLengths = new ArrayList<Long>(), microOffsets = new ArrayList<Long>();
-        /** Offset of the video from the picture's end by the container list (Padding + earlier items), or -1. */
-        long videoAfter = -1;
+        /** Offset of the video from the picture's end by the container list (Padding + earlier items), or -1; and its length. */
+        long videoAfter = -1, videoAfterLength;
         final List<Patch> flags = new ArrayList<Patch>(), items = new ArrayList<Patch>();
 
         void read(Xmp x) {
@@ -547,7 +548,7 @@ public final class MotionPhoto {
                     if (primary) { after = padding; primary = false; continue; }
                     if ("MotionPhoto".equals(semantic)) {
                         if (length > 0) videoLengths.add(length);
-                        if (ok && length > 0) videoAfter = after;
+                        if (ok && length > 0) { videoAfter = after; videoAfterLength = length; }
                         int s = d.start() + li.start();
                         items.add(new Patch(x.pos + s, spaces(li.end() - li.start()), "the video's entry in the container list blanked"));
                     } else if (length > 0) {
@@ -634,7 +635,7 @@ public final class MotionPhoto {
             for (Record r : records) {
                 if (!r.valid) continue;
                 long data = r.start + 8 + r.name.length();
-                if (data + 8 <= r.start + r.size && mp4End(ch, data, r.start + r.size) > 0) { r.video = true; any = true; }
+                if (data + 8 <= r.start + r.size && mp4End(ch, data, r.start + r.size, false) > 0) { r.video = true; any = true; }
             }
             return any;
         }
@@ -656,7 +657,7 @@ public final class MotionPhoto {
             long p = 0, removed = 0;
             for (Record g : gone) {
                 long data = g.start + 8 + g.name.length();
-                f.videos.add(new long[]{data, mp4End(ch, data, g.start + g.size)});
+                f.videos.add(new long[]{data, mp4End(ch, data, g.start + g.size, false)});
                 f.keep.add(new long[]{p, g.start});
                 p = g.start + g.size;
                 removed += g.size;
@@ -710,11 +711,16 @@ public final class MotionPhoto {
         return new long[]{size, hdr};
     }
 
+    /** Top-level boxes an MP4/MOV file may hold (used when no declared length bounds the video). */
+    private static final java.util.Set<String> MP4_TOP = new java.util.HashSet<String>(java.util.Arrays.asList(
+            "ftyp", "moov", "mdat", "free", "skip", "wide", "uuid", "meta", "udta", "moof", "mfra", "sidx", "styp", "pdin", "pnot", "emsg", "prft", "ssix"));
+
     /**
      * The end of the chain of boxes that starts at {@code p}, if it is an MP4/MOV video (an {@code ftyp} box first,
-     * a {@code moov} box among them) ending by {@code limit}; else -1.
+     * a {@code moov} box among them) ending by {@code limit}; else -1. With {@code known}, the chain stops at the first
+     * box that is not a known MP4 top-level box, so unrelated data that merely looks like a box is not taken for video.
      */
-    static long mp4End(FileChannel ch, long p, long limit) throws IOException {
+    static long mp4End(FileChannel ch, long p, long limit, boolean known) throws IOException {
         long q = p;
         boolean moov = false;
         for (int n = 0; ; n++) {
@@ -722,6 +728,7 @@ public final class MotionPhoto {
             if (b == null) break;
             String t = type(read(ch, q + 4, 4), 0);
             if (n == 0 && !t.equals("ftyp")) return -1;
+            if (known && !MP4_TOP.contains(t)) break;
             if (t.equals("moov")) moov = true;
             q += b[0];
         }

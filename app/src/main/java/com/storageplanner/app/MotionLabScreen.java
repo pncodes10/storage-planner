@@ -6,6 +6,8 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
@@ -116,8 +118,19 @@ final class MotionLabScreen extends Screen {
         logRow.addView(save, l1); logRow.addView(share, new LinearLayout.LayoutParams(0, -2, 1));
         add(root, logRow, 14);
         showInfo();
+        if (!locationAccess() && Build.VERSION.SDK_INT >= 29)    // without it Android hides the GPS in what the app reads
+            a.requestPermissions(new String[]{android.Manifest.permission.ACCESS_MEDIA_LOCATION}, 4);
         return sv;
     }
+
+    /** True when this app reads photos' exact bytes, location included (Android 10+ needs ACCESS_MEDIA_LOCATION). */
+    private boolean locationAccess() {
+        return Build.VERSION.SDK_INT < 29
+                || a.checkSelfPermission(android.Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static final String NO_LOCATION = "location access not granted: Android hides the GPS location in what this app reads, "
+            + "so copies may lack the photo's location (allow it when asked, or in Settings > Apps > Storage Planner > Permissions)";
 
     private void add(LinearLayout p, View v, int top) {
         LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(-1, -2); l.topMargin = dp(top);
@@ -134,7 +147,7 @@ final class MotionLabScreen extends Screen {
     // ------------------------------------------------------------------ picking
     /** A picked photo: its real file when this app can read it (all files access), else read through its descriptor. */
     private static final class Picked {
-        Uri uri; String name; long size = -1, modified; File file;
+        Uri uri, media; String name; long size = -1, modified; File file;
     }
 
     /** Called by MainActivity with the picked photos (adds to what is picked). */
@@ -157,7 +170,8 @@ final class MotionLabScreen extends Screen {
                                 if (mi >= 0 && !c.isNull(mi)) p.modified = c.getLong(mi);
                             }
                         } finally { c.close(); }
-                        File f = realFile(u);
+                        p.media = mediaUri(u);
+                        File f = p.media != null ? dataColumn(p.media) : realFile(u);
                         if (f != null && f.isFile() && f.canRead() && (p.size < 0 || f.length() == p.size)) {
                             p.file = f;
                             if (p.modified <= 0) p.modified = f.lastModified();
@@ -181,6 +195,19 @@ final class MotionLabScreen extends Screen {
         });
     }
 
+    /** The MediaStore item behind a picked document or media URI, or null. */
+    private Uri mediaUri(Uri u) {
+        try {
+            if ("media".equals(u.getAuthority()) && u.getPath() != null && u.getPath().startsWith("/external")) return u;
+            if (DocumentsContract.isDocumentUri(a, u) && "com.android.providers.media.documents".equals(u.getAuthority())) {
+                String id = DocumentsContract.getDocumentId(u);
+                if (id.startsWith("image:"))
+                    return ContentUris.withAppendedId(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, Long.parseLong(id.substring(6)));
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
     /** The file behind a picked document or media item, or null (then it is read through its descriptor). */
     private File realFile(Uri u) {
         try {
@@ -199,10 +226,14 @@ final class MotionLabScreen extends Screen {
 
     @SuppressWarnings("deprecation")
     private File dataColumn(Uri u) {
-        Cursor c = a.getContentResolver().query(u, new String[]{MediaStore.MediaColumns.DATA}, null, null, null);
-        if (c == null) return null;
-        try { return c.moveToFirst() && !c.isNull(0) ? new File(c.getString(0)) : null; }
-        finally { c.close(); }
+        try {
+            Cursor c = a.getContentResolver().query(u, new String[]{MediaStore.MediaColumns.DATA}, null, null, null);
+            if (c == null) return null;
+            try { return c.moveToFirst() && !c.isNull(0) ? new File(c.getString(0)) : null; }
+            finally { c.close(); }
+        } catch (Throwable t) {
+            return null;                                    // e.g. a photo-picker URI: read it through its descriptor
+        }
     }
 
     private void showInfo() {
@@ -257,7 +288,9 @@ final class MotionLabScreen extends Screen {
             FileInputStream in = new FileInputStream(p.file);
             try { return r.run(in.getChannel()); } finally { in.close(); }
         }
-        ParcelFileDescriptor pfd = a.getContentResolver().openFileDescriptor(p.uri, "r");
+        Uri u = p.uri;
+        if (p.media != null && Build.VERSION.SDK_INT >= 29 && locationAccess()) u = MediaStore.setRequireOriginal(p.media);   // unredacted
+        ParcelFileDescriptor pfd = a.getContentResolver().openFileDescriptor(u, "r");
         if (pfd == null) throw new java.io.IOException("cannot open " + p.name);
         try {
             FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
@@ -307,13 +340,15 @@ final class MotionLabScreen extends Screen {
                         "StoragePlanner/compressed/motion-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()));
                 dir.mkdirs();
                 String rel = "Download/StoragePlanner/compressed/" + dir.getName() + "/";
+                boolean exact = locationAccess();
+                if (!exact) line("! " + NO_LOCATION);
                 long before = 0, after = 0; int done = 0;
                 List<String> used = new ArrayList<String>();
                 for (final Picked p : src) {
                     if (stop) break;
                     String name = unique(used, safe(p.name));
                     final File outFile = new File(dir, name);
-                    final File vidFile = new File(dir, base(name) + "-video.mp4");
+                    final File vidFile = new File(dir, unique(used, base(name) + "-video.mp4"));
                     MotionPhoto.Outcome o;
                     try {
                         o = open(p, new WithChannel<MotionPhoto.Outcome>() {
@@ -328,6 +363,7 @@ final class MotionLabScreen extends Screen {
                     for (String t : o.trace) line("    " + t);
                     String decoded = sameDecode(p, outFile);
                     line("    on this phone: " + decoded);
+                    if (!exact) line("    ! the location may be missing from this copy (" + NO_LOCATION.substring(0, NO_LOCATION.indexOf(':')) + ")");
                     String facts = String.format(Locale.US, "%s: %s → %s (%s) · video %s · %.1f s",
                             p.name, Report.size(o.before), Report.size(o.after), LabScreen.change(o.before, o.after),
                             Report.size(o.found.videoBytes()), o.ms / 1000.0);

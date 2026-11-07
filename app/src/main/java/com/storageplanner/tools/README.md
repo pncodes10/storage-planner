@@ -411,7 +411,9 @@ rather than taking a frame from the video, which is lower resolution and more he
 - Flagged as a Motion Photo but no MP4 found (already stripped by another app): nothing to do.
 - What would be removed is not a well-formed MP4/MOV (an `ftyp` box first, a `moov` box among them), or starts
   before the picture ends.
-- Unknown non-zero bytes after the video (zero padding is removed with it).
+- Unknown non-zero bytes after the video (zero padding is removed with it). When the XMP gives the video's length
+  (`Item:Length`, `MicroVideoOffset`), the video must end exactly there; when it doesn't, only known MP4 top-level
+  boxes count as video, so other data that merely looks like a box is never removed.
 - A gain map or depth map (MPF) stored after the video, or HEIC boxes after the `mpvd` box: removing the video
   would move them and break their offsets.
 - Samsung records that cannot be read or that overlap.
@@ -449,8 +451,11 @@ file twice. The phone Lab also decodes the original and the copy and compares ev
 
 **What the caller (the action taker) must do:**
 1. Find candidates with `find()` (cheap enough to run over the camera folder: the Lab's survey does).
-2. Tell the user what is lost: the moving clip, nothing else. Galleries then show the photo as an ordinary photo.
-3. Write the copy next to the original under a new name, run off the main thread, scan it with
+2. Read the photo's exact bytes. On Android 10+ hold `ACCESS_MEDIA_LOCATION` and open media URIs through
+   `MediaStore.setRequireOriginal`; otherwise Android zeroes the GPS location in what the app reads, at the same
+   length, and the copy (which passes every check against what was read) has no location. The Lab asks for it.
+3. Tell the user what is lost: the moving clip, nothing else. Galleries then show the photo as an ordinary photo.
+4. Write the copy next to the original under a new name, run off the main thread, scan it with
    `MediaScannerConnection`, and replace the original only through Android's trash after the user confirmed
    ([Removing originals](#removing-originals-not-built-yet)). Keep the file name (Google's `…MP.jpg` naming is
    harmless on a still).

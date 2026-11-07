@@ -30,7 +30,8 @@ expected = sorted(["android.permission.MANAGE_EXTERNAL_STORAGE", "android.permis
                    "android.permission.QUERY_ALL_PACKAGES",
                    # 1.2: background analysis (foreground service) + its notification
                    "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
-                   "android.permission.POST_NOTIFICATIONS", "android.permission.WAKE_LOCK"])
+                   "android.permission.POST_NOTIFICATIONS", "android.permission.WAKE_LOCK",
+                   "android.permission.ACCESS_MEDIA_LOCATION"])
 check("package / SDK", a.get_package() == "com.storageplanner" and a.get_min_sdk_version() == "26" and a.get_target_sdk_version() == "34",
       f"{a.get_package()} min {a.get_min_sdk_version()} target {a.get_target_sdk_version()} v{a.get_androidversion_name()}")
 check("permissions exactly as declared", perms == expected, ", ".join(p.split(".")[-1] for p in perms))
