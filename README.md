@@ -291,6 +291,14 @@ them at **All four levels** or one (Store only, Fast, Balanced, Maximum). It log
 whether it was compressed or stored as it is, and the archive's total saving and time. **Share this zip** sends an
 archive. Archives go to `Download/StoragePlanner/compressed/zip-<time>/`; the picked files are only read.
 
+**Motion Photos** (the third button) opens the **Motion Photo Lab**. A Motion Photo stores a 1–3 second video after
+the photo, often a third to half of the file. Pick photos and tap **Remove the videos (test copies)**: each copy
+keeps the photo byte for byte (same pixels, EXIF, HDR gain map) and leaves out only the clip. The Lab checks that
+the copy decodes to the same pixels, and saves the removed clip next to it so you can play it. **Survey DCIM**
+reads your camera folder and says how much removing every clip would free. Works with Google (Pixel and others,
+JPEG and HEIC) and Samsung Motion Photos ([how](app/src/main/java/com/storageplanner/tools/README.md#motion-photos-motionphoto)).
+Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals are only read.
+
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
    **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
 2. **Run on the selected picture:**

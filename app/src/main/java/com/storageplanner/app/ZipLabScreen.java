@@ -65,7 +65,7 @@ final class ZipLabScreen extends Screen {
                 + "Photos, videos and music are already compressed: a zip barely shrinks them, so they are stored as they are.", 14, Ui.text2, false), 0);
         LinearLayout pickRow = Ui.row(a);
         Button pick = Ui.button(a, "Pick files", true);
-        pick.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { if (!busy) a.pickFiles(ZipLabScreen.this); } });
+        pick.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { if (!busy) a.pickFiles(ZipLabScreen.this, "*/*"); } });
         Button clear = Ui.button(a, "Clear", false);
         clear.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) { if (!busy) { files.clear(); showInfo(); } }

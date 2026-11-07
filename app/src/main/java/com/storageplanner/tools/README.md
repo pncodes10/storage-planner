@@ -2,8 +2,9 @@
 
 This folder holds **tools**: code that changes files on the phone, so that a future **action taker** can carry
 out what the plan recommends. Today it holds the image compression tools (HEIC, WebP, and lossless WebP), the
-video compression tool (HEVC at five levels, see [Videos](#videos-videocompressor)) and the zip tool (any files into
-one checked `.zip`, see [Zip archives](#zip-archives-zipcompressor)).
+video compression tool (HEVC at five levels, see [Videos](#videos-videocompressor)), the zip tool (any files into
+one checked `.zip`, see [Zip archives](#zip-archives-zipcompressor)) and the Motion Photo tool (removes the short
+video from a Motion Photo and keeps the photo byte for byte, see [Motion Photos](#motion-photos-motionphoto)).
 
 ## Ground rules
 
@@ -18,12 +19,13 @@ one checked `.zip`, see [Zip archives](#zip-archives-zipcompressor)).
   **Compress all (test copies)**. It writes test copies to `Download/StoragePlanner/compressed/<name>-<time>/`.
   It never touches the original. Original vs compressed is shown by `app/CompressCompareScreen.java`. Videos:
   **Video compression (test copies)** in the Lab opens `app/VideoLabScreen.java`, which works the same way. Zips:
-  **Zip compression** opens `app/ZipLabScreen.java`, which writes test archives to the same folder.
+  **Zip compression** opens `app/ZipLabScreen.java`, which writes test archives to the same folder. Motion Photos:
+  **Motion Photos** opens `app/MotionLabScreen.java`, which writes test copies (and the removed videos) there too.
 - **A tool never deletes or changes an original.** It writes a new file next to it. Removing originals is the
   action taker's job (see [Removing originals](#removing-originals-not-built-yet)).
 - **The APK audit enforces this** (`tools/audit_apk.py`, run by CI):
-  - only `tools/ImageCompressor`, `tools/VideoCompressor` and `tools/ZipCompressor` may call `File.delete` /
-    `File.renameTo` (on their own work files and samples);
+  - only `tools/ImageCompressor`, `tools/VideoCompressor`, `tools/ZipCompressor` and `tools/MotionPhoto` may call
+    `File.delete` / `File.renameTo` (on their own work files and samples);
   - there must be no MediaStore trash / delete / write requests anywhere.
   A new tool or caller that needs more must update that allowlist on purpose, and say why.
 
@@ -46,6 +48,7 @@ one checked `.zip`, see [Zip archives](#zip-archives-zipcompressor)).
 | `Mp4.java` | Reads an MP4's boxes (tracks, user data, trailer, slow-motion marker, dates) and writes the original dates into a copy. | no |
 | `FrameScore.java` | Scores one video frame against the original (SSIM, PSNR, colour PSNR, colour shift). | no |
 | `ZipCompressor.java` | **The entry point for zips.** Puts files (or a folder) into one `.zip`, reads every entry back to check it. | no (plain Java) |
+| `MotionPhoto.java` | **The entry point for Motion Photos.** Finds the video in a Motion Photo (Google JPEG/HEIC, MicroVideo, Samsung) and makes a checked copy without it. | no (plain Java) |
 
 The plain-Java files are tested on a desktop by `jvmtest/com/storageplanner/test/CompressionTest.java`,
 `VideoTest.java` and `ZipTest.java`. CI runs all three before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
@@ -364,6 +367,106 @@ Empty folders are not added. `folder()` skips symbolic links that lead out of th
   The archives also pass `unzip -t` and Python's `zipfile.testzip()`.
 - On the phone: Algorithm Lab → **Zip compression** (the second button) → **Pick files** → **All four levels**. The
   log shows each file's size before and after and whether it was stored, and each archive's total.
+
+## Motion Photos (`MotionPhoto`)
+
+A Motion Photo is a photo with a 1–3 second video stored after the picture's own bytes (Pixel "Top Shot / Motion",
+Samsung "Motion photo", and many others). Apps that don't know the format show only the photo. The video is often
+**a third to a half of the file**. `MotionPhoto` makes a copy without it in which **the photo is byte for byte the same**:
+the same pixels, EXIF, XMP, ICC profile, Ultra HDR gain map and depth map. Nothing is re-encoded, so nothing is lost
+but the clip.
+
+```java
+MotionPhoto.Found f = MotionPhoto.find(photoFile);              // reads only; f.motion, f.kind, f.videoBytes()
+MotionPhoto.Outcome o = MotionPhoto.strip(photoFile, copyFile, videoFile /* or null */);
+if (o.ok) { /* copy at o.output, o.saved() bytes smaller; the clip at o.video if asked for */ }
+else      { /* o.skipped says why: not a Motion Photo, or something the tool will not guess at */ }
+```
+
+### What it knows
+
+| Kind | How the video is stored | How it is found |
+|---|---|---|
+| Google Motion Photo 1.0, JPEG | MP4 appended after the JPEG's end-of-image marker (after a gain map, if any) | XMP `Container:Directory`, the `MotionPhoto` item's `Item:Length` (from the end, or from the picture's end plus `Padding` and earlier items) |
+| Google Motion Photo 1.0, HEIC/AVIF | MP4 in a top-level `mpvd` box after the image's boxes | the `mpvd` box |
+| Google MicroVideo (older Pixels) | MP4 appended after the JPEG | XMP `MicroVideoOffset` (bytes from the end) |
+| Samsung (JPEG and HEIC) | MP4 in the `MotionPhoto_Data` record of the SEF trailer (`SEFH … SEFT`) at the end of the file | the trailer's index |
+| Anything flagged but with wrong numbers | MP4 after the picture | the first `ftyp` after the picture that starts a valid chain of MP4 boxes |
+
+### What changes in the copy
+
+1. **The video's bytes are left out.** For Samsung, its record is left out and the trailer's index is rewritten
+   with the other records' new offsets (`Image_UTC_Data`, `MCC_Data`, … are kept).
+2. **The XMP flags are cleared in place, at the same length**, so no other byte moves (MPF offsets to a gain map
+   stay right): `MotionPhoto="1"` and `MicroVideo="1"` become `"0"` (what the spec says marks a still photo),
+   and the video's `<rdf:li>` in `Container:Directory` is overwritten with spaces. `MotionPhotoVersion`,
+   timestamps and the `Primary` / `GainMap` items are untouched.
+
+Everything else is copied as it is. The tool keeps the camera's original still (full resolution, HDR-processed)
+rather than taking a frame from the video, which is lower resolution and more heavily compressed.
+
+### What it refuses (never guesses)
+
+- Not a JPEG or a HEIC/AVIF photo (an `.mp4` is left alone), or a JPEG with no end-of-image marker (cut off).
+- Flagged as a Motion Photo but no MP4 found (already stripped by another app): nothing to do.
+- What would be removed is not a well-formed MP4/MOV (an `ftyp` box first, a `moov` box among them), or starts
+  before the picture ends.
+- Unknown non-zero bytes after the video (zero padding is removed with it).
+- A gain map or depth map (MPF) stored after the video, or HEIC boxes after the `mpvd` box: removing the video
+  would move them and break their offsets.
+- Samsung records that cannot be read or that overlap.
+- The usual: `out` (or the video file) already exists, its folder is missing, `out` is the original, not enough
+  free space (copy + video + 16 MB), the original changes while it is copied.
+
+### How a copy is made and checked
+
+`find()` reads only headers: the JPEG's segments up to its end-of-image marker (the entropy data is streamed, never
+held in memory), the XMP, the MPF list, the trailer's index, and MP4 box headers. `strip()` then:
+1. writes the kept parts with the XMP edits (and the new Samsung index) to a hidden work file next to `out`;
+2. reads it back: its size and CRC-32 must match what was written; `find()` on it must report no video, no Motion
+   Photo flag, and the picture ending at the same byte; for Samsung, every record in the new index must read back;
+3. with `videoOut`, writes the clip the same way and checks it is one whole MP4;
+4. checks the original did not change (size, and the modified time for a `File`), then renames into place and
+   gives the copy and the clip the original's modified time.
+
+Measured on a desktop (12 MP JPEG + 2 s 1440p H.264 clip): about 150 ms per photo, nearly all of it reading the
+file twice. The phone Lab also decodes the original and the copy and compares every pixel.
+
+### Motion Photo tool reference
+
+| API | What it does |
+|---|---|
+| `MotionPhoto.find(File)` / `find(FileChannel)` | Reads the file (never changes it) and returns a `Found`. |
+| `MotionPhoto.strip(File in, File out, File videoOut)` | Makes the checked copy at `out`; with `videoOut` (or null) also saves the clip. Blocking. |
+| `MotionPhoto.strip(FileChannel in, long modified, File out, File videoOut)` | The same for a file opened another way (a picked document's descriptor). The caller closes `in`. |
+| `SPARE_BYTES` (16 MB) | Room kept free besides the copy and the clip. |
+
+`Found`: `motion` (a video can be removed), `why` (why not: null for an ordinary photo), `format` (`JPEG`/`HEIC`),
+`kind`, `flagged` (XMP says Motion Photo), `size`, `imageEnd`, `videos` ({start, end} each), `videoBytes()`,
+`newSize()`, `keep`, `patches` (each with `what`), `notes`.
+
+`Outcome`: `ok`, `output`, `video`, `skipped`, `found`, `before`, `after`, `saved()`, `ms`, `trace`.
+
+**What the caller (the action taker) must do:**
+1. Find candidates with `find()` (cheap enough to run over the camera folder: the Lab's survey does).
+2. Tell the user what is lost: the moving clip, nothing else. Galleries then show the photo as an ordinary photo.
+3. Write the copy next to the original under a new name, run off the main thread, scan it with
+   `MediaScannerConnection`, and replace the original only through Android's trash after the user confirmed
+   ([Removing originals](#removing-originals-not-built-yet)). Keep the file name (Google's `…MP.jpg` naming is
+   harmless on a still).
+
+### Testing the Motion Photo tool
+
+- `jvmtest/.../MotionPhotoTest.java` (CI) builds real JPEGs (ImageIO) and MP4 box chains and covers Google JPEG
+  (attribute and element XMP), Ultra HDR with a gain map, MicroVideo, Samsung (video record first or last, with and
+  without Google XMP), HEIC with `mpvd`, wrong `Item:Length`/`Padding` (found by its boxes), plain photos, an
+  `.mp4`, already-stripped files, unknown data after the video, cut-off files, refusals and leftover work files.
+  It checks that only the XMP differs, the pixels decode the same, the clip is saved byte for byte, and the copy
+  reads as an ordinary photo. Run it by hand:
+  `javac -d /tmp/mt app/src/main/java/com/storageplanner/tools/{CopyPaths,MotionPhoto}.java jvmtest/com/storageplanner/test/MotionPhotoTest.java && java -cp /tmp/mt com.storageplanner.test.MotionPhotoTest`.
+- On the phone: Algorithm Lab → **Motion Photos** → **Pick photos** → **Remove the videos (test copies)**, then
+  **Open photo** / **Play removed video**. **Survey DCIM** reads every JPEG/HEIC in the camera folder and says how
+  much removing the videos would free (needs all files access).
 
 ## How it works
 
