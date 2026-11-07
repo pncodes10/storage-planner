@@ -412,8 +412,9 @@ rather than taking a frame from the video, which is lower resolution and more he
 - What would be removed is not a well-formed MP4/MOV (an `ftyp` box first, a `moov` box among them), or starts
   before the picture ends.
 - Unknown non-zero bytes after the video (zero padding is removed with it). When the XMP gives the video's length
-  (`Item:Length`, `MicroVideoOffset`), the video must end exactly there; when it doesn't, only known MP4 top-level
-  boxes count as video, so other data that merely looks like a box is never removed.
+  (`Item:Length`, `MicroVideoOffset`), the video must end exactly there, or the photo is refused. Only when no
+  declared place holds a video does the tool search for one, and then only the MP4's own structure boxes (`ftyp`,
+  `moov`, `mdat`, empty `free`/`skip`, fragments) count as video, so a vendor's `uuid`/`meta` box is never removed.
 - A gain map or depth map (MPF) stored after the video, or HEIC boxes after the `mpvd` box: removing the video
   would move them and break their offsets.
 - Samsung records that cannot be read or that overlap.

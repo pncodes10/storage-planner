@@ -148,6 +148,8 @@ final class MotionLabScreen extends Screen {
     /** A picked photo: its real file when this app can read it (all files access), else read through its descriptor. */
     private static final class Picked {
         Uri uri, media; String name; long size = -1, modified; File file;
+        /** Whether the last read got the photo's exact bytes (location not hidden by Android). */
+        boolean exact;
     }
 
     /** Called by MainActivity with the picked photos (adds to what is picked). */
@@ -284,13 +286,20 @@ final class MotionLabScreen extends Screen {
     private interface WithChannel<T> { T run(java.nio.channels.FileChannel ch) throws Exception; }
 
     private <T> T open(Picked p, WithChannel<T> r) throws Exception {
-        if (p.file != null) {
+        if (p.file != null) {                                   // a path read: exact when location access is granted
+            p.exact = locationAccess();
             FileInputStream in = new FileInputStream(p.file);
             try { return r.run(in.getChannel()); } finally { in.close(); }
         }
-        Uri u = p.uri;
-        if (p.media != null && Build.VERSION.SDK_INT >= 29 && locationAccess()) u = MediaStore.setRequireOriginal(p.media);   // unredacted
-        ParcelFileDescriptor pfd = a.getContentResolver().openFileDescriptor(u, "r");
+        ParcelFileDescriptor pfd = null;
+        if (p.media != null && Build.VERSION.SDK_INT >= 29 && locationAccess()) {
+            try { pfd = a.getContentResolver().openFileDescriptor(MediaStore.setRequireOriginal(p.media), "r"); p.exact = pfd != null; }
+            catch (Exception e) { pfd = null; }                 // no read access to the MediaStore item itself: use the picked URI
+        }
+        if (pfd == null) {
+            pfd = a.getContentResolver().openFileDescriptor(p.uri, "r");
+            p.exact = Build.VERSION.SDK_INT < 29;               // Android 10+ may hide the location in what this gives
+        }
         if (pfd == null) throw new java.io.IOException("cannot open " + p.name);
         try {
             FileInputStream in = new FileInputStream(pfd.getFileDescriptor());
@@ -340,8 +349,7 @@ final class MotionLabScreen extends Screen {
                         "StoragePlanner/compressed/motion-" + new SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(new Date()));
                 dir.mkdirs();
                 String rel = "Download/StoragePlanner/compressed/" + dir.getName() + "/";
-                boolean exact = locationAccess();
-                if (!exact) line("! " + NO_LOCATION);
+                if (!locationAccess()) line("! " + NO_LOCATION);
                 long before = 0, after = 0; int done = 0;
                 List<String> used = new ArrayList<String>();
                 for (final Picked p : src) {
@@ -363,7 +371,7 @@ final class MotionLabScreen extends Screen {
                     for (String t : o.trace) line("    " + t);
                     String decoded = sameDecode(p, outFile);
                     line("    on this phone: " + decoded);
-                    if (!exact) line("    ! the location may be missing from this copy (" + NO_LOCATION.substring(0, NO_LOCATION.indexOf(':')) + ")");
+                    if (!p.exact) line("    ! the location may be missing from this copy: this photo could not be read with its location (Android hides it)");
                     String facts = String.format(Locale.US, "%s: %s → %s (%s) · video %s · %.1f s",
                             p.name, Report.size(o.before), Report.size(o.after), LabScreen.change(o.before, o.after),
                             Report.size(o.found.videoBytes()), o.ms / 1000.0);

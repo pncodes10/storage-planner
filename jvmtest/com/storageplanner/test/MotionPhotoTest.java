@@ -367,11 +367,16 @@ public final class MotionPhotoTest {
 
         // box-shaped data after the video is not video: Item:Length says where the video ends
         MotionPhoto.Outcome boxy = strip(dir, "b.jpg", cat(flagged, MP4, box("abcd", new byte[50])), false);
-        check("box-shaped data after the video: refused, not removed", !boxy.ok && boxy.skipped.contains("follow the video"));
+        check("box-shaped data after the video: refused, not removed", !boxy.ok && boxy.skipped.contains("does not end where"));
         MotionPhoto.Outcome boxy2 = strip(dir, "b2.jpg", cat(jpeg(5, xmpSegment(googleXmp(MP4.length + 7))), MP4, box("abcd", new byte[50])), false);
-        check("box-shaped data after the video, wrong Length: refused", !boxy2.ok && boxy2.skipped.contains("follow the video"));
+        check("box-shaped data after the video, wrong Length: refused", !boxy2.ok);
         MotionPhoto.Outcome boxy3 = strip(dir, "b3.jpg", cat(flagged, MP4, box("free", new byte[50])), false);
-        check("an MP4 'free' (padding) box after the video goes with it", boxy3.ok && boxy3.after == flagged.length);
+        check("a box after a video of the declared length: refused", !boxy3.ok && boxy3.skipped.contains("does not end where"));
+        String noLen = xmp("GCamera:MotionPhoto=\"1\"", null);
+        MotionPhoto.Outcome uuid = strip(dir, "b4.jpg", cat(jpeg(5, xmpSegment(noLen)), MP4, box("uuid", new byte[200])), false);
+        check("no declared length, a vendor uuid box after the video: refused", !uuid.ok && uuid.skipped.contains("follow the video"));
+        MotionPhoto.Outcome pad2 = strip(dir, "b5.jpg", cat(jpeg(5, xmpSegment(noLen)), MP4, box("free", new byte[40])), false);
+        check("no declared length, an empty free box after the video goes with it", pad2.ok && pad2.found.videoBytes() == MP4.length + 48);
 
         MotionPhoto.Outcome pad = strip(dir, "z.jpg", cat(flagged, MP4, new byte[64]), false);
         check("zero padding after the video: removed too", pad.ok && pad.after == flagged.length);
@@ -390,7 +395,7 @@ public final class MotionPhotoTest {
     static void wrongLength(File dir) throws Exception {
         byte[] photo = jpeg(6, xmpSegment(googleXmp(MP4.length + 100)));
         MotionPhoto.Outcome o = strip(dir, "w.jpg", cat(photo, MP4), true);
-        check("Item:Length off: video found by its boxes " + o.skipped, o.ok && o.after == photo.length && o.found.kind.contains("found after"));
+        check("Item:Length disagrees with the video there: refused", !o.ok && o.skipped.contains("does not end where"));
         String x = xmp("GCamera:MotionPhoto=\"1\"", item("image/jpeg", "Primary", 0, 50) + item("video/mp4", "MotionPhoto", MP4.length + 100, 0));
         byte[] photo2 = jpeg(6, xmpSegment(x));
         MotionPhoto.Outcome o2 = strip(dir, "w2.jpg", cat(photo2, MP4), true);

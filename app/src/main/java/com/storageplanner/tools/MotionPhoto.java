@@ -186,13 +186,17 @@ public final class MotionPhoto {
             for (long l : info.videoLengths) { cands.add(new long[]{f.size - l, 0, l}); if (end != f.size) cands.add(new long[]{end - l, 0, l}); }
             if (info.videoAfter >= 0) cands.add(new long[]{f.imageEnd + info.videoAfter, 0, info.videoAfterLength});
             for (long o : info.microOffsets) { cands.add(new long[]{f.size - o, 1, o}); if (end != f.size) cands.add(new long[]{end - o, 1, o}); }
-            long start = -1, e = -1, how = 0;
+            long start = -1, e = -1, how = 0, mismatch = -1;
             for (long[] c : cands) {
                 if (c[0] < f.imageEnd || c[0] >= end) continue;
                 long x = mp4End(ch, c[0], end, false);
                 if (x > 0 && x == c[0] + c[2]) { start = c[0]; e = x; how = c[1]; break; }
+                if (x > 0) mismatch = c[0];                     // a video is there, but not of the declared length
             }
-            if (start < 0 && (info.flagged || info.videoLengths.size() > 0)) {   // the numbers are off: look for it
+            if (start < 0 && mismatch >= 0) {
+                f.why = "the video at byte " + mismatch + " does not end where the XMP says it does"; return f;
+            }
+            if (start < 0 && (info.flagged || info.videoLengths.size() > 0)) {   // no declared start holds a video: look for it
                 for (long p = indexOf(ch, f.imageEnd + 4, end, "ftyp"); p >= 0; p = indexOf(ch, p + 1, end, "ftyp")) {
                     long x = mp4End(ch, p - 4, end, true);         // no declared length: known MP4 boxes only
                     if (x > 0) { start = p - 4; e = x; how = 2; break; }
@@ -713,12 +717,13 @@ public final class MotionPhoto {
 
     /** Top-level boxes an MP4/MOV file may hold (used when no declared length bounds the video). */
     private static final java.util.Set<String> MP4_TOP = new java.util.HashSet<String>(java.util.Arrays.asList(
-            "ftyp", "moov", "mdat", "free", "skip", "wide", "uuid", "meta", "udta", "moof", "mfra", "sidx", "styp", "pdin", "pnot", "emsg", "prft", "ssix"));
+            "ftyp", "moov", "mdat", "free", "skip", "wide", "moof", "mfra", "sidx", "styp"));
 
     /**
      * The end of the chain of boxes that starts at {@code p}, if it is an MP4/MOV video (an {@code ftyp} box first,
      * a {@code moov} box among them) ending by {@code limit}; else -1. With {@code known}, the chain stops at the first
-     * box that is not a known MP4 top-level box, so unrelated data that merely looks like a box is not taken for video.
+     * box that is not one of the MP4's own structure boxes (or a free/skip box that is not empty padding), so unrelated
+     * data that merely looks like a box (a vendor's uuid, meta or udta box) is never taken for video.
      */
     static long mp4End(FileChannel ch, long p, long limit, boolean known) throws IOException {
         long q = p;
@@ -729,6 +734,7 @@ public final class MotionPhoto {
             String t = type(read(ch, q + 4, 4), 0);
             if (n == 0 && !t.equals("ftyp")) return -1;
             if (known && !MP4_TOP.contains(t)) break;
+            if (known && (t.equals("free") || t.equals("skip")) && !zeros(ch, q + b[1], q + b[0])) break;   // padding holds nothing
             if (t.equals("moov")) moov = true;
             q += b[0];
         }
