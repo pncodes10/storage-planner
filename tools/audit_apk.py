@@ -30,7 +30,8 @@ expected = sorted(["android.permission.MANAGE_EXTERNAL_STORAGE", "android.permis
                    "android.permission.QUERY_ALL_PACKAGES",
                    # 1.2: background analysis (foreground service) + its notification
                    "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
-                   "android.permission.POST_NOTIFICATIONS", "android.permission.WAKE_LOCK"])
+                   "android.permission.POST_NOTIFICATIONS", "android.permission.WAKE_LOCK",
+                   "android.permission.ACCESS_MEDIA_LOCATION"])
 check("package / SDK", a.get_package() == "com.storageplanner" and a.get_min_sdk_version() == "26" and a.get_target_sdk_version() == "34",
       f"{a.get_package()} min {a.get_min_sdk_version()} target {a.get_target_sdk_version()} v{a.get_androidversion_name()}")
 check("permissions exactly as declared", perms == expected, ", ".join(p.split(".")[-1] for p in perms))
@@ -142,11 +143,11 @@ web_users = sorted(set(c.get_name() for c in d.get_classes() for m in c.get_meth
                        and "getCurrentWebViewPackage" not in ins.get_output()))   # reading the WebView version for the Lab log is allowed
 check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/app/OcrEngine") for n in web_users), ", ".join(web_users))
 # The compression tools (com.storageplanner.tools) are the only code that removes or renames files: ImageCompressor
-# VideoCompressor and ZipCompressor delete their own work files (and the video tool its sample encodes) and rename a
-# checked copy or archive into place. Today only the Algorithm Lab, the Video Lab and the Zip Lab call them, writing test copies to
+# VideoCompressor, ZipCompressor and MotionPhoto delete their own work files (and the video tool its sample encodes) and rename a
+# checked copy or archive into place. Today only the Algorithm Lab, the Video Lab, the Zip Lab and the Motion Photo Lab call them, writing test copies to
 # Download/StoragePlanner/compressed. Originals are never deleted. Anywhere else is a failure.
 COMPRESSORS = {"Lcom/storageplanner/tools/ImageCompressor;", "Lcom/storageplanner/tools/VideoCompressor;",
-               "Lcom/storageplanner/tools/ZipCompressor;"}
+               "Lcom/storageplanner/tools/ZipCompressor;", "Lcom/storageplanner/tools/MotionPhoto;"}
 ALLOWED = {"deletes / renames files": {
     "Ljava/io/File;->delete()Z": COMPRESSORS,
     "Ljava/io/File;->renameTo(Ljava/io/File;)Z": COMPRESSORS,

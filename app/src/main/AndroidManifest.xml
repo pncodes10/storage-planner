@@ -20,6 +20,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Progress and "your plan is ready" notification (Android 13+ asks the user; the scan runs either way) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Android 10+ hides the GPS location inside photos from apps without this. The Motion Photo tool must read a
+         photo's exact bytes, or its copy would silently lose the location (asked for when the Motion Photo Lab opens) -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
     <!-- Deliberately NO internet permission: the app cannot send anything off the phone. -->
 
     <application
