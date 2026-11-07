@@ -335,23 +335,70 @@ public final class AudioCompressor {
                 if (ox == MediaCodec.INFO_TRY_AGAIN_LATER) return false;
                 if (ox == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     if (muxStarted) throw new IOException("the encoder changed its format");
-                    track = mux.addTrack(enc.getOutputFormat());
-                    mux.start();
-                    muxStarted = true;
+                    outFormat = enc.getOutputFormat();
                     continue;
                 }
                 if (ox < 0) continue;
-                boolean config = (bi.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0;
-                if (!config && bi.size > 0) {
-                    if (!muxStarted) throw new IOException("encoder output before its format");
-                    ByteBuffer b = enc.getOutputBuffer(ox);
-                    b.position(bi.offset).limit(bi.offset + bi.size);
+                ByteBuffer b = enc.getOutputBuffer(ox);
+                b.position(bi.offset).limit(bi.offset + bi.size);
+                if ((bi.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                    config = new byte[bi.size];
+                    b.get(config);
+                } else if (bi.size > 0) {
+                    if (!muxStarted) startMuxer();
                     mux.writeSampleData(track, b, bi);
                     packets++;
                 }
                 enc.releaseOutputBuffer(ox, false);
                 if ((bi.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) return true;
             }
+        }
+
+        MediaFormat outFormat;
+        byte[] config;
+
+        /** Adds the track with the encoder's format, taking the codec headers from its config buffer when the format lacks them. */
+        private void startMuxer() throws IOException {
+            MediaFormat f = outFormat != null ? outFormat : enc.getOutputFormat();
+            if (!f.containsKey("csd-0")) {
+                if (config == null) throw new IOException("the encoder gave no codec header");
+                if (plan.level.opus) opusHeaders(f, config);
+                else f.setByteBuffer("csd-0", ByteBuffer.wrap(config));
+            }
+            track = mux.addTrack(f);
+            mux.start();
+            muxStarted = true;
+        }
+
+        /**
+         * Opus needs three headers in the format: the OpusHead (csd-0), the codec delay (csd-1) and the seek pre-roll
+         * (csd-2), both in nanoseconds. Android's encoder gives them in one config buffer, either as marked blocks
+         * ("AOPUSHDR", "AOPUSDLY", "AOPUSPRL", each with a 64-bit length) or as a bare OpusHead.
+         */
+        static void opusHeaders(MediaFormat f, byte[] c) throws IOException {
+            ByteBuffer b = ByteBuffer.wrap(c).order(ByteOrder.LITTLE_ENDIAN);
+            byte[] head = null; long delayNs = -1, prerollNs = 80_000_000L;
+            if (c.length >= 8 && new String(c, 0, 8, java.nio.charset.StandardCharsets.US_ASCII).equals("OpusHead")) {
+                head = c;
+            } else {
+                while (b.remaining() >= 16) {
+                    String mark = new String(c, b.position(), 8, java.nio.charset.StandardCharsets.US_ASCII);
+                    b.position(b.position() + 8);
+                    long len = b.getLong();
+                    if (len < 0 || len > b.remaining()) throw new IOException("a broken Opus config block");
+                    byte[] v = new byte[(int) len];
+                    b.get(v);
+                    ByteBuffer vb = ByteBuffer.wrap(v).order(ByteOrder.LITTLE_ENDIAN);
+                    if (mark.equals("AOPUSHDR")) head = v;
+                    else if (mark.equals("AOPUSDLY") && len == 8) delayNs = vb.getLong();
+                    else if (mark.equals("AOPUSPRL") && len == 8) prerollNs = vb.getLong();
+                }
+            }
+            if (head == null || head.length < 19) throw new IOException("no OpusHead in the encoder's config");
+            if (delayNs < 0) delayNs = ((head[10] & 255) | (head[11] & 255) << 8) * 1_000_000_000L / 48_000;   // its pre-skip, in 48 kHz samples
+            f.setByteBuffer("csd-0", ByteBuffer.wrap(head));
+            f.setByteBuffer("csd-1", ByteBuffer.allocate(8).order(ByteOrder.nativeOrder()).putLong(0, delayNs));
+            f.setByteBuffer("csd-2", ByteBuffer.allocate(8).order(ByteOrder.nativeOrder()).putLong(0, prerollNs));
         }
 
         void release() {

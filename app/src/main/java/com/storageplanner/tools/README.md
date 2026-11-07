@@ -4,7 +4,8 @@ This folder holds **tools**: code that changes files on the phone, so that a fut
 out what the plan recommends. Today it holds the image compression tools (HEIC, WebP, and lossless WebP), the
 video compression tool (HEVC at five levels, see [Videos](#videos-videocompressor)), the zip tool (any files into
 one checked `.zip`, see [Zip archives](#zip-archives-zipcompressor)) and the Motion Photo tool (removes the short
-video from a Motion Photo and keeps the photo byte for byte, see [Motion Photos](#motion-photos-motionphoto)).
+video from a Motion Photo and keeps the photo byte for byte, see [Motion Photos](#motion-photos-motionphoto)), and
+the audio tool (smaller checked copies of recordings, Opus for speech, see [Audio](#audio-audiocompressor)).
 
 ## Ground rules
 
@@ -21,10 +22,12 @@ video from a Motion Photo and keeps the photo byte for byte, see [Motion Photos]
   **Video compression (test copies)** in the Lab opens `app/VideoLabScreen.java`, which works the same way. Zips:
   **Zip compression** opens `app/ZipLabScreen.java`, which writes test archives to the same folder. Motion Photos:
   **Motion Photos** opens `app/MotionLabScreen.java`, which writes test copies (and the removed videos) there too.
+  Audio: **Audio** opens `app/AudioLabScreen.java`, which writes test copies of recordings there too.
 - **A tool never deletes or changes an original.** It writes a new file next to it. Removing originals is the
   action taker's job (see [Removing originals](#removing-originals-not-built-yet)).
 - **The APK audit enforces this** (`tools/audit_apk.py`, run by CI):
-  - only `tools/ImageCompressor`, `tools/VideoCompressor`, `tools/ZipCompressor` and `tools/MotionPhoto` may call
+  - only `tools/ImageCompressor`, `tools/VideoCompressor`, `tools/ZipCompressor`, `tools/MotionPhoto` and
+    `tools/AudioCompressor` may call
     `File.delete` / `File.renameTo` (on their own work files and samples);
   - there must be no MediaStore trash / delete / write requests anywhere.
   A new tool or caller that needs more must update that allowlist on purpose, and say why.
@@ -49,9 +52,11 @@ video from a Motion Photo and keeps the photo byte for byte, see [Motion Photos]
 | `FrameScore.java` | Scores one video frame against the original (SSIM, PSNR, colour PSNR, colour shift). | no |
 | `ZipCompressor.java` | **The entry point for zips.** Puts files (or a folder) into one `.zip`, reads every entry back to check it. | no (plain Java) |
 | `MotionPhoto.java` | **The entry point for Motion Photos.** Finds the video in a Motion Photo (Google JPEG/HEIC, MicroVideo, Samsung) and makes a checked copy without it. | no (plain Java) |
+| `AudioCompressor.java` | **The entry point for audio.** Decodes a recording, mixes, resamples, encodes (Opus in `.ogg`, or AAC in `.m4a`), and checks the copy. | yes |
+| `AudioMath.java` | The five audio levels and their plans, the streaming resampler, the loudness envelope check. | no (plain Java) |
 
 The plain-Java files are tested on a desktop by `jvmtest/com/storageplanner/test/CompressionTest.java`,
-`VideoTest.java` and `ZipTest.java`. CI runs all three before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
+`VideoTest.java`, `ZipTest.java`, `MotionPhotoTest.java` and `AudioTest.java`. CI runs all of them before every build. That test also checks `tools/Ssim` == `app/Ssim`: **change both or neither.**
 
 ## How to use
 
@@ -473,6 +478,87 @@ file twice. The phone Lab also decodes the original and the copy and compares ev
 - On the phone: Algorithm Lab → **Motion Photos** → **Pick photos** → **Remove the videos (test copies)**, then
   **Open photo** / **Play removed video**. **Survey DCIM** reads every JPEG/HEIC in the camera folder and says how
   much removing the videos would free (needs all files access).
+
+## Audio (`AudioCompressor`)
+
+Phones record calls, voice notes and meetings at bitrates made for music: a Samsung call recording or a Voice
+Recorder file is AAC at 64–128 kbps, a WAV is 128–1,411 kbps. Speech needs far less. **Opus**, the codec built for
+speech and the internet (RFC 6716; what WhatsApp voice notes and every video call use), keeps wideband speech clear
+at 12–16 kbps, and beats HE-AAC at those rates. So a call recording becomes **about a tenth of its size**, and still
+sounds like the call.
+
+```java
+AudioMath.Plan p = AudioMath.plan(Level.VOICE, bytes, durationUs, rate, channels);   // what a level would make; p.skip says why not
+AudioCompressor.Outcome o = AudioCompressor.compress(fd, bytes, modified, Level.VOICE, outFile, stop, progress);
+if (o.ok) { /* outFile is o.after bytes, checked */ } else { /* o.skipped says why */ }
+```
+
+### Levels
+
+| Level | Codec | Bitrate | Channels | Sample rate (at most) | For |
+|---|---|---|---|---|---|
+| Voice small | Opus | 12 kbps | mono | 16 kHz | speech, the smallest |
+| **Voice** | Opus | 16 kbps | mono | 16 kHz | **calls and voice notes (recommended)** |
+| Voice clear | Opus | 24 kbps | mono | 24 kHz | lectures, meetings, speech with music behind it |
+| Music | Opus | 96 kbps (64 for mono) | kept | 48 kHz | music |
+| Compatible | AAC-LC | 32 kbps | mono | 16 kHz | an `.m4a` every phone, computer and messenger plays |
+
+Opus copies are `.ogg` files (Ogg Opus), written by Android's own encoder and muxer: **Android 10 or newer**. Older
+phones get only the Compatible level. The sample rate is never raised: an 8 kHz phone-line recording stays 8 kHz.
+
+### What it refuses
+
+- **Already small:** a copy that would not be at least 20% smaller (an AMR call recording at 12 kbps, a voice note
+  that is already Opus). The estimate is the bitrate × length plus the container's overhead.
+- A file with no audio track, or no length; a level this phone cannot encode.
+- A copy that fails the check, or is not smaller; `out` already exists; not enough free space (twice the expected
+  size plus 16 MB).
+
+### How a copy is made and checked
+
+1. One pass: `MediaExtractor` → the phone's decoder (16-bit or float PCM) → mixed down to the level's channels →
+   resampled (`AudioMath.Resampler`: windowed sinc, Blackman window, 16 zero crossings; when it lowers the rate it
+   first removes everything above the new Nyquist frequency, so nothing folds back as aliasing) → encoder → muxer,
+   into a hidden work file (`.<name>.part`) next to `out`. Nothing is held in memory but a few buffers, so an hour
+   long recording is fine.
+2. While decoding the original it records its **loudness envelope**: the level in dB of every 20 ms.
+3. The work file is decoded again with the phone's decoder, and its envelope compared with the original's
+   (`AudioMath.match`, best of ±300 ms of shift for codec delay). It must have **the same length** (within 0.15 s
+   + 0.5%), **the same envelope** (correlation ≥ 0.90), and **the same loudness** (within 2 dB, measured on the
+   speech, not the pauses). A low-bitrate codec changes the waveform but not when and how loud each word is, so this
+   catches a copy that is silent, cut short, noise, too quiet, or of another file. Real Opus at 8–24 kbps and AAC at
+   32 kbps score 0.997–1.000 on a two-speaker recording.
+4. Only then is it renamed to `out` and given the original's modified time.
+
+Tags (title, artist) and cover art are not copied: recordings rarely have them. For music, keep that in mind.
+
+### Audio tool reference
+
+| API | What it does |
+|---|---|
+| `AudioMath.plan(level, bytes, durationUs, rate, channels)` | The level's `Plan` (codec, rate, channels, bitrate, expected size) or `skip`. Plain Java. |
+| `AudioCompressor.probe(fd, bytes)` | The first audio track's `Info` (mime, rate, channels, length). |
+| `AudioCompressor.cannot(level)` | Why this phone cannot make `level` copies, or null. |
+| `AudioCompressor.compress(fd, bytes, modified, level, out, stop, progress)` | Makes the checked copy. Blocking; `stop` (an `AtomicBoolean`, may be null) ends it early; `progress` (may be null) gets 0..1. The caller closes `fd`. |
+
+`Outcome`: `ok`, `skipped`, `in`, `plan`, `match`, `before`, `after`, `inSeconds`, `outSeconds`, `encoder`, `ms`, `trace`.
+
+**What the caller (the action taker) must do:** pick the level by what the recording is (Voice for the call
+recorder's and the voice recorder's folders, Music for music; never re-compress files that are already Opus),
+tell the user the copy is lossy and play a few seconds of it, write it next to the original, scan it with
+`MediaScannerConnection`, and replace the original only through Android's trash after the user confirmed. A call
+recorder's own app may only list its own `.m4a` files: say so before replacing them.
+
+### Testing the audio tool
+
+- `jvmtest/.../AudioTest.java` (CI): the levels' plans (rates, channels, already-small refusals), the resampler
+  (exact length, 1 kHz level and frequency kept at seven rate pairs, 10 kHz removed at 16 kHz, passthrough exact,
+  any chunk sizes give the same output, stereo), mixing, PCM clipping, and the check (a noisy, delayed copy passes;
+  other speech, silence, 6 dB quieter and cut copies fail). With a WAV as its argument it also checks that file.
+  `javac -d /tmp/at app/src/main/java/com/storageplanner/tools/AudioMath.java jvmtest/com/storageplanner/test/AudioTest.java && java -cp /tmp/at com.storageplanner.test.AudioTest [file.wav]`.
+- On the phone: Algorithm Lab → **Audio** → **Pick recordings** → **Compress at Voice** or **All five levels**,
+  then **Play original** / **Play copy**. **Check only** lists what each level would make. **Survey recordings**
+  reads `Recordings/`, `Call/`, `Music/` and `Sounds/` and says how much Voice (Music for `Music/`) would free.
 
 ## How it works
 

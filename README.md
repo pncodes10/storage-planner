@@ -299,6 +299,14 @@ reads your camera folder and says how much removing every clip would free. Works
 JPEG and HEIC) and Samsung Motion Photos ([how](app/src/main/java/com/storageplanner/tools/README.md#motion-photos-motionphoto)).
 Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals are only read.
 
+**Audio** (the fourth button) opens the **Audio Lab**. Pick recordings (call recordings, voice notes, music) and tap
+**Compress at Voice**: Opus at 16 kbps keeps speech clear at about a tenth of a typical recording's size. **All five
+levels** compares Voice small, Voice, Voice clear, Music and Compatible (AAC `.m4a`, plays everywhere). Each copy is
+decoded again and checked against the original: the same length and the same loudness over time. **Play original**
+and **Play copy** let you hear both. **Survey recordings** says how much compressing your recordings folders would
+free ([how](app/src/main/java/com/storageplanner/tools/README.md#audio-audiocompressor)). Copies go to
+`Download/StoragePlanner/compressed/audio-<time>/`; the originals are only read.
+
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
    **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
 2. **Run on the selected picture:**
