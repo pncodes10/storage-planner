@@ -148,8 +148,9 @@ final class MotionLabScreen extends Screen {
     /** A picked photo: its real file when this app can read it (all files access), else read through its descriptor. */
     private static final class Picked {
         Uri uri, media; String name; long size = -1, modified; File file;
-        /** Whether the last read got the photo's exact bytes (location not hidden by Android). */
+        /** Whether the last read got the photo's exact bytes (location not hidden by Android), and how it was read. */
         boolean exact;
+        String how = "";
     }
 
     /** Called by MainActivity with the picked photos (adds to what is picked). */
@@ -288,17 +289,19 @@ final class MotionLabScreen extends Screen {
     private <T> T open(Picked p, WithChannel<T> r) throws Exception {
         if (p.file != null) {                                   // a path read: exact when location access is granted
             p.exact = locationAccess();
+            p.how = "file path";
             FileInputStream in = new FileInputStream(p.file);
             try { return r.run(in.getChannel()); } finally { in.close(); }
         }
         ParcelFileDescriptor pfd = null;
         if (p.media != null && Build.VERSION.SDK_INT >= 29 && locationAccess()) {
-            try { pfd = a.getContentResolver().openFileDescriptor(MediaStore.setRequireOriginal(p.media), "r"); p.exact = pfd != null; }
+            try { pfd = a.getContentResolver().openFileDescriptor(MediaStore.setRequireOriginal(p.media), "r"); p.exact = pfd != null; p.how = "MediaStore original"; }
             catch (Exception e) { pfd = null; }                 // no read access to the MediaStore item itself: use the picked URI
         }
         if (pfd == null) {
             pfd = a.getContentResolver().openFileDescriptor(p.uri, "r");
             p.exact = Build.VERSION.SDK_INT < 29;               // Android 10+ may hide the location in what this gives
+            p.how = "picked URI";
         }
         if (pfd == null) throw new java.io.IOException("cannot open " + p.name);
         try {
@@ -350,6 +353,7 @@ final class MotionLabScreen extends Screen {
                 dir.mkdirs();
                 String rel = "Download/StoragePlanner/compressed/" + dir.getName() + "/";
                 if (!locationAccess()) line("! " + NO_LOCATION);
+                else line("location access in photos: granted");
                 long before = 0, after = 0; int done = 0;
                 List<String> used = new ArrayList<String>();
                 for (final Picked p : src) {
@@ -371,6 +375,8 @@ final class MotionLabScreen extends Screen {
                     for (String t : o.trace) line("    " + t);
                     String decoded = sameDecode(p, outFile);
                     line("    on this phone: " + decoded);
+                    line("    " + location(p, outFile));
+                    android.media.MediaScannerConnection.scanFile(a, new String[]{outFile.getPath(), vidFile.getPath()}, null, null);   // so galleries list them
                     if (!p.exact) line("    ! the location may be missing from this copy: this photo could not be read with its location (Android hides it)");
                     String facts = String.format(Locale.US, "%s: %s → %s (%s) · video %s · %.1f s",
                             p.name, Report.size(o.before), Report.size(o.after), LabScreen.change(o.before, o.after),
@@ -388,6 +394,29 @@ final class MotionLabScreen extends Screen {
                 line("Saved in " + rel);
             }
         });
+    }
+
+    /** The GPS position in the original (as this app reads it) and in the copy, from their EXIF. */
+    private String location(final Picked p, File copy) {
+        String orig, cp;
+        try {
+            orig = open(p, new WithChannel<String>() {
+                public String run(java.nio.channels.FileChannel ch) throws Exception {
+                    return latLong(new android.media.ExifInterface(java.nio.channels.Channels.newInputStream(ch)));
+                }
+            });
+        } catch (Throwable t) { orig = "unreadable (" + t.getMessage() + ")"; }
+        try { cp = latLong(new android.media.ExifInterface(copy.getPath())); }
+        catch (Throwable t) { cp = "unreadable (" + t.getMessage() + ")"; }
+        return "location: original " + orig + " (read by " + p.how + (p.exact ? ", exact" : ", may be hidden") + ") · copy " + cp
+                + (orig.equals(cp) ? " · same" : " · DIFFERENT");
+    }
+
+    @SuppressWarnings("deprecation")
+    private static String latLong(android.media.ExifInterface e) {
+        float[] ll = new float[2];
+        if (!e.getLatLong(ll)) return e.getAttribute(android.media.ExifInterface.TAG_GPS_LATITUDE) != null ? "zeroed GPS tags" : "none";
+        return String.format(Locale.US, "%.5f, %.5f", ll[0], ll[1]);
     }
 
     /** Decodes the original and the copy (scaled down alike) and compares every pixel. */
