@@ -180,6 +180,7 @@ public final class MainActivity extends Activity {
         if (d.equals("videolab")) return new VideoLabScreen(this);
         if (d.equals("ziplab")) return new ZipLabScreen(this);
         if (d.equals("motionlab")) return new MotionLabScreen(this);
+        if (d.equals("audiolab")) return new AudioLabScreen(this);
         if (d.startsWith("pics:")) return Session.pictures.containsKey(d.substring(5)) ? PicturesScreen.category(this, d.substring(5)) : null;
         if (d.startsWith("search:")) return PicturesScreen.search(this, d.substring(7));
         if (d.startsWith("compare:")) {
@@ -349,7 +350,7 @@ public final class MainActivity extends Activity {
     private static final int REQ_PICK_FILES = 4713;
     private Screen pickingFiles;
 
-    /** Lets the user pick several files of type {@code mime}; they go to {@code s.picked} (a Zip Lab or Motion Photo Lab). */
+    /** Lets the user pick several files of type {@code mime}; they go to {@code s.picked} (a Zip Lab, Motion Photo Lab or Audio Lab). */
     void pickFiles(Screen s, String mime) {
         pickingFiles = s;
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType(mime)
@@ -366,7 +367,7 @@ public final class MainActivity extends Activity {
         super.onActivityResult(req, res, data);
         if (req == REQ_PICK_FILES) {
             Screen z = pickingFiles;
-            if (z == null && !stack.isEmpty() && (top() instanceof ZipLabScreen || top() instanceof MotionLabScreen)) z = top();   // the app was restarted meanwhile
+            if (z == null && !stack.isEmpty() && (top() instanceof ZipLabScreen || top() instanceof MotionLabScreen || top() instanceof AudioLabScreen)) z = top();   // the app was restarted meanwhile
             pickingFiles = null;
             if (z == null || res != RESULT_OK || data == null) return;
             java.util.List<android.net.Uri> got = new ArrayList<android.net.Uri>();
@@ -376,6 +377,7 @@ public final class MainActivity extends Activity {
             if (got.isEmpty()) return;
             if (z instanceof ZipLabScreen) ((ZipLabScreen) z).picked(got);
             else if (z instanceof MotionLabScreen) ((MotionLabScreen) z).picked(got);
+            else if (z instanceof AudioLabScreen) ((AudioLabScreen) z).picked(got);
             return;
         }
         if (req == REQ_PICK_VIDEO) {
