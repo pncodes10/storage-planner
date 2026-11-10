@@ -23,6 +23,8 @@ import java.util.Map;
 
 /** Everything about one file or app: preview, facts, every flag and its status, the related kept copy, actions. */
 public final class DetailScreen extends Screen {
+    private static String cap(String s) { return s.isEmpty() ? s : Character.toUpperCase(s.charAt(0)) + s.substring(1); }
+
     private final Row row;
     private LinearLayout content;
 
@@ -165,6 +167,8 @@ public final class DetailScreen extends Screen {
                 c.addView(top, new LinearLayout.LayoutParams(-1, -2));
                 Ui.add(c, Ui.text(a, o.technique, 16, Ui.text, true), 8);
                 Ui.add(c, Ui.text(a, o.why, 15, Ui.text2, false), 4);
+                if (o.evidence != null && !o.evidence.isEmpty())
+                    Ui.add(c, Ui.text(a, "Do you need it? Estimated " + o.need + " of 100. " + cap(o.evidence) + ".", 14, Ui.text2, false), 4);
                 String st; int col;
                 if (kept) { st = "You chose to keep this item. It is not in any plan."; col = Ui.text2; }
                 else if (o == chosen && Session.isAccepted(u)) { st = "\u2713 Approved by you: locked into your plan."; col = Ui.tier[0]; }

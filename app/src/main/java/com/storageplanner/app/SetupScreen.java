@@ -102,9 +102,14 @@ public final class SetupScreen extends Screen {
         lab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(20);
         L.addView(row, rl);
-        LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
-        L.addView(lab, labl);
         Ui.add(L, Ui.text(a, "Runs in the background. You can switch apps; you'll get a notification when your plan is ready.", 14, Ui.text2, false), 8);
+        LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
+        Button algo = Ui.button(a, "Algorithm settings", false);
+        algo.setContentDescription("Algorithm settings: how readily a file is called not needed, and what the app looks at");
+        algo.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new AlgorithmScreen(a)); } });
+        LinearLayout.LayoutParams algl = new LinearLayout.LayoutParams(-2, -2); algl.topMargin = dp(20);
+        L.addView(algo, algl);
+        L.addView(lab, labl);
 
         progressBar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setVisibility(View.GONE);

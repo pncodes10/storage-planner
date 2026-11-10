@@ -87,6 +87,34 @@ public final class Session {
         }
     }
 
+    private static int rebuilds;
+
+    /**
+     * Judges the saved scan again with the current algorithm settings (Policy.active), off the main thread,
+     * then replaces the plan. done runs on the main thread afterwards, also when there was nothing to do.
+     */
+    public static void rebuildAsync(final Runnable done) {
+        if (!hasResults()) { if (done != null) done.run(); return; }
+        final Scanner.Result r = result; final Estimates e = est; final int s = sdk; final long t = targetUsed; final boolean st = appStats;
+        final com.storageplanner.core.Policy p = com.storageplanner.core.Policy.active;
+        final int gen = ++rebuilds;
+        new Thread(new Runnable() {
+            public void run() {
+                UnitBuilder b = null;
+                try { b = new UnitBuilder(r, e, s, p); } catch (Throwable x) { b = null; }
+                final UnitBuilder fb = b;
+                AnalysisState.UI.post(new Runnable() {
+                    public void run() {
+                        if (fb != null && gen == rebuilds && result == r) {
+                            try { set(r, fb, e, t, st, s); } catch (Throwable x) { /* keep the plan that was there */ }
+                        }
+                        if (done != null) done.run();
+                    }
+                });
+            }
+        }, "rejudge").start();
+    }
+
     public static void replan() {
         if (ub == null) return;
         long need = Math.max(0, used() - targetUsed);

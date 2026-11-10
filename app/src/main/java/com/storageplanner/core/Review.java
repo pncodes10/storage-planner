@@ -68,7 +68,7 @@ public final class Review {
     /**
      * Plan that respects the user's review: kept units are never used; accepted units (unit id ->
      * accepted technique) are locked in with that option; the planner covers what is still needed.
-     * mode 0 = minimum to reach the target, 1 = every safe step (R0-R2).
+     * mode 0 = minimum to reach the target, 1 = every safe step (Planner.safe).
      */
     public static Planner.Plan planWithDecisions(List<Unit> units, Set<String> kept, Map<String, String> accepted, long need, int mode) {
         List<Unit> rest = new ArrayList<Unit>();
@@ -81,7 +81,7 @@ public final class Review {
             if (o != null) { forced.put(u, o); forcedSaved += o.saved; forcedTier = Math.max(forcedTier, o.risk); }
             else rest.add(u);
         }
-        Planner.Plan p = mode == 1 ? Planner.bestWithin(rest, Option.R2) : Planner.tiered(rest, Math.max(0, need - forcedSaved));
+        Planner.Plan p = mode == 1 ? Planner.safe(rest) : Planner.tiered(rest, Math.max(0, need - forcedSaved));
         p.chosen.putAll(forced);
         p.reachesTarget = p.saved() >= need;
         int tier = -1;

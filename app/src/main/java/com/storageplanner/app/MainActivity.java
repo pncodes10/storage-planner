@@ -60,6 +60,7 @@ public final class MainActivity extends Activity {
         current = this;
         Ui.init(this); night = Ui.night;
         Session.loadKept(this);
+        AlgorithmScreen.activate(this);
         styleBars();
         setup = new SetupScreen(this);
         push(setup);
@@ -176,6 +177,7 @@ public final class MainActivity extends Activity {
             com.storageplanner.core.FileItem f = Session.fileByRel.get(d.substring(7));
             return f != null ? new ViewerScreen(this, f) : null;
         }
+        if (d.equals("algorithm")) return new AlgorithmScreen(this);
         if (d.equals("lab")) return new LabScreen(this);
         if (d.equals("videolab")) return new VideoLabScreen(this);
         if (d.equals("ziplab")) return new ZipLabScreen(this);

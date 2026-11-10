@@ -27,6 +27,8 @@ import java.util.Set;
  *        a file with companions (RAW + JPEG, edit sidecar) is not split up
  *        an older backup may go only while a newer one is there
  *        expected harm above Policy.REVIEW_HARM
+ *        whether the user is likely to need the file (Need): suggestions that rest on what a file is or how old
+ *        it is, not on another copy, are kept silently, suggested, or shown for review by that score
  *   2. Tier, derived from the five values (Policy): Safe, No loss, or Your call. Re-encodes keep the tier of
  *      their kind; the tools check the real result when they run.
  *
@@ -68,12 +70,40 @@ public final class Assessor {
         final Map<String, Long> newestBackup = new HashMap<String, Long>();
         UnitBuilder.Detections det;
         long now;
+        Policy policy;
+        /** When each camera photo and video was taken, sorted. */
+        long[] cameraTimes = new long[0];
+        double medianSharp;
+        /** technique -> {approved, kept}: what the user decided before on that kind of suggestion */
+        final Map<String, int[]> history = new HashMap<String, int[]>();
     }
 
+    /** Suggestions that rest on what the file is, not on another copy of it: Need decides them. */
+    private static final Set<String> NEED_BASED = set(Techniques.BLURRY, Techniques.ACCIDENTAL, Techniques.OTP_SHOTS, Techniques.GREETINGS,
+            Techniques.OLD_PAYMENTS, Techniques.EXPIRED_TICKETS, Techniques.OLD_DOWNLOADS, Techniques.ACCIDENTAL_VIDEOS,
+            Techniques.SCREEN_RECORDINGS);
+
+    public static void apply(UnitBuilder ub, Scanner.Result r) { apply(ub, r, Policy.active); }
+
     /** Assess every file unit of a finished UnitBuilder, replacing its proposals with the ones that stand. */
-    public static void apply(UnitBuilder ub, Scanner.Result r) {
+    public static void apply(UnitBuilder ub, Scanner.Result r, Policy policy) {
         Ctx c = new Ctx();
-        c.det = ub.det; c.now = r.now;
+        c.det = ub.det; c.now = r.now; c.policy = policy == null ? new Policy() : policy;
+        List<Long> times = new ArrayList<Long>(); List<Double> sharps = new ArrayList<Double>();
+        for (FileItem f : r.files) if ("camera".equals(f.area)) {
+            times.add(f.mtime);
+            if (f.hasPhash && f.sharp >= 0) sharps.add(f.sharp);
+        }
+        java.util.Collections.sort(times); java.util.Collections.sort(sharps);
+        c.cameraTimes = new long[times.size()];
+        for (int i = 0; i < times.size(); i++) c.cameraTimes[i] = times.get(i);
+        if (!sharps.isEmpty()) c.medianSharp = sharps.get(sharps.size() / 2);
+        // what the user decided before, by kind of suggestion (counted on the proposals, before any is withdrawn)
+        if (c.policy.accepted != null)
+            for (String tech : c.policy.accepted.values()) if (NEED_BASED.contains(tech)) hist(c, tech)[0]++;
+        if (c.policy.kept != null && !c.policy.kept.isEmpty())
+            for (Unit u : ub.units) if (u.file != null && c.policy.kept.contains(u.id))
+                for (Option o : u.options) if (NEED_BASED.contains(o.technique)) hist(c, o.technique)[1]++;
         for (FileItem f : r.files) {
             c.byRel.put(f.rel, f);
             String stem = stem(f.rel);
@@ -102,6 +132,28 @@ public final class Assessor {
             u.options.clear();
             u.options.addAll(stand);
         }
+    }
+
+    private static int[] hist(Ctx c, String technique) {
+        int[] h = c.history.get(technique);
+        if (h == null) { h = new int[2]; c.history.put(technique, h); }
+        return h;
+    }
+
+    private static Need.Around around(FileItem f, String technique, Ctx c) {
+        Need.Around a = new Need.Around();
+        a.now = c.now; a.medianSharp = c.medianSharp;
+        if ("camera".equals(f.area)) {
+            long lo = f.mtime - 3600000L, hi = f.mtime + 3600000L;
+            int n = 0;
+            int i = java.util.Arrays.binarySearch(c.cameraTimes, lo);
+            if (i < 0) i = -i - 1; else while (i > 0 && c.cameraTimes[i - 1] >= lo) i--;
+            for (; i < c.cameraTimes.length && c.cameraTimes[i] <= hi; i++) n++;
+            a.takenNearby = Math.max(0, n - 1);
+        }
+        int[] h = c.history.get(technique);
+        if (h != null) { a.approvedBefore = h[0]; a.keptBefore = h[1]; }
+        return a;
     }
 
     private static void count(Map<String, Integer> n, Map<String, String> copyToKeeper) {
@@ -178,8 +230,9 @@ public final class Assessor {
         if (a.hasCompanion) return withdraw(a, o, "other files belong to it and would no longer match");
         if (lossy && f.category != null && TEXT_CATEGORIES.contains(f.category)) return withdraw(a, o, "the text or code in it must stay exact");
         double conf = o.exact ? 0.9 : 0.8;
-        return new Option(o.action, o.technique, o.saved, o.risk, o.exact, o.why, false, null, null,
-                a.retention, 0, 0, lossy ? 0.1 : 0.0, conf);
+        Option n = new Option(o.action, o.technique, o.saved, o.risk, o.exact, o.why);
+        n.retention = a.retention; n.redundancy = 0; n.regenerable = 0; n.harm = lossy ? 0.1 : 0.0; n.confidence = conf;
+        return n;
     }
 
     private static Option judgeDelete(FileItem f, Option o, Assessment a, Ctx c) {
@@ -189,6 +242,7 @@ public final class Assessor {
         boolean discarded = false;              // the user already threw it away
         String review = null;                   // set = review-only, with this reason
         String keeps = null, technique = t;
+        Need.Result need = null;
         double age = f.ageDays(c.now);
         double aged = age > 1 ? 0.6 : 0;
 
@@ -234,15 +288,24 @@ public final class Assessor {
             red = 0.6; conf = agree(0.7, 0.5, measured ? 0.6 : 0);
             if (!measured) review = "the shots look alike, but which one is better was not measured";
         }
-        else if (t.equals(Techniques.BLURRY)) { conf = agree(0.5); review = "a soft photo may be the only one of that moment"; }
-        else if (t.equals(Techniques.ACCIDENTAL)) { conf = agree(0.6); review = "darkness or blur alone is not a reason to delete"; }
-        else if (t.equals(Techniques.OTP_SHOTS)) conf = agree(0.8, aged);
-        else if (t.equals(Techniques.GREETINGS)) conf = agree(0.6, 0.7, 0.5);
-        else if (t.equals(Techniques.OLD_PAYMENTS)) { conf = agree(0.8, 0.5); review = "a payment record; your call whether you still need it"; }
-        else if (t.equals(Techniques.EXPIRED_TICKETS)) { conf = agree(0.8, 0.5); review = "may still be needed for a refund or an expense claim"; }
-        else if (t.equals(Techniques.OLD_DOWNLOADS)) {
-            if (f.apkPackage != null) { regen = 0.5; assumed = true; conf = agree(0.95, 0.9); }   // an installer; the store may still have it
-            else { conf = agree(0.5); review = "old does not mean unimportant"; }
+        else if (t.equals(Techniques.SENT_VIDEOS)) {
+            keeps = c.det.sentCopyOf.get(f.rel);
+            FileItem k = keeps == null ? null : c.byRel.get(keeps);
+            int close = k == null ? -1 : VideoLook.sameVideo(k, f, UnitBuilder.SENT_VIDEO_BITS);
+            if (close < 0) return withdraw(a, o, "the video it was sent from could not be confirmed");
+            boolean sure = close == f.vHashes.length && Math.abs(k.durationMs - f.durationMs) <= 300
+                    && (long) k.width * k.height >= (long) f.width * f.height && k.size >= f.size;
+            red = sure ? 0.98 : 0.85; conf = agree(0.8, sure ? 0.9 : 0.7);
+        }
+        else if (t.equals(Techniques.OLD_DOWNLOADS) && f.apkPackage != null) { regen = 0.5; assumed = true; conf = agree(0.95, 0.9); }   // an installer; the store may still have it
+        else if (NEED_BASED.contains(t)) {
+            need = Need.of(f, t, around(f, t, c), c.policy);
+            if (need.verdict == Need.KEEP) return withdraw(a, o, "you probably need it (" + need.evidence() + ")");
+            conf = need.reasonsAgainst == 0 ? 0 : 1 - Math.pow(0.4, need.reasonsAgainst);
+            if (need.verdict == Need.REVIEW)
+                review = need.reasonsAgainst < Policy.MIN_REASONS && !need.against.isEmpty()
+                        ? "one reason is not enough (" + need.against.get(0) + ")"
+                        : "could not tell whether you need it";
         }
         else { conf = agree(0.5); review = "not enough is known about this file"; }
 
@@ -254,10 +317,10 @@ public final class Assessor {
             review = "other files with the same name belong to it";
         if ("unreadable".equals(f.type)) return withdraw(a, o, "the file could not be read");
 
-        double keep = a.retention;
+        double keep = need != null ? need.score / 100.0 : a.retention;
         double harm = discarded ? 0.05 : keep * (1 - red) * (1 - regen);
         harm = 1 - (1 - harm) * conf;                           // weak evidence counts as possible harm
-        if (review == null && harm > Policy.REVIEW_HARM) review = "the evidence is not strong enough to plan this for you";
+        if (need == null && review == null && harm > Policy.REVIEW_HARM) review = "the evidence is not strong enough to plan this for you";
 
         // ---- tier, from the values
         int tier;
@@ -267,8 +330,14 @@ public final class Assessor {
         else tier = Option.R4;
         if (review != null) tier = Option.R4;                    // nothing review-only is ever labelled safe
 
-        return new Option(o.action, technique, o.saved, tier, o.exact, o.why, review != null, review, keeps,
-                keep, red, regen, harm, conf);
+        Option n = new Option(o.action, technique, o.saved, tier, o.exact, o.why);
+        n.review = review != null; n.note = review; n.keeps = keeps;
+        n.retention = keep; n.redundancy = red; n.regenerable = regen; n.harm = harm; n.confidence = conf;
+        if (need != null) {
+            n.need = need.score; n.evidence = need.evidence();
+            n.sure = need.sure && review == null;               // only the Thorough setting marks anything sure
+        }
+        return n;
     }
 
     private static Option withdraw(Assessment a, Option o, String reason) {
@@ -296,6 +365,13 @@ public final class Assessor {
         String base = (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
         for (String w : base.split("[^a-z0-9]+")) if (words.contains(w)) return w;
         return null;
+    }
+
+    /** "report (1).pdf", "IMG_1 - Copy.jpg", "file-2.zip" style names: a second download or a copy. */
+    static boolean copyName(String name) {
+        int dot = name.lastIndexOf('.');
+        String base = (dot > 0 ? name.substring(0, dot) : name).toLowerCase(Locale.ROOT);
+        return base.matches(".*\\(\\d{1,2}\\)") || base.endsWith(" - copy") || base.endsWith(" copy");
     }
 
     static String ext(String rel) {

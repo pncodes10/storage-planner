@@ -35,6 +35,9 @@ public final class Techniques {
     public static final String EXPIRED_TICKETS = "Tickets for past trips and shows";
     public static final String GREETINGS = "Greeting images from chats";
     public static final String ACCIDENTAL = "Accidental shots";
+    public static final String ACCIDENTAL_VIDEOS = "Accidental recordings";
+    public static final String SCREEN_RECORDINGS = "Old screen recordings";
+    public static final String SENT_VIDEOS = "WhatsApp Sent copies of videos";
     /** Deletions the user picked while browsing pictures (recorded as Review.CHOSEN + PICKED). */
     public static final String PICKED = "Pictures you picked to delete";
 
@@ -59,6 +62,12 @@ public final class Techniques {
             "Compare each one with the photo that is kept before deleting it.");
         put(LEFTOVER_MEDIA, "Files an app saved in its own folder, left behind after you uninstalled it. They can be photos, recordings or exports you made in that app.",
             "Open each one. Delete it with your file manager only if you do not need it.");
+        put(ACCIDENTAL_VIDEOS, "Videos that are black or show nothing from start to end, or last only a second or two: usually recorded by accident, in a pocket or while reaching for the photo button.",
+            "Play each one (a dark video may have been kept for its sound); delete it in your gallery if nothing is in it.");
+        put(SCREEN_RECORDINGS, "Recordings of your screen made more than three months ago, usually to show someone something once.",
+            "Play each one; delete it in your gallery if you no longer need it.");
+        put(SENT_VIDEOS, "Smaller copies WhatsApp made of videos you sent, while the original video is still on the phone.",
+            "Delete them from WhatsApp > Media > Sent, or with your file manager. The chat will show the video as missing.");
         put(INSTALLED_APK, "Installer files (.apk) for apps that are already installed.",
             "Delete them from Downloads.");
         put(WA_BACKUP, "Older local chat backups. WhatsApp keeps the newest one; your Google Drive backup is separate.",

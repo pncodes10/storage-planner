@@ -31,7 +31,13 @@ public final class UnitBuilder {
     public final List<Unit> units = new ArrayList<Unit>();
     public final Detections det = new Detections();
 
-    public UnitBuilder(Scanner.Result r, Estimates est, int sdk) {
+    public static final long SCREEN_REC_DAYS = 90;
+    /** Frame fingerprints of a Sent video and its original may differ by this many bits (it was re-encoded). */
+    public static final int SENT_VIDEO_BITS = 10;
+
+    public UnitBuilder(Scanner.Result r, Estimates est, int sdk) { this(r, est, sdk, Policy.active); }
+
+    public UnitBuilder(Scanner.Result r, Estimates est, int sdk, Policy policy) {
         long now = r.now;
         Map<String, FileItem> byRel = new HashMap<String, FileItem>();
         for (FileItem f : r.files) byRel.put(f.rel, f);
@@ -111,6 +117,20 @@ public final class UnitBuilder {
             }
         }
 
+        // ---------------- WhatsApp "Sent" copies of videos that are still on the phone
+        List<FileItem> ownVideos = new ArrayList<FileItem>();
+        for (FileItem f : r.files)
+            if (f.vHashes != null && (f.area.equals("camera") || f.area.equals("movies") || f.area.equals("pictures"))) ownVideos.add(f);
+        for (FileItem s : r.files) {
+            if (!"wa_sent_video".equals(s.area) || s.vHashes == null) continue;
+            FileItem best = null; int bestClose = -1;
+            for (FileItem c : ownVideos) {
+                int close = VideoLook.sameVideo(c, s, SENT_VIDEO_BITS);
+                if (close > bestClose) { bestClose = close; best = c; }
+            }
+            if (best != null) det.sentCopyOf.put(s.rel, best.rel);
+        }
+
         // ---------------- per-file units
         java.util.Set<String> keepers = new java.util.HashSet<String>();
         keepers.addAll(det.duplicateOf.values()); keepers.addAll(det.burstExtraOf.values()); keepers.addAll(det.sentCopyOf.values());
@@ -135,7 +155,19 @@ public final class UnitBuilder {
                 else u.add(new Option("delete", Techniques.OLD_DOWNLOADS, s, Option.R4, true, "Installer for an app that is not installed"));
             }
             String sentOf = det.sentCopyOf.get(f.rel);
-            if (sentOf != null) u.add(new Option("delete", Techniques.SENT, s, Option.R1, true, "Compressed copy of " + sentOf + ", which is kept"));
+            if (sentOf != null) u.add(new Option("delete", a.equals("wa_sent_video") ? Techniques.SENT_VIDEOS : Techniques.SENT, s, Option.R1, true,
+                    "Compressed copy of " + sentOf + ", which is kept"));
+            // videos: recorded by accident, or a screen recording made long ago (Need decides, see Assessor)
+            if (Need.isVideo(f) && (a.equals("camera") || a.equals("pictures") || a.equals("movies"))) {
+                boolean empty = f.vFrames > 0 && f.vFlat >= 0.8f;
+                boolean blink = f.durationMs > 0 && f.durationMs < 4000 && a.equals("camera");
+                if (Need.isScreenRecording(f)) {
+                    if (age > SCREEN_REC_DAYS) u.add(new Option("delete", Techniques.SCREEN_RECORDINGS, s, Option.R4, true,
+                            "Screen recording from " + Math.round(age) + " days ago"));
+                } else if (empty || blink) u.add(new Option("delete", Techniques.ACCIDENTAL_VIDEOS, s, Option.R4, true,
+                        empty ? (f.vDark >= 0.8f ? "Black from start to end" : "Nothing to see from start to end")
+                              : String.format(java.util.Locale.US, "Only %.1f seconds long", f.durationMs / 1000.0)));
+            }
             String burstOf = det.burstExtraOf.get(f.rel);
             if (burstOf != null) u.add(new Option("delete", Techniques.BURSTS, s, Option.R4, true, burstWhy(f, byRel.get(burstOf))));
             if (det.blurry.contains(f.rel)) u.add(new Option("delete", Techniques.BLURRY, s, Option.R4, true, "Much softer than your other photos"));
@@ -188,7 +220,7 @@ public final class UnitBuilder {
             else if (keepers.contains(f.rel) || f.category != null) units.add(u);   // no options, but the user may pick it for deletion
         }
         // every proposal above is only a candidate: the Assessor decides which stand, at which tier, and which are review-only
-        Assessor.apply(this, r);
+        Assessor.apply(this, r, policy);
     }
 
     /** Camera photos with features, oldest first (the burst search input). */

@@ -342,7 +342,7 @@ public final class AndroidPlatform implements Platform {
     }
 
     /** Stops the text reader, if it was started. */
-    public void close() { if (ocr != null) { ocr.close(); ocr = null; } }
+    public void close() { if (ocr != null) { ocr.close(); ocr = null; } closeFrames(); }
 
     public boolean video(FileItem f) {
         MediaMetadataRetriever mmr = new MediaMetadataRetriever();
@@ -369,6 +369,53 @@ public final class AndroidPlatform implements Platform {
             try { ex.release(); } catch (Throwable ignored) {}
         }
         return f.vcodec != null;
+    }
+
+    private MediaMetadataRetriever frameSource;      // kept open between frames of one video
+    private String framePath;
+
+    public int[] videoFrame(String path, long timeMs, int longEdge, int[] dims) {
+        try {
+            if (frameSource == null || !path.equals(framePath)) {
+                closeFrames();
+                MediaMetadataRetriever m = new MediaMetadataRetriever();
+                try { m.setDataSource(path); } catch (Throwable t) { try { m.release(); } catch (Throwable ignored) {} return null; }
+                frameSource = m; framePath = path;
+            }
+            Bitmap bm;
+            // OPTION_CLOSEST: the frame shown at that moment, so that a re-encoded copy gives the same picture
+            if (Build.VERSION.SDK_INT >= 27)
+                bm = frameSource.getScaledFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST, longEdge, longEdge);
+            else {
+                Bitmap full = frameSource.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST);
+                if (full == null) return null;
+                double s = Math.min(1.0, (double) longEdge / Math.max(full.getWidth(), full.getHeight()));
+                bm = Bitmap.createScaledBitmap(full, Math.max(1, (int) Math.round(full.getWidth() * s)),
+                        Math.max(1, (int) Math.round(full.getHeight() * s)), true);
+                if (bm != full) full.recycle();
+            }
+            if (bm == null) return null;
+            if (bm.getConfig() != Bitmap.Config.ARGB_8888) {
+                Bitmap c = bm.copy(Bitmap.Config.ARGB_8888, false);
+                bm.recycle();
+                if (c == null) return null;
+                bm = c;
+            }
+            int w = bm.getWidth(), h = bm.getHeight();
+            int[] px = new int[w * h];
+            bm.getPixels(px, 0, w, 0, 0, w, h);
+            bm.recycle();
+            dims[0] = w; dims[1] = h;
+            return px;
+        } catch (Throwable t) {
+            closeFrames();
+            return null;
+        }
+    }
+
+    private void closeFrames() {
+        if (frameSource != null) { try { frameSource.release(); } catch (Throwable ignored) {} }
+        frameSource = null; framePath = null;
     }
 
     public long audioBitrate(String path) {

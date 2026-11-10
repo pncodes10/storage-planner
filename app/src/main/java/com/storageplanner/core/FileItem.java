@@ -20,6 +20,13 @@ public final class FileItem {
     public long bitrate;          // bits per second (video or audio)
     public long durationMs;
 
+    // ---- a look inside the video (a few frames); vFrames -1 = not looked at
+    public int vFrames = -1;      // frames that could be read
+    public float vDark;           // share of them that are almost black
+    public float vFlat;           // share with nothing in them (one flat colour: a lens cover, a ceiling, a pocket)
+    public int vFaces = -1;       // most faces seen in one frame (-1 = not checked)
+    public long[] vHashes;        // perceptual hash of each frame, in time order
+
     public PhotoQuality.Q quality;  // measured for near-duplicate shots only (eyes, faces, light); else null
 
     // ---- picture sorting (1.6)

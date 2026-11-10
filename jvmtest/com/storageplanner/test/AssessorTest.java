@@ -59,7 +59,10 @@ public final class AssessorTest {
     }
 
     public static void main(String[] args) {
+        Policy.active = new Policy();
         cases();
+        need();
+        videos();
         properties();
         System.out.println((checks - bad) + "/" + checks + " assessor checks pass");
         if (bad > 0) System.exit(1);
@@ -141,8 +144,7 @@ public final class AssessorTest {
         UnitBuilder ub = new UnitBuilder(r, new Estimates(), 34);
 
         check("blurry only-copy with faces: never deleted automatically", !everAutoDeleted(ub, blurry.rel));
-        Option bl = opt(ub, blurry.rel, Techniques.BLURRY);
-        check("blurry: still shown for review", bl != null && bl.review && bl.risk == Option.R4);
+        check("blurry only-copy with faces: kept without asking", !anyDelete(ub, blurry.rel));
 
         Option dup = opt(ub, d2.rel, Techniques.DUPLICATES);
         check("identical copy: No loss, planned", dup != null && dup.risk == Option.R1 && !dup.review && planned(ub, d2.rel) && d1.rel.equals(dup.keeps));
@@ -217,10 +219,211 @@ public final class AssessorTest {
         String js = Actions.json(ub.units, safe, kept, accepted, true, NOW);
         check("actions: approved state", js.contains("\"item\": \"Download/report (1).pdf\", \"kind\": \"file\", \"action\": \"delete\", \"state\": \"approved\""));
         check("actions: keeps + verify", js.contains("\"keeps\": \"Download/report.pdf\"") && js.contains("\"verify\": {\"size\": 500000, \"mtime\": "));
-        check("actions: review state with its reason", js.contains("\"state\": \"review\"") && js.contains("\"review_because\": \"old does not mean unimportant\""));
+        check("actions: review state with its reason", js.contains("\"state\": \"review\"") && js.contains("\"review_because\": \"one reason is not enough (downloaded 13 months ago and not changed since)\""));
         check("actions: protected list", js.contains("\"item\": \"DCIM/Camera/IMG_id.jpg\", \"protected\": true"));
         check("actions: kept by user left out", js.contains("\"kept_by_user\": [\"DCIM/.thumbnails/1.jpg\"]") && !js.contains("\"item\": \"DCIM/.thumbnails/1.jpg\""));
         check("actions: balanced JSON", count(js, '{') == count(js, '}') && count(js, '[') == count(js, ']'));
+    }
+
+    static Policy policy(int sensitivity) { Policy p = new Policy(); p.sensitivity = sensitivity; return p; }
+
+    /** "Will the user need it?": the same files at the three settings, with ways switched off, and with earlier choices. */
+    static void need() {
+        Scanner.Result r = phone();
+        for (int i = 0; i < 9; i++) photo(r, "DCIM/Camera/IMG_20" + i + ".jpg", 4000000, 400 + i * 3, "camera", 0x1111L * (i + 3) << 7 ^ (0x5A5AL << (i * 5)), 100);
+        // a party: eight photos in ten minutes, one of them soft, no faces found in it
+        for (int i = 0; i < 8; i++) photo(r, "DCIM/Camera/IMG_party" + i + ".jpg", 4000000, 100 + i * 0.001, "camera", 0xABCDEFL * (i + 5) << 9 ^ (0x3333L << (i * 6)), i == 3 ? 10 : 100);
+        FileItem soft = photo(r, "DCIM/Camera/IMG_soft_alone.jpg", 4000000, 250, "camera", 0x4444000011110000L, 10);
+        FileItem pocket = photo(r, "DCIM/Camera/IMG_pocket.jpg", 1500000, 250.5, "camera", 0, 5); pocket.category = PhotoCategory.ACCIDENTAL;
+        FileItem otpNew = photo(r, "Pictures/Screenshots/Screenshot_otp_new.png", 300000, 1.5, "screenshot", 1, 50); otpNew.type = "png"; otpNew.category = PhotoCategory.OTP;
+        FileItem otpOld = photo(r, "Pictures/Screenshots/Screenshot_otp_old.png", 300000, 40, "screenshot", 1, 50); otpOld.type = "png"; otpOld.category = PhotoCategory.OTP;
+        FileItem tOld = photo(r, "Pictures/Screenshots/Screenshot_trip.png", 300000, 200, "screenshot", 3, 50); tOld.type = "png"; tOld.category = PhotoCategory.TICKET; tOld.catDate = NOW - 150 * DAY;
+        FileItem tNext = photo(r, "Pictures/Screenshots/Screenshot_next.png", 300000, 40, "screenshot", 3, 50); tNext.type = "png"; tNext.category = PhotoCategory.TICKET; tNext.catDate = NOW + 5 * DAY;
+        file(r, "Download/old_archive.zip", 80000000, 400, "download", "zip");
+        file(r, "Download/thesis_draft.pdf", 5000000, 400, "download", "pdf");
+        file(r, "Download/setup (1).exe", 90000000, 300, "download", "other");
+
+        UnitBuilder bal = new UnitBuilder(r, new Estimates(), 34, policy(Policy.BALANCED));
+        UnitBuilder car = new UnitBuilder(r, new Estimates(), 34, policy(Policy.CAREFUL));
+        UnitBuilder tho = new UnitBuilder(r, new Estimates(), 34, policy(Policy.THOROUGH));
+
+        check("soft photo from a party: kept without asking", opt(bal, "DCIM/Camera/IMG_party3.jpg", Techniques.BLURRY) == null);
+        Option sa = opt(bal, soft.rel, Techniques.BLURRY);
+        check("soft photo taken alone: one reason, review", sa != null && sa.review && sa.note.startsWith("one reason is not enough"));
+        check("soft photo taken alone, Careful: kept without asking", opt(car, soft.rel, Techniques.BLURRY) == null);
+        Option pk = del(bal, pocket.rel);        // a file has one delete suggestion; here it is filed under "possibly blurry"
+        check("black and soft pocket shot: suggested (two reasons)", pk != null && !pk.review && pk.risk == Option.R4 && pk.need <= 25 && pk.evidence.contains("against"));
+        check("pocket shot: not in the default plan at Balanced", Planner.safe(bal.units).chosen.get(unit(bal, pocket.rel)) != pk);
+
+        check("one-time code from yesterday: UnitBuilder waits a day; from 1.5 days: recent, not suggested",
+                opt(bal, otpNew.rel, Techniques.OTP_SHOTS) == null || opt(bal, otpNew.rel, Techniques.OTP_SHOTS).review);
+        Option ob = opt(bal, otpOld.rel, Techniques.OTP_SHOTS), ot = opt(tho, otpOld.rel, Techniques.OTP_SHOTS);
+        check("old one-time code, Balanced: suggested, your call", ob != null && !ob.review && !ob.sure && !ob.safeStep());
+        check("old one-time code, Thorough: in the default plan", ot != null && ot.sure && Planner.safe(tho.units).chosen.get(unit(tho, otpOld.rel)) == ot);
+        check("Thorough never marks a review item sure", noSureReview(tho));
+
+        Option tk = opt(bal, tOld.rel, Techniques.EXPIRED_TICKETS);
+        check("ticket for a trip five months ago: suggested", tk != null && !tk.review);
+        check("ticket for next week: no suggestion", opt(bal, tNext.rel, Techniques.EXPIRED_TICKETS) == null);
+
+        Option zip = opt(bal, "Download/old_archive.zip", Techniques.OLD_DOWNLOADS), pdf = opt(bal, "Download/thesis_draft.pdf", Techniques.OLD_DOWNLOADS);
+        check("old archive in Downloads: suggested", zip != null && !zip.review);
+        check("old document in Downloads: review, not suggested", pdf != null && pdf.review);
+        check("old document, Careful: kept without asking", opt(car, "Download/thesis_draft.pdf", Techniques.OLD_DOWNLOADS) == null);
+        Option exe = opt(bal, "Download/setup (1).exe", Techniques.OLD_DOWNLOADS);
+        check("old second download of an installer: suggested", exe != null && !exe.review && exe.evidence.contains("second download"));
+
+        // ---- switching a way off can only take suggestions away
+        Policy noAge = policy(Policy.BALANCED); noAge.useAge = false;
+        UnitBuilder na = new UnitBuilder(r, new Estimates(), 34, noAge);
+        Option z2 = opt(na, "Download/old_archive.zip", Techniques.OLD_DOWNLOADS);
+        check("age switched off: the old archive has one reason left, so review", z2 != null && z2.review);
+        String[] ways = {"source", "content", "people", "quality", "age", "event", "motion", "history"};
+        int base = suggestions(bal); boolean never = true;
+        for (int w = 1; w < ways.length; w++) {              // source only moves the starting point, so it is not part of this rule
+            Policy q = policy(Policy.BALANCED);
+            if (w == 1) q.useContent = false; if (w == 2) q.usePeople = false; if (w == 3) q.useQuality = false; if (w == 4) q.useAge = false;
+            if (w == 5) q.useEvent = false; if (w == 6) q.useMotion = false; if (w == 7) q.useHistory = false;
+            // people and event only ever speak for keeping, so without them more may be suggested; the others only against
+            if (w == 2 || w == 5) continue;
+            if (suggestions(new UnitBuilder(r, new Estimates(), 34, q)) > base) { never = false; System.out.println("  more suggestions without " + ways[w]); }
+        }
+        check("switching off a way that speaks against files never adds suggestions", never);
+        System.out.println("  suggested without review: Careful " + suggestions(car) + ", Balanced " + suggestions(bal) + ", Thorough " + suggestions(tho));
+        check("more is suggested at Thorough than at Careful", suggestions(tho) > suggestions(car));
+
+        // ---- earlier choices: the user kept six old archives before
+        Policy learned = policy(Policy.BALANCED);
+        learned.kept = new HashSet<String>(); learned.accepted = new HashMap<String, String>();
+        Scanner.Result r2 = phone();
+        for (int i = 0; i < 7; i++) file(r2, "Download/archive" + i + ".zip", 80000000, 400 + i, "download", "zip");
+        for (int i = 0; i < 6; i++) learned.kept.add("Download/archive" + i + ".zip");
+        UnitBuilder plain = new UnitBuilder(r2, new Estimates(), 34, policy(Policy.BALANCED)), taught = new UnitBuilder(r2, new Estimates(), 34, learned);
+        Option before = opt(plain, "Download/archive6.zip", Techniques.OLD_DOWNLOADS), after = opt(taught, "Download/archive6.zip", Techniques.OLD_DOWNLOADS);
+        check("earlier choices: kept six old archives, so the seventh is no longer suggested",
+                before != null && !before.review && (after == null || after.review) && (after == null || after.evidence.contains("you kept 6 of 6")));
+    }
+
+    static Option del(UnitBuilder ub, String rel) {
+        Unit u = unit(ub, rel); if (u == null) return null;
+        for (Option o : u.options) if (o.action.equals("delete")) return o;
+        return null;
+    }
+
+    static boolean noSureReview(UnitBuilder ub) {
+        for (Unit u : ub.units) for (Option o : u.options) if (o.sure && (o.review || (u.assessment != null && u.assessment.isProtected()))) return false;
+        return true;
+    }
+
+    /** Deletions of files that are not copies of anything, suggested without asking for a review. */
+    static int suggestions(UnitBuilder ub) {
+        int n = 0;
+        for (Unit u : ub.units) for (Option o : u.options) if (o.need >= 0 && !o.review) n++;
+        return n;
+    }
+
+    static FileItem video(Scanner.Result r, String rel, long size, double ageDays, String area, long durationMs, long seed, int frames) {
+        FileItem f = file(r, rel, size, ageDays, area, "mp4");
+        f.width = 1920; f.height = 1080; f.durationMs = durationMs; f.vcodec = "video/hevc"; f.bitrate = 8000000;
+        if (frames > 0) {
+            f.vFrames = frames; f.vHashes = new long[frames]; f.vFaces = 0;
+            java.util.Random rnd = new java.util.Random(seed);
+            for (int i = 0; i < frames; i++) f.vHashes[i] = rnd.nextLong() >>> 1;
+        }
+        return f;
+    }
+
+    static void black(FileItem f) { f.vDark = 1; f.vFlat = 1; java.util.Arrays.fill(f.vHashes, 0L); }
+
+    static void videos() {
+        Scanner.Result r = phone();
+        FileItem pocket = video(r, "DCIM/Camera/VID_pocket.mp4", 30000000, 80, "camera", 3000, 1, 5); black(pocket);
+        FileItem blackMid = video(r, "DCIM/Camera/VID_black12s.mp4", 90000000, 80.5, "camera", 12000, 2, 5); black(blackMid);
+        FileItem talk = video(r, "DCIM/Camera/VID_talk.mp4", 400000000, 81, "camera", 600000, 3, 5); black(talk);
+        FileItem blink = video(r, "DCIM/Camera/VID_blink.mp4", 6000000, 82, "camera", 1200, 4, 5);
+        FileItem blinkKid = video(r, "DCIM/Camera/VID_kid.mp4", 6000000, 83, "camera", 1500, 5, 5); blinkKid.vFaces = 1;
+        FileItem normal = video(r, "DCIM/Camera/VID_trip.mp4", 200000000, 84, "camera", 45000, 6, 5);
+        FileItem notLooked = video(r, "DCIM/Camera/VID_notlooked.mp4", 9000000, 85, "camera", 1000, 7, 0);
+        FileItem rec = video(r, "DCIM/Screen recordings/Screen_Recording_20260101.mp4", 120000000, 200, "camera", 60000, 8, 5);
+        FileItem recNew = video(r, "DCIM/Screen recordings/Screen_Recording_20261101.mp4", 120000000, 5, "camera", 60000, 9, 5);
+        // a video and the copy WhatsApp made when it was sent; and a different video of the same length
+        FileItem orig = video(r, "DCIM/Camera/VID_sent.mp4", 150000000, 20, "camera", 30000, 10, 5);
+        FileItem sent = video(r, "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video/Sent/VID-1.mp4", 9000000, 20, "wa_sent_video", 30200, 10, 5);
+        sent.width = 848; sent.height = 478; for (int i = 0; i < 5; i++) sent.vHashes[i] ^= 1L << i;
+        FileItem other = video(r, "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Video/Sent/VID-2.mp4", 9000000, 20, "wa_sent_video", 30100, 99, 5);
+        other.width = 848; other.height = 478;
+
+        UnitBuilder ub = new UnitBuilder(r, new Estimates(), 34, policy(Policy.BALANCED));
+        Option a1 = opt(ub, pocket.rel, Techniques.ACCIDENTAL_VIDEOS);
+        check("black three-second video: suggested as accidental", a1 != null && !a1.review && a1.risk == Option.R4);
+        Option a2 = opt(ub, blackMid.rel, Techniques.ACCIDENTAL_VIDEOS);
+        check("black twelve-second video: darkness alone, review", a2 != null && a2.review);
+        Option a3 = opt(ub, talk.rel, Techniques.ACCIDENTAL_VIDEOS);
+        check("black ten-minute video: may be kept for its sound, never suggested", a3 == null || a3.review);
+        Option a4 = opt(ub, blink.rel, Techniques.ACCIDENTAL_VIDEOS);
+        check("one-second clip with something in it: shortness alone, review", a4 != null && a4.review);
+        check("one-second clip of a person: kept without asking", opt(ub, blinkKid.rel, Techniques.ACCIDENTAL_VIDEOS) == null);
+        check("ordinary video: nothing suggested", !anyDelete(ub, normal.rel));
+        Option a5 = opt(ub, notLooked.rel, Techniques.ACCIDENTAL_VIDEOS);
+        check("short clip that was not looked into: review at most", a5 == null || a5.review);
+        Option s1 = opt(ub, rec.rel, Techniques.SCREEN_RECORDINGS);
+        check("screen recording from months ago: suggested", s1 != null && !s1.review);
+        check("screen recording from this week: nothing", !anyDelete(ub, recNew.rel));
+        Option sv = opt(ub, sent.rel, Techniques.SENT_VIDEOS);
+        check("Sent copy of a video still on the phone: found, keeps the original", sv != null && orig.rel.equals(sv.keeps) && !sv.review);
+        check("a different Sent video of the same length: not matched", !anyDelete(ub, other.rel));
+        check("the original of a Sent video is never deleted automatically", !everAutoDeleted(ub, orig.rel));
+
+        Policy noMotion = policy(Policy.THOROUGH);
+        UnitBuilder th = new UnitBuilder(r, new Estimates(), 34, noMotion);
+        check("Thorough: no video goes into the default plan unless it is almost certainly not needed", videoPlanOk(th));
+
+        // ---- VideoLook on made-up frames: black, flat, moving
+        check("frames: black video", look(0).vDark == 1f && look(0).vFlat == 1f && !Need.still(look(2)));
+        check("frames: flat grey video is empty but not dark", look(1).vDark == 0f && look(1).vFlat == 1f);
+        check("frames: moving video is neither, and its frames differ", look(2).vFlat == 0f && look(2).vFrames == 5);
+        check("frames: unreadable video", look(3).vFrames == 0 && look(3).vHashes == null);
+    }
+
+    static boolean videoPlanOk(UnitBuilder ub) {
+        for (Map.Entry<Unit, Option> e : Planner.safe(ub.units).chosen.entrySet()) {
+            Option o = e.getValue();
+            if (o.need >= 0 && (o.need > 10 || o.review)) return false;
+        }
+        return true;
+    }
+
+    /** kind 0 = black, 1 = flat grey, 2 = a pattern that changes over time, 3 = cannot be read */
+    static FileItem look(final int kind) {
+        FileItem f = new FileItem("v.mp4", "/v.mp4", 1000, NOW);
+        f.durationMs = 10000;
+        VideoLook.look(new JvmFrames(kind), f);
+        return f;
+    }
+
+    static final class JvmFrames implements Platform {
+        final int kind; JvmFrames(int kind) { this.kind = kind; }
+        public int[] videoFrame(String path, long timeMs, int longEdge, int[] dims) {
+            if (kind == 3) return null;
+            int w = 160, h = 90; dims[0] = w; dims[1] = h;
+            int[] px = new int[w * h];
+            java.util.Random rnd = new java.util.Random(timeMs);
+            int cx = rnd.nextInt(w), cy = rnd.nextInt(h);
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                int v = kind == 0 ? rnd.nextInt(6) : kind == 1 ? 128 + rnd.nextInt(3) : (Math.abs(x - cx) + Math.abs(y - cy)) * 255 / (w + h);
+                px[y * w + x] = 0xFF000000 | v << 16 | v << 8 | v;
+            }
+            return px;
+        }
+        public float[] faces(String path, int[] argb, int w, int h) { return new float[0]; }
+        public String storageRoot() { return "/"; } public long totalBytes() { return 0; } public long freeBytes() { return 0; }
+        public List<AppItem> apps() { return new ArrayList<AppItem>(); }
+        public int[] luma(String path, int[] dims) { return null; } public int[] argb(String path, int longEdge, int[] dims) { return null; }
+        public float[] otherFaces(String path, int[] argb, int w, int h) { return null; } public String otherFacesName() { return ""; }
+        public TextRules.Words readText(String path, int[] argb, int w, int h) { return null; }
+        public boolean imageSize(String path, int[] dims) { return false; } public boolean video(FileItem f) { return false; }
+        public long audioBitrate(String path) { return 0; } public String[] apkInfo(String path) { return null; }
+        public int sdkInt() { return 34; } public long now() { return NOW; }
     }
 
     static int count(String s, char c) { int n = 0; for (int i = 0; i < s.length(); i++) if (s.charAt(i) == c) n++; return n; }
@@ -249,10 +452,10 @@ public final class AssessorTest {
                 if (rnd.nextInt(3) == 0) f.sha256 = "h" + f.size + "_" + rnd.nextInt(3);     // same size + same tag = identical
                 if (area.equals("residue")) f.pkg = "com.gone";
             }
-            UnitBuilder ub = new UnitBuilder(r, new Estimates(), 34);
+            UnitBuilder ub = new UnitBuilder(r, new Estimates(), 34, policy(t % 3));
             Planner.Plan all = Planner.bestWithin(ub.units, Option.R4);
             Planner.Plan goal = Planner.tiered(ub.units, Long.MAX_VALUE / 4);
-            for (Planner.Plan p : new Planner.Plan[]{all, goal, Planner.bestWithin(ub.units, Option.R2)}) {
+            for (Planner.Plan p : new Planner.Plan[]{all, goal, Planner.bestWithin(ub.units, Option.R2), Planner.safe(ub.units)}) {
                 Set<String> deleted = new HashSet<String>();
                 for (Map.Entry<Unit, Option> e : p.chosen.entrySet()) {
                     Option o = e.getValue(); Unit u = e.getKey();

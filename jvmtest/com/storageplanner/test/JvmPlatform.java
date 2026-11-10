@@ -168,6 +168,9 @@ public final class JvmPlatform implements Platform {
         } catch (Exception e) { return false; }
     }
 
+    /** The desktop harness does not read video frames; videos are judged there by length and place only. */
+    public int[] videoFrame(String path, long timeMs, int longEdge, int[] dims) { return null; }
+
     public boolean video(FileItem f) {
         String out = run("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                 "stream=codec_name,width,height,bit_rate:format=duration,bit_rate", "-of", "default=nw=1", f.abs);

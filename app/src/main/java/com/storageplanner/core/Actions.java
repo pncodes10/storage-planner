@@ -87,6 +87,8 @@ public final class Actions {
         if (o.confidence >= 0)
             sb.append(String.format(Locale.US, ", \"retention\": %.2f, \"redundancy\": %.2f, \"regenerable\": %.2f, \"harm\": %.2f, \"confidence\": %.2f",
                     o.retention, o.redundancy, o.regenerable, o.harm, o.confidence));
+        if (o.need >= 0) sb.append(", \"need\": ").append(o.need).append(", \"evidence\": ").append(js(o.evidence == null ? "" : o.evidence));
+        if (o.sure) sb.append(", \"sure\": true");
         sb.append("}");
     }
 

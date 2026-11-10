@@ -88,6 +88,11 @@ public final class OverviewScreen extends Screen {
         labBtn.setContentDescription("Algorithm Lab: try the picture algorithms on pictures you pick, with a log for debugging");
         labBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
         LinearLayout.LayoutParams lab0 = new LinearLayout.LayoutParams(-1, -2); lab0.topMargin = dp(16);
+        Button algoBtn = Ui.button(a, "Algorithm settings", false);
+        algoBtn.setContentDescription("Algorithm settings: how readily a file is called not needed, and what the app looks at");
+        algoBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new AlgorithmScreen(a)); } });
+        LinearLayout.LayoutParams algo0 = new LinearLayout.LayoutParams(-1, -2); algo0.topMargin = dp(16);
+        content.addView(algoBtn, algo0);
         content.addView(labBtn, lab0);
         Button save = Ui.button(a, "Save report", true);
         save.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.saveReport(); } });

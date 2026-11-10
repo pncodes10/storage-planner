@@ -31,6 +31,9 @@ final class AnalysisRunner {
             AndroidPlatform pf = new AndroidPlatform(app);
             Scanner.Options opt = new Scanner.Options();
             opt.sortPictures = sortPictures(app);
+            final com.storageplanner.core.Policy policy = AlgorithmScreen.load(app);
+            com.storageplanner.core.Policy.active = policy;
+            opt.lookInsideVideos = policy.lookInsideVideos;
             ResultStore.Saved prev = ResultFiles.load(app);               // unchanged pictures are not measured or read again
             if (prev != null) {
                 opt.previous = new java.util.HashMap<String, com.storageplanner.core.FileItem>();
@@ -43,7 +46,7 @@ final class AnalysisRunner {
             if (!AnalysisState.cancelled && measure) Calibrator.run(r, est, pr);
             if (AnalysisState.cancelled) { o.cancelled = true; o.message = "Cancelled."; return o; }
             pr.update("Planning", 0, 0);
-            final UnitBuilder ub = new UnitBuilder(r, est, pf.sdkInt());
+            final UnitBuilder ub = new UnitBuilder(r, est, pf.sdkInt(), policy);
 
             final ResultStore.Saved s = new ResultStore.Saved();
             s.result = r; s.est = est; s.targetUsed = (long) (targetGb * 1e9);

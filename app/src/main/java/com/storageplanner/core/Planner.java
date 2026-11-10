@@ -40,6 +40,19 @@ public final class Planner {
         return p;
     }
 
+    /** Every safe step: the largest option per unit that the default plan may take (Option.safeStep). */
+    public static Plan safe(List<Unit> units) {
+        Plan p = new Plan();
+        for (Unit u : units) {
+            Option best = null;
+            for (Option o : u.options)
+                if (o.safeStep() && (best == null || o.saved > best.saved || (o.saved == best.saved && o.cost() < best.cost())))
+                    best = o;
+            if (best != null) p.chosen.put(u, best);
+        }
+        return p;
+    }
+
     /** Minimum-intervention plan reaching targetSaving bytes. */
     public static Plan tiered(List<Unit> units, long targetSaving) {
         for (int k = 0; k <= Option.R4; k++) {

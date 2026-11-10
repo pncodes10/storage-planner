@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 3;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories
+    public static final int VERSION = 4;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: a look inside videos
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -111,6 +111,15 @@ public final class ResultStore {
                 str(out, f.text);
                 out.writeBoolean(f.textPending);
                 out.writeInt(f.faces);
+            }
+            if (version >= 4) {
+                out.writeInt(f.vFrames);
+                out.writeFloat(f.vDark);
+                out.writeFloat(f.vFlat);
+                out.writeInt(f.vFaces);
+                int n = f.vHashes == null ? 0 : f.vHashes.length;
+                out.writeByte(n);
+                for (int i = 0; i < n; i++) out.writeLong(f.vHashes[i]);
             }
         }
 
@@ -199,6 +208,14 @@ public final class ResultStore {
                 f.textPending = in.readBoolean();
                 f.faces = in.readInt();
                 if (f.faces < -1) throw new IOException("results file damaged (faces)");
+            }
+            if (v >= 4) {
+                f.vFrames = in.readInt();
+                f.vDark = in.readFloat();
+                f.vFlat = in.readFloat();
+                f.vFaces = in.readInt();
+                int n = in.readUnsignedByte();
+                if (n > 0) { f.vHashes = new long[n]; for (int k = 0; k < n; k++) f.vHashes[k] = in.readLong(); }
             }
             r.files.add(f);
         }

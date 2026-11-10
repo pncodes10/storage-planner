@@ -51,6 +51,12 @@ public interface Platform {
     /** Fill vcodec, width, height, bitrate, durationMs. Return false if unreadable. */
     boolean video(FileItem f);
 
+    /**
+     * One frame of a video, the one shown at timeMs (not just the nearest key frame), as ARGB with long edge
+     * ~longEdge px, upright. dims receives {w, h}. Returns null if it cannot be read.
+     */
+    int[] videoFrame(String path, long timeMs, int longEdge, int[] dims);
+
     /** Audio bitrate in bits/s, or 0. */
     long audioBitrate(String path);
 

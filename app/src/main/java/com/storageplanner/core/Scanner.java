@@ -50,6 +50,10 @@ public final class Scanner {
         public boolean sortPictures = true;
         /** Time allowed for reading text in pictures in this scan; the rest is read next time. */
         public long textBudgetMs = 20 * 60 * 1000L;
+        /** Look at a few frames of each video (dark, empty, still, people, Sent copies). */
+        public boolean lookInsideVideos = true;
+        /** Time allowed for that in this scan; the rest is looked at next time. */
+        public long videoBudgetMs = 10 * 60 * 1000L;
     }
 
     public static Result scan(Platform pf, Progress pr) { return scan(pf, pr, new Options()); }
@@ -133,7 +137,8 @@ public final class Scanner {
             if (img && (f.area.equals("camera") || f.area.equals("wa_sent") || f.area.equals("screenshot")
                     || f.area.equals("wa_image") || f.area.equals("pictures"))) imgs.add(f);
             else if ((f.type.equals("mp4") || f.type.equals("mkv")) && (f.area.equals("camera") || f.area.equals("movies")
-                    || f.area.equals("download") || f.area.equals("wa_video"))) vids.add(f);
+                    || f.area.equals("download") || f.area.equals("wa_video") || f.area.equals("wa_sent_video")
+                    || f.area.equals("pictures"))) vids.add(f);
             else if ((f.type.equals("mp3") || f.type.equals("flac") || f.type.equals("m4a")) && f.area.equals("music")) auds.add(f);
             else if (f.rel.toLowerCase().endsWith(".apk") && f.type.equals("zip")) {
                 String[] info = pf.apkInfo(f.abs);
@@ -183,6 +188,25 @@ public final class Scanner {
             if (pr.cancelled()) return r;
             pr.update("Reading videos", k + 1, vids.size());
             try { pf.video(vids.get(k)); } catch (Throwable ignored) {}
+        }
+        if (opt.lookInsideVideos) {
+            // the user's own recordings first (that is where accidents are), then the copies they may match
+            List<FileItem> look = new ArrayList<FileItem>();
+            for (FileItem f : vids) if (f.area.equals("camera") || f.area.equals("pictures") || f.area.equals("movies")) look.add(f);
+            for (FileItem f : vids) if (f.area.equals("wa_sent_video")) look.add(f);
+            long until = System.currentTimeMillis() + opt.videoBudgetMs;
+            for (int k = 0; k < look.size(); k++) {
+                if (pr.cancelled()) return r;
+                FileItem f = look.get(k);
+                pr.update("Looking inside videos", k + 1, look.size());
+                FileItem p = same(f, opt.previous);
+                if (p != null && p.vFrames >= 0) {            // unchanged since the last scan
+                    f.vFrames = p.vFrames; f.vDark = p.vDark; f.vFlat = p.vFlat; f.vFaces = p.vFaces; f.vHashes = p.vHashes;
+                    continue;
+                }
+                if (System.currentTimeMillis() > until) continue;       // out of time: stays "not looked at" until the next scan
+                try { VideoLook.look(pf, f); } catch (Throwable t) { f.vFrames = -1; }
+            }
         }
         for (int k = 0; k < auds.size(); k++) {
             if (pr.cancelled()) return r;

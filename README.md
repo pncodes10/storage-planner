@@ -101,8 +101,7 @@ safe to delete just because it is low-value:
 | Rule | What it does |
 |---|---|
 | Personal records | ID pictures, and files named like a personal record (passport, bank statement, tax, insurance, medical, deed, certificate …), get no suggestion at all, except removing an identical extra copy. They are never re-encoded |
-| One reason is not enough | Age alone, blur alone, darkness alone or a folder name alone never plans a deletion. Old downloads, soft photos and dark shots are shown for you to review |
-| Payment and ticket screenshots | Shown for review only: they can matter for refunds, claims and disputes |
+| One reason is not enough | Age alone, blur alone, darkness alone or a folder name alone never suggests a deletion. At least two different kinds of reason must agree (see [Do you need this file?](#do-you-need-this-file)) |
 | The kept copy stays | The file that is kept from a group (duplicates, a burst, a Sent copy's original) is never planned for deletion itself, whatever else is true of it |
 | Companions stay together | RAW + JPEG pairs, edit sidecars (`.xmp`, `.aae`), subtitles, and a photo with a video of the same name are not split and not re-encoded |
 | Text stays exact | Receipts, bills, documents, QR codes, payments and tickets are not re-encoded with loss |
@@ -129,10 +128,93 @@ are conservative starting values, not yet tuned on labelled data.
 
 Protected files and withdrawn suggestions are listed too, with the reason.
 
-**Tests** (`AssessorTest`, run by CI): 45 checks. A hand-built phone with the hard cases (the only copy of a
+**Tests** (`AssessorTest`, run by CI): 81 checks. A hand-built phone with the hard cases (the only copy of a
 blurry family photo, an old deed, an ID picture and its copy, a kept copy that is also an old download, a
-RAW + JPEG pair, recordings left by an uninstalled app), and 300 random phones on which no plan at any risk
-level deletes a kept copy together with its copies, touches a protected file, or picks a review-only item.
+RAW + JPEG pair, recordings left by an uninstalled app), the scenarios below at each setting, videos, and
+300 random phones on which no plan at any risk level or setting deletes a kept copy together with its
+copies, touches a protected file, or picks a review-only item.
+
+### Do you need this file?
+
+Some suggestions are not about a copy of anything: a soft photo, a dark shot, an old download, a one-time
+code, a greeting, a ticket, a payment screenshot, an accidental video. For these the app estimates how
+likely you are to need the file, from 0 to 100 (`core/Need.java`), and then does one of three things:
+
+| Estimate | What happens |
+|---|---|
+| High | The file is **kept without asking**. Nothing is suggested and nothing is shown for review |
+| Low, with at least two different kinds of reason against it | **Suggested** for deletion ("Your call") |
+| In between, or only one kind of reason | Shown **for you to decide**, with the reason |
+
+**What the app looks at.** Each of these adds to or takes away from the estimate, and says why in words. The
+reasons are shown on the file's details page ("Do you need it? Estimated 15 of 100. For keeping: … Against: …").
+
+| Way | What it uses | Effect |
+|---|---|---|
+| Where it came from | Camera, Pictures, download, screenshot, chat | The starting point: a camera photo starts at 70, a chat image or screenshot at 40 |
+| What it shows | The picture's category and the text read in it; for other files, the kind of file | A one-time code, a greeting, an empty frame, or a ticket whose date passed over a month ago count against. A receipt, document, payment, chat, QR code, or a ticket for a date to come count for keeping. In Downloads, documents count for keeping; archives and installers against |
+| People in it | Faces found in the photo, or in two frames of the video | The strongest reason to keep |
+| Blur and length | Sharpness against your other photos, picture size, video length | Very soft, very small, or a clip under four seconds counts against |
+| Age, by kind | Days since it was saved, read by what the file is | A code is useless after a day, a greeting after a week, a screenshot fades over months. **Your own photos and videos never count as old.** Anything from the last two days counts as still in use |
+| Taken with others | Other camera photos and videos within the hour | Five or more means a trip or a party: keep |
+| Videos: does anything happen | Whether the frames differ | A video whose frames all look the same counts against |
+| Your earlier choices | What you kept or approved on the same kind of suggestion | Counts after five decisions |
+
+**Scenarios** (all in `AssessorTest`, at the Balanced setting):
+
+| File | Result | Why |
+|---|---|---|
+| Blurry photo with three faces | Kept without asking | People outweigh blur |
+| Soft photo, one of eight taken at a party | Kept without asking | Part of a set |
+| Soft photo taken alone, no faces | For you to decide | One reason only |
+| Black **and** soft shot, no faces | Suggested | Two reasons: nothing to see, and soft |
+| One-time code, 40 days old | Suggested | Code, and long expired |
+| Ticket for a trip five months ago | Suggested | Date long past, and saved long ago |
+| Ticket for next week | Kept without asking | Still to come |
+| Payment screenshot, 200 days old | For you to decide | A record: only its age speaks against it |
+| Greeting image from a chat, a month old | Suggested | Greeting, and old |
+| Greeting image with faces in it | For you to decide | It may be a personal photo with a caption |
+| Old `.zip` in Downloads | Suggested | Archive, and untouched for over six months |
+| Old `.pdf` in Downloads | For you to decide | A document: only its age speaks against it |
+
+### Videos
+
+During the analysis the app looks at **five frames of each of your own videos** (`core/VideoLook.java`), at
+10%, 30%, 50%, 70% and 90% of its length, without playing it. From them it knows whether the video is black,
+whether there is anything in it, whether anything moves, and (from two frames) whether people are in it. It
+keeps a fingerprint of each frame.
+
+| Video | Result | Why |
+|---|---|---|
+| Black, three seconds long | Suggested as an accidental recording | Nothing to see, and very short |
+| Black, twelve seconds long | For you to decide | Darkness alone is one reason |
+| Black, ten minutes long | For you to decide | It may have been recorded for its sound, which the app cannot judge |
+| One second long, something in it | For you to decide | Shortness alone is one reason |
+| One second long, a person in it | Kept without asking | People |
+| Screen recording older than three months | Suggested | A screen recording, and old |
+| The copy WhatsApp made of a video you sent, original still on the phone | "No loss" when every frame matches closely, otherwise "Your call" | Same length within a second, same shape, and the frames at the same moments match |
+| Any other video of yours | Nothing suggested | A video is not "not needed" because it is old or large |
+
+Videos received in chats are only suggested when they are exact duplicates: the app cannot tell a forwarded
+clip from a family video someone sent you. Sound is not analysed.
+
+Looking inside videos takes about a second per video the first time (an estimate; not measured on a phone),
+up to ten minutes per analysis; the rest is done at the next one. Unchanged videos are not looked at again.
+
+### Algorithm settings
+
+**Algorithm settings** is on the start screen and at the bottom of the plan. Changes apply to the current
+results at once, without a new analysis.
+
+| Setting | Suggests when the estimate is at most | Keeps without asking from | Adds to the default plan |
+|---|---|---|---|
+| Careful | 10 | 45 | Nothing unique |
+| Balanced (default) | 25 | 60 | Nothing unique |
+| Thorough | 35 | 70 | Suggestions with an estimate of 10 or less, such as expired one-time codes |
+
+Below the setting, each way of looking at a file can be switched off, and so can looking inside videos. At
+every setting two kinds of reason are needed for a suggestion, and the fixed rules above (personal records,
+the kept copy, companions) are never loosened. The settings and their numbers are in `core/Policy.java`.
 
 The research and design behind this is in [`docs/storage-engine-design.md`](docs/storage-engine-design.md).
 
@@ -422,7 +504,7 @@ The app also contains one private, read-only file provider. It isn't exported, a
 | R1 | Nothing lost | Exact duplicates, installers for installed apps, WhatsApp Sent copies that surely match a photo still in your camera roll, trash, old WhatsApp backups (while a newer one exists), game data left by uninstalled games, archiving idle apps (Android 15), lossless screenshots |
 | R2 | Visually identical | Photos re-encoded to HEIC/WebP, H.264 videos re-encoded to HEVC |
 | R3 | Small quality trade-off | Music above 256 kbps to 128 kbps |
-| R4 | Needs your confirmation | Burst near-duplicates (keeps the best shot), Telegram media, Sent copies to check, one-time codes, greetings, unused games/apps. **Review only, never planned:** possibly blurry photos, accidental shots, old downloads, payment and ticket screenshots, files left by uninstalled apps |
+| R4 | Needs your confirmation | Burst near-duplicates (keeps the best shot), Telegram media, Sent copies to check, unused games/apps, and the files you probably do not need (one-time codes, greetings, accidental shots and recordings, old screen recordings, past tickets, old archives). **Review only, never planned:** anything the app could not tell about, and files left by uninstalled apps |
 
 *All safe steps* takes everything in R0–R2. *Reach my target* uses the lowest tier that can reach the target; within that tier it takes the cheapest bytes first, then drops anything not needed. Neither ever takes a review-only item.
 
@@ -453,12 +535,13 @@ The app also contains one private, read-only file provider. It isn't exported, a
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
   - **UnitBuilder:** proposals.
-  - **Assessor / Assessment / Policy:** the decision algorithm: which proposals stand, at which tier.
+  - **Assessor / Assessment / Policy:** the decision algorithm: which proposals stand, at which tier; Policy also holds the user's algorithm settings.
+  - **Need:** the estimate of whether the user needs a file. **VideoLook:** the look inside videos.
   - **Actions:** the algorithm's output for the action engine.
   - **Planner:** tiered planner.
   - **Report:** output.
   - **ResultStore:** versioned binary format for saved results (with checksum).
-- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; LabScreen and LabLog are the Algorithm Lab; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
+- `app/src/main/java/com/storageplanner/app/`: the Android layer. Screens: SetupScreen, AlgorithmScreen (algorithm settings), OverviewScreen, ListScreen (review lists), DetailScreen, DeckScreen (swipe cards), CompareScreen and ViewerScreen; Group holds the copies of one photo and the user's ticks; Tick is the delete box; PicturesScreen is the category grid; LabScreen and LabLog are the Algorithm Lab; OcrEngine runs the offline text reader; Session holds results and Keep decisions; Thumbs, MeterView, MediaOpen.
   - **AndroidPlatform:** reads files and system stats.
   - **Calibrator:** on-device measurement.
   - **Ssim:** matches scikit-image to 1e-14.
@@ -490,4 +573,6 @@ The app also contains one private, read-only file provider. It isn't exported, a
   - Only English letters are read, so Hindi and other scripts are not.
   - Greeting images are often missed.
 - **The compression tools are tested on one phone only** (Galaxy S23 FE, Android 16). The HEIC writer depends on each phone's encoders. The path through a dedicated HEIC encoder hasn't run on a phone yet. See the [tools README](app/src/main/java/com/storageplanner/tools/README.md).
+- **The look inside videos has not run on a phone.** It is tested on made-up frames on the desktop. Reading the exact frame at a moment is slower than reading the nearest key frame, and how long it takes on a phone is not measured. A Sent copy that WhatsApp turned or trimmed is not matched (it is then simply not suggested).
+- **The need estimate uses points chosen by reasoning, not fitted to real decisions.** "Learn from my choices" adjusts it per kind of suggestion as you decide.
 - **Cache clearing is manual.** Android doesn't let one app clear another app's cache, so you do it from each app's settings page.
