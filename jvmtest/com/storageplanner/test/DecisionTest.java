@@ -49,7 +49,7 @@ public final class DecisionTest {
                 for (Unit u : act) {
                     String tech = acc.get(u.id); long m = 0;
                     if (tech != null) m = Review.optionFor(u, tech).saved;
-                    else for (Option o : u.options) if (mode == 0 || o.risk <= Option.R2) m = Math.max(m, o.saved);
+                    else for (Option o : u.options) if (!o.review && (mode == 0 || o.risk <= Option.R2)) m = Math.max(m, o.saved);
                     best += m;
                 }
                 if (mode == 0 && best >= need && !p.reachesTarget) ok = false;

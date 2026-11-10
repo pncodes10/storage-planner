@@ -34,7 +34,7 @@ public final class Session {
     public static long targetUsed;
     public static boolean appStats;
     public static int sdk;
-    public static int mode = MODE_TARGET;
+    public static int mode = MODE_SAFE;      // every safe step; "Reach my target" is the user's choice
     public static final Set<String> kept = new HashSet<String>();
     /** unit id -> technique the user accepted (swiped right); locked into every plan */
     public static final Map<String, String> accepted = new HashMap<String, String>();

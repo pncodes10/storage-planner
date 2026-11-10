@@ -187,6 +187,8 @@ public final class UnitBuilder {
             if (!u.options.isEmpty()) units.add(u);
             else if (keepers.contains(f.rel) || f.category != null) units.add(u);   // no options, but the user may pick it for deletion
         }
+        // every proposal above is only a candidate: the Assessor decides which stand, at which tier, and which are review-only
+        Assessor.apply(this, r);
     }
 
     /** Camera photos with features, oldest first (the burst search input). */

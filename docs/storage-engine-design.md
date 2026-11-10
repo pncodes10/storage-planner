@@ -1,6 +1,10 @@
 # Intelligent on-device storage engine: Phase 0 discovery and design
 
-Status: design for review. No app code changes with this document. Written 2026-11-10 against
+Status: design. Decisions taken since (section 10): GitHub-only distribution, the app may act on files
+(through a separate action engine, not built yet), zero dependencies kept, *All safe steps* is the default.
+The first part is implemented: the decision algorithm of section 6 (`core/Assessor.java`, `Policy.java`,
+`Actions.java`; README, "The decision algorithm"). Not implemented yet: the index, the wider relationship
+search, documents, the action engine. The original text follows; it was written with no app code changes. Written 2026-11-10 against
 commit `4e84791` (app 1.8.1), in answer to the brief *Intelligent On-Device Storage Optimization Engine*.
 The brief asks for research, a repository audit and a design **before** implementation; this is that
 deliverable. Section 10 lists the decisions that need an answer before Phase 1 starts.

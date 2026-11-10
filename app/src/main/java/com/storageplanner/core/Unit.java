@@ -11,6 +11,8 @@ public final class Unit {
     public final FileItem file;      // null for apps and caches
     public final AppItem app;        // null for files
     public final List<Option> options = new ArrayList<Option>();
+    /** What the Assessor found out about this file (null for apps and caches). */
+    public Assessment assessment;
 
     private Unit(String id, String title, String kind, FileItem f, AppItem a) {
         this.id = id; this.title = title; this.kind = kind; this.file = f; this.app = a;
@@ -43,7 +45,7 @@ public final class Unit {
             for (int i = 0; i < options.size(); i++) {
                 Option e = options.get(i);
                 if (e.action.equals("delete")) {
-                    if (o.risk < e.risk) options.set(i, o);
+                    if (o.risk < e.risk || (o.risk == e.risk && Techniques.DUPLICATES.equals(o.technique))) options.set(i, o);
                     return;
                 }
             }

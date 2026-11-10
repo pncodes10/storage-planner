@@ -170,6 +170,7 @@ public final class DetailScreen extends Screen {
                 else if (o == chosen && Session.isAccepted(u)) { st = "\u2713 Approved by you: locked into your plan."; col = Ui.tier[0]; }
                 else if (o == chosen) { st = "✓ This is in your plan."; col = Ui.accent; }
                 else if (chosen != null) { st = "Not chosen: “" + chosen.technique + "” is planned for this item instead."; col = Ui.text2; }
+                else if (o.review) { st = "For you to decide, never planned automatically: " + o.note + "."; col = Ui.text2; }
                 else { st = Session.mode == Session.MODE_SAFE && o.risk > Option.R2 ? "Not included at this risk level." : "Not needed to reach your target."; col = Ui.text2; }
                 Ui.add(c, Ui.text(a, st, 15, col, true), 8);
                 c.setContentDescription(o.technique + ". Risk: " + Ui.TIER_SPOKEN[o.risk] + ". Frees " + Report.size(o.saved)

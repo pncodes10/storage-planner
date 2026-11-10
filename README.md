@@ -10,7 +10,7 @@ An Android app that scans your phone and builds a plan to reach a storage target
    - **Grant usage access** (optional). This adds app sizes, caches, and apps you haven't opened in months. If the toggle is greyed out, go to Settings → Apps → Storage Planner → ⋮ → **Allow restricted settings**, then try again.
 3. Check the target (GB of used space) and tap **Analyse my storage**. With tens of thousands of photos this takes a few minutes. You can switch to other apps meanwhile (see below). On Android 13+ the app asks once whether it may show notifications; the scan runs either way.
 4. **Your storage plan** (overview) shows:
-   - **Mode:** *Reach my target* (the minimum steps needed) or *All safe steps* (everything that loses nothing visible).
+   - **Mode:** *All safe steps* (everything that loses nothing visible; the default) or *Reach my target* (the minimum steps needed to get there, which can include items that need your confirmation).
    - **Storage bar:** used now, what the plan frees, and a marker at your target.
    - **Recommendations:** lowest risk first, each with a risk label in words (Safe / No loss / Looks identical / Small quality loss / Your call), how much it frees, and how many items are in the plan.
    - **What's using space:** photos, videos, WhatsApp, apps and the rest, largest first.
@@ -29,7 +29,7 @@ An Android app that scans your phone and builds a plan to reach a storage target
    - for duplicates, bursts and Sent copies, **the copy that is kept**, with a **Compare side by side** button.
 
    Buttons open the file in your gallery or viewer, or open an app's settings (where you clear its cache, archive it or uninstall it).
-7. **Save report** writes `.txt`, `.csv` and `.json` files to `Download/StoragePlanner/`.
+7. **Save report** writes `.txt`, `.csv` and `.json` files to `Download/StoragePlanner/`, plus `actions-<time>.json`: every suggestion with its state, for the engine that will carry actions out (see [The decision algorithm](#the-decision-algorithm)).
 
 Accessibility:
 - TalkBack labels on every row, card and button.
@@ -78,6 +78,63 @@ What you can do:
 TalkBack users get Keep / Accept / View actions on each card. Decisions are remembered across scans; see them under "You approved N items" and "You chose to keep N items" on the overview.
 
 Accepting doesn't delete anything. Storage Planner stays read-only: act on approved items with Open with, Show in folder, or an app's settings.
+
+## The decision algorithm
+
+Finding something that *could* be removed is not the same as deciding that it *should* be. After the scan,
+every suggestion is only a proposal. The **Assessor** (`core/Assessor.java`) decides which proposals stand.
+It only reads the scan: it calls no tool and changes no file.
+
+For each file it works out five things and keeps them apart, so that a low-value file is never treated as
+safe to delete just because it is low-value:
+
+| Value | Meaning |
+|---|---|
+| Retention | How much keeping the file is worth. Unknown means valuable. Camera originals, faces, documents and records raise it |
+| Redundancy | How sure it is that another file, which stays, holds the same content |
+| Regenerable | How sure it is that the file can be had again (rebuilt, downloaded again) |
+| Confidence | How strong the evidence is. Different kinds of evidence that agree count; one kind alone counts for little unless it is conclusive (identical bytes, a system fact) |
+| Harm | What is lost if the suggestion is wrong. Weak evidence counts as possible harm |
+
+**Rules that size never overrides:**
+
+| Rule | What it does |
+|---|---|
+| Personal records | ID pictures, and files named like a personal record (passport, bank statement, tax, insurance, medical, deed, certificate …), get no suggestion at all, except removing an identical extra copy. They are never re-encoded |
+| One reason is not enough | Age alone, blur alone, darkness alone or a folder name alone never plans a deletion. Old downloads, soft photos and dark shots are shown for you to review |
+| Payment and ticket screenshots | Shown for review only: they can matter for refunds, claims and disputes |
+| The kept copy stays | The file that is kept from a group (duplicates, a burst, a Sent copy's original) is never planned for deletion itself, whatever else is true of it |
+| Companions stay together | RAW + JPEG pairs, edit sidecars (`.xmp`, `.aae`), subtitles, and a photo with a video of the same name are not split and not re-encoded |
+| Text stays exact | Receipts, bills, documents, QR codes, payments and tickets are not re-encoded with loss |
+| Backups | An older WhatsApp backup may go only while a newer one is in the same folder |
+| Leftovers of uninstalled apps | Game data (`Android/obb`) is junk. Files in the app's media folder may be your own recordings or exports, so they are review-only |
+| WhatsApp Sent copies | "No loss" only when the match with the camera photo is very close and the original is not smaller. Otherwise they are listed as *Sent copies to check* |
+| Telegram media | "Your call", not "No loss": the app cannot check that a file is still in Telegram's cloud |
+
+**Review-only** suggestions are listed and you can approve them, but no plan ever includes one by itself, in
+either mode. In the list they say *For you to decide*, with the reason.
+
+**Tiers are worked out, not assigned.** *Safe* needs a file that rebuilds itself, is worth nothing kept, and
+strong evidence. *No loss* needs the same content elsewhere or a file that can be had again, and strong
+evidence. Everything else that passes the rules is *Your call*. The numbers are in `core/Policy.java`; they
+are conservative starting values, not yet tuned on labelled data.
+
+**Output for the action engine** (`core/Actions.java`, saved as `actions-<time>.json`). Each suggestion has:
+- a **state**: `approved` (you accepted it), `planned` (in the plan, not looked at yet), `available` (passed
+  every rule, not needed), or `review`;
+- the action, tier, bytes and reason, and the five values;
+- `keeps`: the file that must still be there when this one goes;
+- `verify`: the file's size, modified time and SHA-256 (when known) at scan time, so an engine can refuse a
+  file that changed since.
+
+Protected files and withdrawn suggestions are listed too, with the reason.
+
+**Tests** (`AssessorTest`, run by CI): 45 checks. A hand-built phone with the hard cases (the only copy of a
+blurry family photo, an old deed, an ID picture and its copy, a kept copy that is also an old download, a
+RAW + JPEG pair, recordings left by an uninstalled app), and 300 random phones on which no plan at any risk
+level deletes a kept copy together with its copies, touches a protected file, or picks a review-only item.
+
+The research and design behind this is in [`docs/storage-engine-design.md`](docs/storage-engine-design.md).
 
 ## Tools (for the action taker)
 
@@ -361,13 +418,13 @@ The app also contains one private, read-only file provider. It isn't exported, a
 
 | Tier | Meaning | Examples |
 |---|---|---|
-| R0 | Rebuildable or junk | App caches, thumbnails, temp files, leftovers of uninstalled apps, expired statuses |
-| R1 | Nothing lost | Exact duplicates, installers for installed apps, WhatsApp Sent copies of photos still in your camera roll, trash, old WhatsApp backups, Telegram media (re-downloadable), archiving idle apps (Android 15), lossless screenshots |
+| R0 | Rebuildable or junk | App caches, thumbnails, temp files, expired statuses |
+| R1 | Nothing lost | Exact duplicates, installers for installed apps, WhatsApp Sent copies that surely match a photo still in your camera roll, trash, old WhatsApp backups (while a newer one exists), game data left by uninstalled games, archiving idle apps (Android 15), lossless screenshots |
 | R2 | Visually identical | Photos re-encoded to HEIC/WebP, H.264 videos re-encoded to HEVC |
 | R3 | Small quality trade-off | Music above 256 kbps to 128 kbps |
-| R4 | Needs your confirmation | Burst near-duplicates (keeps the sharpest), possibly blurry photos, unused games/apps, old downloads |
+| R4 | Needs your confirmation | Burst near-duplicates (keeps the best shot), Telegram media, Sent copies to check, one-time codes, greetings, unused games/apps. **Review only, never planned:** possibly blurry photos, accidental shots, old downloads, payment and ticket screenshots, files left by uninstalled apps |
 
-The planner uses the lowest tier that can reach the target. Within that tier it takes the cheapest bytes first, then drops anything not needed.
+*All safe steps* takes everything in R0–R2. *Reach my target* uses the lowest tier that can reach the target; within that tier it takes the cheapest bytes first, then drops anything not needed. Neither ever takes a review-only item.
 
 **Exact vs estimated.** Deletions, caches and app sizes are exact. Re-encoding savings are estimates:
 - **Photos and chat images:** if "Measure compression" is on, these are **measured on a sample of your own files**. The app re-encodes each sampled photo to WebP at the lowest quality that still passes the study's guard (SSIM ≥ 0.98 and PSNR ≥ 38 dB) and records the real size. HEIC usually saves more, so this is conservative.
@@ -395,7 +452,9 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
-  - **UnitBuilder:** options.
+  - **UnitBuilder:** proposals.
+  - **Assessor / Assessment / Policy:** the decision algorithm: which proposals stand, at which tier.
+  - **Actions:** the algorithm's output for the action engine.
   - **Planner:** tiered planner.
   - **Report:** output.
   - **ResultStore:** versioned binary format for saved results (with checksum).
@@ -408,7 +467,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest), image-compression rules (CompressionTest) and decision-algorithm (AssessorTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

@@ -270,7 +270,8 @@ public final class ListScreen extends Screen {
                 statusColor = Ui.tier[0];
             }
             else if (ch == null) {
-                statusText = Session.mode == Session.MODE_SAFE && shown.risk > Option.R2 ? "Not included at this risk level" : "Not needed for your target";
+                statusText = shown.review ? "For you to decide: " + shown.note
+                        : Session.mode == Session.MODE_SAFE && shown.risk > Option.R2 ? "Not included at this risk level" : "Not needed for your target";
             } else if (kind == TECH && !ch.technique.equals(key)) {
                 statusText = "In plan as: " + ch.technique;
                 statusColor = Ui.accent;

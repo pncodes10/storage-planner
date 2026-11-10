@@ -56,7 +56,10 @@ jobs:
             $T/Exif.java $T/Extras.java $T/WebpMeta.java $T/CopyPaths.java $T/Ssim.java app/src/main/java/com/storageplanner/app/Ssim.java \
             $T/Mp4.java $T/FrameScore.java $T/VideoLevel.java $T/VideoSearch.java $T/ZipCompressor.java $T/MotionPhoto.java \
             jvmtest/com/storageplanner/test/CompressionTest.java jvmtest/com/storageplanner/test/VideoTest.java \
-            jvmtest/com/storageplanner/test/ZipTest.java jvmtest/com/storageplanner/test/MotionPhotoTest.java
+            jvmtest/com/storageplanner/test/ZipTest.java jvmtest/com/storageplanner/test/MotionPhotoTest.java \
+            jvmtest/com/storageplanner/test/AssessorTest.java jvmtest/com/storageplanner/test/PlannerTest.java
+          java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.AssessorTest
+          java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.PlannerTest
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.CompressionTest
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.VideoTest
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.ZipTest

@@ -12,6 +12,10 @@ public final class Techniques {
     public static final String TRASH = "Empty the trash";
     public static final String DUPLICATES = "Exact duplicates";
     public static final String SENT = "WhatsApp Sent copies";
+    /** Sent copies whose match with a camera photo is close but not certain. */
+    public static final String SENT_CHECK = "WhatsApp Sent copies to check";
+    /** Files in Android/media or Android/data of an app that is no longer installed: may be the user's own media. */
+    public static final String LEFTOVER_MEDIA = "Files left by uninstalled apps";
     public static final String INSTALLED_APK = "Installers already installed";
     public static final String WA_BACKUP = "Old WhatsApp backups";
     public static final String TELEGRAM = "Telegram downloaded media";
@@ -51,6 +55,10 @@ public final class Techniques {
             "Delete the listed copies in your file manager. Open an item to see which copy is kept.");
         put(SENT, "Compressed copies WhatsApp made of photos you sent, while the original is still in your camera roll.",
             "Delete them from WhatsApp > Media > Sent, or with your file manager.");
+        put(SENT_CHECK, "Sent copies that look like a photo in your camera roll, but not closely enough to be sure it is the same shot.",
+            "Compare each one with the photo that is kept before deleting it.");
+        put(LEFTOVER_MEDIA, "Files an app saved in its own folder, left behind after you uninstalled it. They can be photos, recordings or exports you made in that app.",
+            "Open each one. Delete it with your file manager only if you do not need it.");
         put(INSTALLED_APK, "Installer files (.apk) for apps that are already installed.",
             "Delete them from Downloads.");
         put(WA_BACKUP, "Older local chat backups. WhatsApp keeps the newest one; your Google Drive backup is separate.",
@@ -78,19 +86,19 @@ public final class Techniques {
         put(OTP_SHOTS, "Screenshots of one-time passwords and login codes. A code stops working within minutes.",
             "Delete them in your gallery (Screenshots).");
         put(OLD_PAYMENTS, "Screenshots of UPI and bank payment confirmations older than 3 months. Your bank statement and the payment app keep the record.",
-            "Check each one, then delete it in your gallery.");
+            "Shown for you to review only; never added to a plan automatically. Check each one, then delete it in your gallery.");
         put(EXPIRED_TICKETS, "Train, flight, bus and movie tickets whose date has passed.",
-            "Check each one (some are needed for refunds or expense claims), then delete it.");
+            "Shown for you to review only; never added to a plan automatically. Check each one (some are needed for refunds or expense claims), then delete it.");
         put(GREETINGS, "Good-morning, festival and other greeting images received in chats more than a week ago.",
             "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
         put(ACCIDENTAL, "Very dark, covered or badly shaken shots, usually taken by accident.",
-            "Look at each one; delete it in your gallery if nothing is in it.");
+            "Shown for you to review only; never added to a plan automatically. Look at each one; delete it in your gallery if nothing is in it.");
         put(BURSTS, "Photos taken within minutes of each other that look almost identical. The better one is kept: eyes open, faces visible, sharper, better lit.",
             "Look at each one; delete the extras in your gallery if you agree.");
         put(BLURRY, "Photos much softer than the rest of your photos. Some may be intentional (motion, low light, close-ups).",
-            "Look at each one before deleting.");
+            "Shown for you to review only; a soft photo may be the only one you have of that moment. Look at each one before deleting.");
         put(OLD_DOWNLOADS, "Downloads you have not touched for 6+ months, and installers for apps that are no longer installed.",
-            "Check each one; delete what you no longer need.");
+            "Age alone never puts a file in a plan: old downloads are shown for you to review. Check each one; delete what you no longer need.");
     }
 
     private static void put(String t, String what, String how) { INFO.put(t, new Info(what, how)); }

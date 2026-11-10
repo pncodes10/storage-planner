@@ -407,7 +407,10 @@ public final class MainActivity extends Activity {
             write(new File(dir, "plan-" + stamp + ".txt"), Report.text(c, Session.plan, Session.safe));
             write(new File(dir, "plan-" + stamp + ".csv"), Report.csv(Session.plan));
             write(new File(dir, "plan-" + stamp + ".json"), Report.json(c, Session.plan, Session.safe));
-            toast("Saved to Download/StoragePlanner/plan-" + stamp + " (.txt, .csv, .json)");
+            // the algorithm's full output for the engine that will carry actions out (see core/Actions.java)
+            write(new File(dir, "actions-" + stamp + ".json"), com.storageplanner.core.Actions.json(Session.ub.units, Session.plan,
+                    Session.kept, Session.accepted, Session.mode == Session.MODE_SAFE, c.now));
+            toast("Saved to Download/StoragePlanner/plan-" + stamp + " (.txt, .csv, .json) and actions-" + stamp + ".json");
         } catch (Throwable t) {
             toast("Could not save: " + t.getMessage());
         }

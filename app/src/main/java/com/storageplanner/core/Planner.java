@@ -8,7 +8,8 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Stage 3: pick at most one option per unit.
+ * Stage 3: pick at most one option per unit. Review-only options (Option.review) are never picked here;
+ * they enter a plan only through the user's own approval (Review.planWithDecisions).
  * Tiered planner: use the lowest risk tier that can reach the target; inside it, take the cheapest
  * cost-per-byte upgrades first, then prune anything not needed. In the research prototype this
  * greedy+prune matched the exact knapsack DP to within half a cost point, and runs in milliseconds
@@ -32,7 +33,7 @@ public final class Planner {
         for (Unit u : units) {
             Option best = null;
             for (Option o : u.options)
-                if (o.risk <= maxRisk && (best == null || o.saved > best.saved || (o.saved == best.saved && o.cost() < best.cost())))
+                if (!o.review && o.risk <= maxRisk && (best == null || o.saved > best.saved || (o.saved == best.saved && o.cost() < best.cost())))
                     best = o;
             if (best != null) p.chosen.put(u, best);
         }
@@ -63,7 +64,7 @@ public final class Planner {
             Option cur = p.chosen.get(u);
             long cs = cur == null ? 0 : cur.saved; double cc = cur == null ? 0 : cur.cost();
             for (Option o : u.options) {
-                if (o.risk > maxRisk || o.saved <= cs) continue;
+                if (o.review || o.risk > maxRisk || o.saved <= cs) continue;
                 Move m = new Move(); m.u = u; m.o = o; m.key = (o.cost() - cc) / (double) (o.saved - cs);
                 moves.add(m);
             }
@@ -101,7 +102,7 @@ public final class Planner {
             if (total - cur.saved >= target) { bestAltCost = 0; bestAlt = null; bestAltSaved = 0; }
             else {
                 for (Option o : e.getKey().options) {
-                    if (o == cur || o.risk > maxRisk || o.cost() >= bestAltCost) continue;
+                    if (o == cur || o.review || o.risk > maxRisk || o.cost() >= bestAltCost) continue;
                     if (total - cur.saved + o.saved >= target) { bestAlt = o; bestAltSaved = o.saved; bestAltCost = o.cost(); }
                 }
                 if (bestAltCost >= cur.cost()) continue;   // nothing cheaper fits
