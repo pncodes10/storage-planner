@@ -25,6 +25,7 @@ check-in reads this file first. Spec: `Storage_Planner_Technical_Specification_v
 | D4 | Drive photos stay outside git, in `/home/user/sp-dataset-drive/`; Drive is read-only. | Personal photos, some owned by other accounts. |
 | D5 | Drive videos skipped. | Drive tool caps downloads at 10 MB; smallest video is 18.6 MB. No direct Google API access used. |
 | D6 | Hourly scheduled check-in wakes this session. | Owner asked that work continue unattended. |
+| D7 | Relaunched the survey and dataset agents at 22:25 UTC. | Both had been silently stopped at 20:25/20:33 by the owner's interrupts (made to reconnect Drive), and could not be resumed. Two hours lost. Lesson: after any interrupt, check that background agents are still alive. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -36,8 +37,8 @@ check-in reads this file first. Spec: `Storage_Planner_Technical_Specification_v
 
 ## State
 
-- Codebase survey (Explore agent): running.
-- Dataset builder agent: running.
+- Codebase survey (Explore agent): relaunched 22:25 UTC, running.
+- Dataset builder agent: relaunched 22:25 UTC, running.
 - Phase 1 (storage discovery + permission capabilities): not started; waits
   for the survey.
 
