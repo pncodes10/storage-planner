@@ -18,6 +18,9 @@ public final class Assessment {
     /** Suggestions that were withdrawn, with the reason ("Old payment screenshots: sensitive record"). */
     public final List<String> withdrawn = new ArrayList<String>();
 
+    /** Debug only (Policy.trace): every proposal for this file and what became of it, step by step. */
+    public final List<String> trace = new ArrayList<String>();
+
     /** True when the file must not be suggested for anything but removing an identical extra copy. */
     public boolean isProtected() { return sensitive; }
 }

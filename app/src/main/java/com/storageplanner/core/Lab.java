@@ -415,4 +415,184 @@ public final class Lab {
         if (ms < 172800000) return (ms / 3600000) + " h";
         return (ms / 86400000) + " days";
     }
+
+    // ------------------------------------------------------------------ the whole algorithm
+    /** What the algorithm concluded for one picked picture. */
+    public static final class Conclusion {
+        public String name;
+        /** KEEP, PROTECTED, DELETE (in the plan), KEEP, MAKE SMALLER (in the plan), SUGGESTED TO DELETE (your call) or FOR YOU TO DECIDE. */
+        public String verdict;
+        public String why;
+    }
+
+    /**
+     * Runs the whole decision algorithm on the picked pictures as if they were the only files on the phone:
+     * the scan's measurements (type, exact copies, picture features, category, faces, text, best shot), then
+     * the proposals (UnitBuilder), the judging (Assessor, Need) and the default plan. Every step is logged, and
+     * a conclusion per picture comes last.
+     */
+    public static List<Conclusion> algorithm(Platform pf, List<Pic> pics, long now, Policy settings, Out o) {
+        List<Conclusion> out = new ArrayList<Conclusion>();
+        Policy policy = (settings == null ? new Policy() : settings).copy();
+        policy.trace = true;
+        o.line("RUN THE ALGORITHM on " + pics.size() + " picture(s)");
+        o.line("  settings: " + policy.describe());
+        o.line("  note: the picked pictures are judged as if they were the only files on the phone. In a real analysis they are also");
+        o.line("        compared with all your other files: exact copies, similar shots, the usual sharpness of your photos, and");
+        o.line("        photos taken within the same hour. Pick the related pictures together to see those rules work.");
+
+        // ---- 1. the files, as the scan lists them
+        o.line("");
+        o.line("STEP 1  files and types");
+        Scanner.Result r = new Scanner.Result();
+        r.now = now;
+        java.util.Map<FileItem, Pic> picOf = new java.util.LinkedHashMap<FileItem, Pic>();
+        java.util.Set<String> used = new java.util.HashSet<String>();
+        for (Pic p : pics) {
+            String dir = p.area.equals("screenshot") ? "Pictures/Screenshots/" : p.area.equals("wa_image") ? "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/"
+                    : p.area.equals("download") ? "Download/" : "DCIM/Camera/";
+            String rel = dir + p.name;
+            for (int k = 2; !used.add(rel); k++) rel = dir + "picked" + k + "/" + p.name;     // two picks with one name
+            FileItem f = new FileItem(rel, p.path, p.size, p.mtime);
+            f.area = Classifier.classify(rel, new java.util.HashSet<String>())[0];
+            f.type = Classifier.magic(p.path, p.size);
+            r.files.add(f); picOf.put(f, p);
+            o.line(f("  %s: %d bytes, %s old, treated as %s -> area \"%s\", type by content \"%s\"", p.name, p.size, dur(Math.max(0, now - p.mtime)), p.area, f.area, f.type));
+        }
+
+        // ---- 2. exact copies: size, then first and last 64 KB, then everything
+        o.line("");
+        o.line("STEP 2  exact copies (same size -> quick hash -> full SHA-256)");
+        boolean anyCopy = false;
+        for (int i = 0; i < r.files.size(); i++) for (int j = i + 1; j < r.files.size(); j++) {
+            FileItem a = r.files.get(i), b = r.files.get(j);
+            if (a.size != b.size || a.size < 4096) continue;
+            String qa = Scanner.quickHash(a.abs, a.size), qb = Scanner.quickHash(b.abs, b.size);
+            if (qa == null || !qa.equals(qb)) { o.line("  " + a.name() + " and " + b.name() + ": same size, different content"); continue; }
+            if (a.sha256 == null) a.sha256 = Scanner.fullHash(a.abs);
+            if (b.sha256 == null) b.sha256 = Scanner.fullHash(b.abs);
+            boolean same = a.sha256 != null && a.sha256.equals(b.sha256);
+            o.line("  " + a.name() + " and " + b.name() + ": " + (same ? "IDENTICAL (SHA-256 " + a.sha256.substring(0, 16) + "…)" : "different"));
+            anyCopy |= same;
+        }
+        if (!anyCopy) o.line("  no two picked pictures are identical");
+
+        // ---- 3. picture features, as Scanner does (hash and sharpness for camera photos; size for the rest)
+        o.line("");
+        o.line("STEP 3  picture measurements");
+        java.util.Map<FileItem, Sorter.Prep> measured = new java.util.HashMap<FileItem, Sorter.Prep>();
+        int[] dims = new int[4];
+        for (FileItem f : r.files) {
+            boolean img = f.type.equals("jpeg") || f.type.equals("heic") || f.type.equals("png") || f.type.equals("webp");
+            if (!img) { o.line("  " + f.name() + ": not a picture the app measures (type " + f.type + ")"); continue; }
+            long t0 = System.nanoTime();
+            if (f.area.equals("camera") || f.area.equals("wa_sent")) {
+                int[] px;
+                try { px = pf.argb(f.abs, Sorter.EDGE, dims); } catch (Throwable t) { px = null; }
+                if (px == null) { o.line("  ! " + f.name() + ": could not be decoded"); continue; }
+                int[] l = Sorter.luma(px);
+                if (PhotoCategory.sortable(f)) measured.put(f, Sorter.measure(pf, f, px, dims));
+                f.width = dims[0]; f.height = dims[1];
+                f.phash = ImageFeatures.phash(l, dims[2], dims[3]); f.hasPhash = true;
+                f.sharp = ImageFeatures.sharpness(l, dims[2], dims[3]);
+                o.line(f("  %s: %d x %d, look-alike hash %016x, sharpness %.1f (%d ms)", f.name(), f.width, f.height, f.phash, f.sharp, (System.nanoTime() - t0) / 1000000));
+            } else {
+                try { if (pf.imageSize(f.abs, dims)) { f.width = dims[0]; f.height = dims[1]; } } catch (Throwable ignored) {}
+                o.line(f("  %s: %d x %d (hash and sharpness are measured for camera photos only)", f.name(), f.width, f.height));
+            }
+        }
+
+        // ---- 4. near-identical shots, and which one is better
+        o.line("");
+        o.line("STEP 4  near-identical shots (same size, within " + UnitBuilder.BURST_WINDOW_MS / 60000 + " min, hash within " + UnitBuilder.NEAR_DUP_BITS + " bits)");
+        List<List<FileItem>> clusters = UnitBuilder.burstClusters(r.files);
+        if (clusters.isEmpty()) o.line("  none among the picked pictures");
+        for (List<FileItem> c : clusters) {
+            StringBuilder b = new StringBuilder();
+            for (FileItem f : c) {
+                try { f.quality = Scanner.quality(pf, f.abs); } catch (Throwable t) { f.quality = null; }
+                b.append(b.length() == 0 ? "" : ", ").append(f.name()).append(f.quality == null ? " (not measured)" : f(" (faces %d)", f.quality.faces));
+            }
+            o.line("  group: " + b + " -> keep " + UnitBuilder.bestShot(c).name());
+        }
+
+        // ---- 5. what each picture shows
+        o.line("");
+        o.line("STEP 5  what each picture shows (category, code, faces, text)");
+        Scanner.Options opt = new Scanner.Options();
+        try {
+            Sorter.sort(pf, new Scanner.Progress() { public void update(String s, int d, int t) {} public boolean cancelled() { return false; } }, r, opt, measured);
+        } catch (Throwable t) { o.line("  ! sorting failed: " + t); }
+        for (FileItem f : r.files) {
+            if (f.category == null) { o.line("  " + f.name() + ": not sorted"); continue; }
+            o.line("  " + f.name() + ": " + PhotoCategory.label(f.category) + "; faces " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces))
+                    + "; code " + (f.code == null ? "none" : f.code) + (f.catDate > 0 ? "; date read " + Report.day(f.catDate) : "")
+                    + (f.textPending ? "; text NOT read (no reader, or out of time)" : f.text == null ? "; no text kept" : "; text \"" + cut(f.text, 80) + "\""));
+        }
+
+        // ---- 6. proposals, judging, plan
+        o.line("");
+        o.line("STEP 6  proposals and how each was judged");
+        UnitBuilder ub = new UnitBuilder(r, new Estimates(), pf.sdkInt(), policy);
+        Planner.Plan plan = Planner.safe(ub.units);
+        java.util.Map<String, Unit> byId = new java.util.HashMap<String, Unit>();
+        for (Unit u : ub.units) byId.put(u.id, u);
+        for (FileItem f : r.files) {
+            Unit u = byId.get(f.rel);
+            o.line(" " + f.name());
+            Conclusion c = new Conclusion();
+            c.name = f.name();
+            out.add(c);
+            if (u == null) {
+                o.line("  nothing was proposed for this file");
+                c.verdict = "KEEP"; c.why = "nothing speaks against it";
+                continue;
+            }
+            Assessment a = u.assessment;
+            if (a != null) {
+                o.line(f("  the file: worth keeping %.2f%s%s%s", a.retention, a.sensitive ? "; PERSONAL RECORD" : "",
+                        a.keeperOf > 0 ? "; the copy that is kept of " + a.keeperOf : "", a.hasCompanion ? "; has companion files" : ""));
+                if (!a.labels.isEmpty()) o.line("  found: " + a.labels);
+                if (a.trace.isEmpty()) o.line("  nothing was proposed for this file");
+                for (String t : a.trace) o.line("  " + t);
+            }
+            Option chosen = plan.chosen.get(u);
+            Option del = Review.deleteOption(u);
+            if (a != null && a.isProtected() && u.options.isEmpty()) { c.verdict = "PROTECTED"; c.why = "a personal record: nothing is ever suggested for it"; }
+            else if (chosen != null) {
+                boolean gone = chosen.action.equals("delete");
+                c.verdict = gone ? "DELETE (in the plan)" : "KEEP, MAKE SMALLER (in the plan)";
+                c.why = (gone ? "delete" : chosen.action.equals("lossless_image") ? "convert without loss" : "re-encode") + " as \"" + chosen.technique + "\" (" + Option.TIER_NAME[chosen.risk] + "), frees " + Report.size(chosen.saved)
+                        + (chosen.exact ? "" : " (estimate)") + ": " + chosen.why + (chosen.keeps == null ? "" : "; " + chosen.keeps + " stays");
+                if (del != null && del != chosen) c.why += ". Also " + (del.review ? "for you to decide" : "suggested") + ": delete as \"" + del.technique + "\"";
+            }
+            else if (del != null && !del.review) { c.verdict = "SUGGESTED TO DELETE (your call)"; c.why = "delete as \"" + del.technique + "\" (your call, not in the default plan): " + del.why
+                    + (del.evidence == null || del.evidence.isEmpty() ? "" : "; estimate " + del.need + " of 100, " + del.evidence); }
+            else if (del != null) { c.verdict = "FOR YOU TO DECIDE"; c.why = "\"" + del.technique + "\": " + del.note
+                    + (del.evidence == null || del.evidence.isEmpty() ? "" : "; estimate " + del.need + " of 100, " + del.evidence); }
+            else if (!u.options.isEmpty()) { c.verdict = "KEEP"; c.why = "only optional steps outside the default plan: " + u.options.get(0).technique; }
+            else {
+                c.verdict = "KEEP";
+                c.why = a != null && !a.withdrawn.isEmpty() ? a.withdrawn.get(a.withdrawn.size() - 1) : a != null && a.keeperOf > 0 ? "it is the copy that is kept" : "nothing speaks against it";
+            }
+        }
+
+        // ---- conclusion
+        o.line("");
+        o.line("==================== CONCLUSION ====================");
+        long frees = 0; int keep = 0, plan0 = 0, smaller = 0, sugg = 0, ask = 0;
+        for (Conclusion c : out) {
+            o.line(c.name + "  ->  " + c.verdict);
+            o.line("      " + c.why);
+            if (c.verdict.startsWith("DELETE")) plan0++; else if (c.verdict.startsWith("KEEP, MAKE")) smaller++;
+            else if (c.verdict.startsWith("SUGGESTED")) sugg++; else if (c.verdict.startsWith("FOR YOU")) ask++; else keep++;
+        }
+        for (Option x : plan.chosen.values()) frees += x.saved;
+        o.line(f("of %d picture(s): %d kept as they are, %d kept and made smaller, %d deleted by the default plan, %d suggested for your call, %d for you to decide",
+                out.size(), keep, smaller, plan0, sugg, ask));
+        o.line("the default plan (every safe step) would free " + Report.size(frees) + ".");
+        o.line("nothing was deleted or changed: this only shows what the algorithm decides.");
+        o.line("====================================================");
+        return out;
+    }
 }

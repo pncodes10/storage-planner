@@ -459,6 +459,7 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 
 | Button | What it shows |
 |---|---|
+| Run the algorithm | The whole decision algorithm on the picked pictures, as if they were the only files on the phone, with the current **Algorithm settings**. The log shows six steps (file types, exact copies, picture measurements, near-identical shots, what each picture shows, then every proposal and how it was judged, with the need estimate point by point) and ends with a **CONCLUSION** block: for each picture *Keep*, *Protected*, *Delete (in the plan)*, *Keep, make smaller (in the plan)*, *Suggested to delete (your call)* or *For you to decide*, and why. Nothing is deleted. Because only the picked pictures are compared with each other, pick related pictures together (copies, a burst, photos of one event) |
 | Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
 | Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
 | Exact duplicate check | SHA-256 of each file |

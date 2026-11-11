@@ -76,6 +76,8 @@ public final class Assessor {
         double medianSharp;
         /** technique -> {approved, kept}: what the user decided before on that kind of suggestion */
         final Map<String, int[]> history = new HashMap<String, int[]>();
+        /** The estimate made for the proposal being judged, for the trace. */
+        Need.Result lastNeed;
     }
 
     /** Suggestions that rest on what the file is, not on another copy of it: Need decides them. */
@@ -126,12 +128,33 @@ public final class Assessor {
             u.assessment = a;
             List<Option> stand = new ArrayList<Option>();
             for (Option o : u.options) {
+                c.lastNeed = null;
+                int before = a.withdrawn.size();
                 Option j = judge(u.file, o, a, c);
                 if (j != null) stand.add(j);
+                if (c.policy.trace) trace(a, o, j, c.lastNeed, a.withdrawn.size() > before ? a.withdrawn.get(a.withdrawn.size() - 1) : null, c.policy);
             }
             u.options.clear();
             u.options.addAll(stand);
         }
+    }
+
+    private static void trace(Assessment a, Option proposed, Option result, Need.Result need, String withdrawn, Policy p) {
+        a.trace.add("proposal: " + proposed.action + " as \"" + proposed.technique + "\" (" + proposed.why + "), frees " + Report.size(proposed.saved));
+        if (need != null) {
+            a.trace.add("  do you need it? estimate, step by step:");
+            for (String s : need.steps) a.trace.add("    " + s);
+            a.trace.add("    = " + need.score + " of 100, with " + need.reasonsAgainst + " kind(s) of reason against (" + Policy.MIN_REASONS + " needed to suggest)");
+            a.trace.add("    limits now: suggest at " + p.suggestAtOrBelow() + " or less, keep without asking from " + p.keepAtOrAbove()
+                    + (p.planAtOrBelow() >= 0 ? ", add to the plan at " + p.planAtOrBelow() + " or less" : ""));
+        }
+        if (result == null) { a.trace.add("  -> WITHDRAWN: " + (withdrawn == null ? "no reason recorded" : withdrawn)); return; }
+        if (result.confidence >= 0)
+            a.trace.add(String.format(Locale.US, "  values: worth keeping %.2f, same content elsewhere %.2f, can be had again %.2f, evidence %.2f, harm if wrong %.2f",
+                    result.retention, result.redundancy, result.regenerable, result.confidence, result.harm));
+        if (result.keeps != null) a.trace.add("  the file that stays: " + result.keeps);
+        a.trace.add("  -> " + (result.review ? "FOR YOU TO DECIDE: " + result.note
+                : "STANDS as \"" + result.technique + "\", tier: " + Option.TIER_NAME[result.risk] + (result.sure ? " (sure: goes into the default plan)" : "")));
     }
 
     private static int[] hist(Ctx c, String technique) {
@@ -300,6 +323,7 @@ public final class Assessor {
         else if (t.equals(Techniques.OLD_DOWNLOADS) && f.apkPackage != null) { regen = 0.5; assumed = true; conf = agree(0.95, 0.9); }   // an installer; the store may still have it
         else if (NEED_BASED.contains(t)) {
             need = Need.of(f, t, around(f, t, c), c.policy);
+            c.lastNeed = need;
             if (need.verdict == Need.KEEP) return withdraw(a, o, "you probably need it (" + need.evidence() + ")");
             conf = need.reasonsAgainst == 0 ? 0 : 1 - Math.pow(0.4, need.reasonsAgainst);
             if (need.verdict == Need.REVIEW)

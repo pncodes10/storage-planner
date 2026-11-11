@@ -63,6 +63,7 @@ public final class AssessorTest {
         cases();
         need();
         videos();
+        try { lab(); } catch (Exception e) { check("lab run: " + e, false); }
         properties();
         System.out.println((checks - bad) + "/" + checks + " assessor checks pass");
         if (bad > 0) System.exit(1);
@@ -401,7 +402,53 @@ public final class AssessorTest {
         return f;
     }
 
-    static final class JvmFrames implements Platform {
+    /** The Lab's "Run the algorithm" on four made-up pictures: two identical, one black and soft, one ordinary. */
+    static void lab() throws Exception {
+        java.io.File dir = java.nio.file.Files.createTempDirectory("lab").toFile();
+        byte[] jpeg = new byte[300000]; new Random(5).nextBytes(jpeg); jpeg[0] = (byte) 0xFF; jpeg[1] = (byte) 0xD8; jpeg[2] = (byte) 0xFF;
+        byte[] dark = jpeg.clone(); dark[1000] ^= 1;
+        byte[] other = new byte[5000000]; new Random(6).nextBytes(other); other[0] = (byte) 0xFF; other[1] = (byte) 0xD8; other[2] = (byte) 0xFF;
+        String[] names = {"IMG_a.jpg", "IMG_a_copy.jpg", "IMG_dark.jpg", "IMG_view.jpg"};
+        byte[][] data = {jpeg, jpeg, dark, other};
+        List<Lab.Pic> pics = new ArrayList<Lab.Pic>();
+        for (int i = 0; i < 4; i++) {
+            java.io.File f = new java.io.File(dir, names[i]);
+            java.nio.file.Files.write(f.toPath(), data[i]);
+            pics.add(new Lab.Pic(f.getPath(), names[i], f.length(), NOW - (100 + i * 10) * DAY));
+        }
+        final StringBuilder log = new StringBuilder();
+        Policy p = policy(Policy.BALANCED);
+        List<Lab.Conclusion> c = Lab.algorithm(new JvmFrames(2) {
+            @Override public int[] argb(String path, int longEdge, int[] dims) {
+                int w = 400, h = 300; dims[0] = 4000; dims[1] = 3000; dims[2] = w; dims[3] = h;
+                int[] px = new int[w * h];
+                boolean black = path.contains("dark"); int k = path.contains("view") ? 7 : 3;
+                for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                    int v = black ? 2 : ((x * k / 20 + y / 15) % 2 == 0 ? 40 : 215);
+                    px[y * w + x] = 0xFF000000 | v << 16 | (black ? v : 255 - v) << 8 | v;
+                }
+                return px;
+            }
+        }, pics, NOW, p, new Lab.Out() { public void line(String s) { log.append(s).append('\n'); } });
+        String out = log.toString();
+        if (System.getProperty("show") != null) System.out.println(out);
+        check("lab run: one conclusion per picture", c.size() == 4);
+        check("lab run: settings, six steps and a conclusion block", out.contains("settings: Balanced") && out.contains("STEP 6") && out.contains("== CONCLUSION =="));
+        check("lab run: finds the identical pair", out.contains("IMG_a.jpg and IMG_a_copy.jpg: IDENTICAL"));
+        String copy = verdict(c, "IMG_a_copy.jpg"), orig = verdict(c, "IMG_a.jpg");
+        check("lab run: one of the identical pair is deleted by the plan, the other kept", (copy + orig).contains("DELETE (in the plan)")
+                && (copy.equals("KEEP") || orig.equals("KEEP")) && (why(c, "IMG_a_copy.jpg") + why(c, "IMG_a.jpg")).contains("Exact duplicates"));
+        check("lab run: estimate shown step by step for the black picture", out.contains("do you need it? estimate, step by step:") && out.contains("start 70"));
+        check("lab run: says nothing was deleted", out.contains("nothing was deleted or changed"));
+        check("lab run: the settings in use are not left in debug mode", !p.trace && !Policy.active.trace);
+        for (java.io.File f : dir.listFiles()) f.delete();
+        dir.delete();
+    }
+
+    static String verdict(List<Lab.Conclusion> c, String name) { for (Lab.Conclusion x : c) if (x.name.equals(name)) return x.verdict; return ""; }
+    static String why(List<Lab.Conclusion> c, String name) { for (Lab.Conclusion x : c) if (x.name.equals(name)) return x.why; return ""; }
+
+    static class JvmFrames implements Platform {
         final int kind; JvmFrames(int kind) { this.kind = kind; }
         public int[] videoFrame(String path, long timeMs, int longEdge, int[] dims) {
             if (kind == 3) return null;

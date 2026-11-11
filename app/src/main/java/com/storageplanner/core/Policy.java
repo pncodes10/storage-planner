@@ -32,6 +32,28 @@ public final class Policy {
     /** Look inside videos during the scan (a few frames each). Off: videos are judged by length and place only. */
     public boolean lookInsideVideos = true;
 
+    /** Debug (Algorithm Lab): record every step of every decision in Assessment.trace. Off in a scan. */
+    public boolean trace;
+
+    public Policy copy() {
+        Policy p = new Policy();
+        p.sensitivity = sensitivity; p.useSource = useSource; p.useContent = useContent; p.usePeople = usePeople; p.useQuality = useQuality;
+        p.useAge = useAge; p.useEvent = useEvent; p.useMotion = useMotion; p.useHistory = useHistory; p.lookInsideVideos = lookInsideVideos;
+        p.kept = kept; p.accepted = accepted; p.trace = trace;
+        return p;
+    }
+
+    /** "Balanced; off: age, event" */
+    public String describe() {
+        StringBuilder off = new StringBuilder();
+        String[] n = {"where it came from", "what it shows", "people", "blur and length", "age", "taken with others", "video motion", "earlier choices"};
+        boolean[] on = {useSource, useContent, usePeople, useQuality, useAge, useEvent, useMotion, useHistory};
+        for (int i = 0; i < n.length; i++) if (!on[i]) off.append(off.length() == 0 ? "" : ", ").append(n[i]);
+        return sensitivityName(sensitivity) + " (suggest at an estimate of " + suggestAtOrBelow() + " or less, keep without asking from "
+                + keepAtOrAbove() + (planAtOrBelow() >= 0 ? ", add to the plan at " + planAtOrBelow() + " or less" : "") + "); "
+                + (off.length() == 0 ? "every way of looking is on" : "switched off: " + off);
+    }
+
     /** For useHistory: unit ids the user kept, and unit id -> technique the user approved. May be null. */
     public java.util.Set<String> kept;
     public java.util.Map<String, String> accepted;

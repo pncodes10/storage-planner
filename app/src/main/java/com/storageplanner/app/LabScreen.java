@@ -177,7 +177,12 @@ public final class LabScreen extends Screen {
         root.addView(groupButtons, new LinearLayout.LayoutParams(-1, -2));
         LinearLayout keep = buttons;
         buttons = groupButtons;
-        addRun("Best shot among them", true, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o)); } });
+        addRun("Run the algorithm (keep, suggest or delete?)", true, new Job() {
+            public void run(Lab.Out o) throws Exception {
+                Lab.algorithm(pf(), new ArrayList<Lab.Pic>(pics), System.currentTimeMillis(), com.storageplanner.core.Policy.active, o);
+            }
+        });
+        addRun("Best shot among them", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o)); } });
         addRun("Near-duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.nearDuplicates(pf(), new ArrayList<Lab.Pic>(pics), o); } });
         addRun("Exact duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.exactDuplicates(new ArrayList<Lab.Pic>(pics), o); } });
         addRun("Compress all (test copies)", false, new Job() {

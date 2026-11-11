@@ -41,6 +41,8 @@ public final class Need {
         /** Different ways that spoke against needing the file. */
         public int reasonsAgainst;
         public final List<String> forIt = new ArrayList<String>(), against = new ArrayList<String>();
+        /** Every step with its points, in order: "start 70 (taken with your camera)", "-20 much softer…". */
+        public final List<String> steps = new ArrayList<String>();
 
         /** "for keeping: people in it, camera original; against: very soft" */
         public String evidence() {
@@ -68,6 +70,7 @@ public final class Need {
             if (points == 0) return;
             score += points;
             if (points > 0) r.forIt.add(why); else { r.against.add(why); ways++; }
+            r.steps.add((points > 0 ? "+" : "") + points + "  " + why);
         }
     }
 
@@ -91,6 +94,8 @@ public final class Need {
             else if (shot || chat) base = 40;
         }
         t.score = base;
+        t.r.steps.add("start " + base + "  " + (p.useSource ? (screenRec ? "a screen recording" : camera ? "from your camera" : area.isEmpty() ? "unknown place" : "from " + area)
+                : "the same for every file (\"where it came from\" is off)"));
         if (p.useSource && camera && !screenRec) t.r.forIt.add("taken with your camera");
 
         // ---- content: what it shows (one finding, the most telling one)
