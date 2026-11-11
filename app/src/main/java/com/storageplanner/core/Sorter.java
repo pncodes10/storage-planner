@@ -70,6 +70,15 @@ final class Sorter {
                 m = measure(pf, f, px, dims);
             }
             ImageSignals.S s = m.s;
+            if (opt.trace != null) {
+                opt.trace.line("  " + f.name() + ": measured");
+                opt.trace.line(Lab.f("    brightness %.0f, contrast %.1f, colourful %.1f, dark %.1f%%, paper-like %.1f%%, flat (screen) %.1f%%, focus %.3f",
+                        s.meanLuma, s.contrast, s.colorful, 100 * s.darkFrac, 100 * s.paper, 100 * s.flat, s.sharp));
+                opt.trace.line(Lab.f("    text-like marks %d in %d lines covering %.2f%%, big lettering across %.0f%% of the width -> %s",
+                        s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.bigText, lettering(s) ? "has lettering on it" : "no lettering to speak of"));
+                opt.trace.line("    code: " + (f.code == null ? "none" : f.code) + "; faces: " + (f.faces < 0 ? "not looked for" : String.valueOf(f.faces))
+                        + "; read its text? " + (PhotoCategory.worthReading(f, s) ? "yes" : "no (a camera photo with no text or paper in it)"));
+            }
             if (f.quality != null) f.faces = f.quality.faces;          // measured more carefully for near-identical shots
             boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, null, f.faces);
@@ -104,6 +113,7 @@ final class Sorter {
             }
             fails = 0;
             ImageSignals.S s = sig.get(f);
+            if (opt.trace != null) opt.trace.line("  " + f.name() + ": English reader: " + said(words));
             TextRules.Verdict v = TextRules.classify(words, aspect.get(f)[0], s.colorful >= 15 && s.flat < 0.5, PhotoCategory.isScreenshot(f),
                     f.area.startsWith("wa_") || "telegram_media".equals(f.area), r.now);
             boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
@@ -115,15 +125,51 @@ final class Sorter {
                     TextRules.Words w2 = small == null ? null : pf.readText(f.abs, small, dims[2], dims[3]);
                     if (w2 != null) {
                         TextRules.Verdict v2 = TextRules.classify(w2, aspect.get(f)[0], true, false, true, r.now);
+                        if (opt.trace != null) opt.trace.line("    English reader on a small copy (decorative letters read better small): " + said(w2));
                         if (PhotoCategory.GREETING.equals(v2.kind)) { v = v2; words = w2; }
                     }
                 } catch (Throwable ignored) {}
             }
+            if (opt.trace != null) opt.trace.line("    English text says: " + (v.kind == null ? "nothing specific" : PhotoCategory.label(v.kind) + " (" + v.why + ")"));
+            // Marathi and Hindi: a colourful picture with lettering on it that the English reader made nothing of
+            // (a poster on a plain coloured background counts too, so only colour is asked for here, not "photo-like")
+            boolean poster = s.colorful >= 15 && !PhotoCategory.isScreenshot(f);
+            if (v.kind == null && opt.readIndic && poster && lettering(s)) {
+                for (int edge : new int[]{GREETING_EDGE, INDIC_EDGE}) {
+                    TextRules.Words wi = null;
+                    try {
+                        int[] px = pf.argb(f.abs, edge, dims);
+                        if (px != null) wi = pf.readTextIndic(f.abs, px, dims[2], dims[3]);
+                    } catch (Throwable t) { wi = null; }
+                    if (wi == null) { if (opt.trace != null) opt.trace.line("    Marathi/Hindi reader: not available"); break; }
+                    TextRules.Verdict vi = TextRules.classifyIndic(wi, true);
+                    if (opt.trace != null) {
+                        opt.trace.line("    Marathi/Hindi reader at " + edge + " px: " + said(wi));
+                        opt.trace.line("    Marathi/Hindi text says: " + (vi.kind == null ? "nothing specific" : PhotoCategory.label(vi.kind) + " (" + vi.why + ")"));
+                    }
+                    if (vi.kind != null) { v = vi; words = new TextRules.Words(); for (String x : TextRules.cleanIndic(wi).split(" ")) { words.text.add(x); words.conf.add(90); } break; }
+                }
+            } else if (opt.trace != null && v.kind == null)
+                opt.trace.line("    Marathi/Hindi reader: not used (" + (!opt.readIndic ? "switched off" : !poster ? "a screenshot or a picture without colour" : "no lettering on it") + ")");
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, v, f.faces);
             f.category = c.category; f.catDate = c.date; f.textPending = false;
             String t = TextRules.clean(words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
+    }
+
+    /** Second size tried for Marathi and Hindi text when the small copy gave no greeting word. */
+    static final int INDIC_EDGE = 720;
+
+    /** Lettering laid over the picture: a wide row of large letters, or a fair number of letter-shaped marks. */
+    static boolean lettering(ImageSignals.S s) { return s.bigText >= 0.25 || (s.textBlobs >= 20 && s.textLines >= 2); }
+
+    /** "12 words: बलिप्रतिपदा(96) व(96) …" for the Lab log. */
+    static String said(TextRules.Words w) {
+        if (w == null) return "nothing";
+        StringBuilder b = new StringBuilder(w.text.size() + " words:");
+        for (int i = 0; i < w.text.size() && b.length() < 400; i++) b.append(' ').append(w.text.get(i)).append('(').append(w.conf.get(i)).append(')');
+        return b.toString();
     }
 
     /** Faces, looked for on a small copy (People vs. other photos only needs to know there is a face). */

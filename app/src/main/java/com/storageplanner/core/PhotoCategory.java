@@ -118,6 +118,7 @@ public final class PhotoCategory {
         if (s == null || accidental(s)) return false;
         if (isScreenshot(f) || "download".equals(f.area) || f.area.startsWith("wa_") || "pictures".equals(f.area) || "document".equals(f.area)) return true;
         if (s.flat >= 0.15) return true;                        // paper, screens, printed pages photographed straight
+        if (s.bigText >= 0.4 && s.colorful >= 15) return true;  // a headline laid over a picture: a poster or greeting, wherever it was saved
         return s.textBlobs >= 60 && s.textLines >= 4;
     }
 

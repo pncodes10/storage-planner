@@ -50,6 +50,7 @@ public final class AlgorithmScreen extends Screen {
         p.useMotion = sp.getBoolean("motion", true);
         p.useHistory = sp.getBoolean("history", true);
         p.lookInsideVideos = sp.getBoolean("videos", true);
+        p.readIndic = sp.getBoolean("indic", true);
         // copies: these are read on background threads while the user keeps deciding
         SharedPreferences rv = c.getSharedPreferences("review", Context.MODE_PRIVATE);
         Set<String> kept = new HashSet<String>(rv.getStringSet("kept", new HashSet<String>()));
@@ -126,6 +127,9 @@ public final class AlgorithmScreen extends Screen {
         way(scan, "videos", p.lookInsideVideos, "Look inside videos",
                 "Reads five frames of each of your videos to see whether it is black, empty or still, whether people are in it, "
                 + "and whether a WhatsApp Sent copy matches it. Takes about a second per video the first time. Used from the next analysis on.");
+        way(scan, "indic", p.readIndic, "Read Marathi and Hindi text",
+                "Reads Devanagari lettering on colourful pictures, so that greetings and festival wishes in Marathi and Hindi are recognised. "
+                + "About half a second for each such picture. Used from the next analysis on.");
         addCard(L, scan);
 
         status = Ui.add(L, Ui.text(a, "", 14, Ui.text2, false), 12);

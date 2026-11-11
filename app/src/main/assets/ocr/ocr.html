@@ -19,13 +19,27 @@ async function start(workers) {
     Native.failed(-1, String(e && e.message || e));
   }
 }
+function words(r) {
+  const out = [];
+  for (const b of (r.data.blocks || [])) for (const p of b.paragraphs) for (const l of p.lines) for (const w of l.words)
+    out.push([w.text, Math.round(w.confidence)]);
+  return JSON.stringify(out);
+}
 async function read(id) {
   try {
-    const r = await scheduler.addJob('recognize', '/img/' + id, {}, {text: false, blocks: true});
-    const words = [];
-    for (const b of (r.data.blocks || [])) for (const p of b.paragraphs) for (const l of p.lines) for (const w of l.words)
-      words.push([w.text, Math.round(w.confidence)]);
-    Native.done(id, JSON.stringify(words));
+    Native.done(id, words(await scheduler.addJob('recognize', '/img/' + id, {}, {text: false, blocks: true})));
+  } catch (e) {
+    Native.failed(id, String(e && e.message || e));
+  }
+}
+// Marathi and Hindi (Devanagari script): its own reader, started the first time it is needed
+let indic = null;
+async function readIndic(id) {
+  try {
+    if (!indic) indic = await Tesseract.createWorker('mar+hin', 1, {
+      workerPath: '/ocr/worker.min.js', corePath: '/ocr/', langPath: '/ocr/', gzip: false, cacheMethod: 'none', logger: () => {}
+    });
+    Native.done(id, words(await indic.recognize('/img/' + id, {}, {text: false, blocks: true})));
   } catch (e) {
     Native.failed(id, String(e && e.message || e));
   }

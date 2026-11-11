@@ -50,6 +50,10 @@ public final class Scanner {
         public boolean sortPictures = true;
         /** Time allowed for reading text in pictures in this scan; the rest is read next time. */
         public long textBudgetMs = 20 * 60 * 1000L;
+        /** Also read Marathi and Hindi text (Devanagari) on pictures with lettering that the English reader made nothing of. */
+        public boolean readIndic = true;
+        /** Debug (Algorithm Lab): every measurement and reading of the sorting step is reported here. Null in a scan. */
+        public Lab.Out trace;
         /** Look at a few frames of each video (dark, empty, still, people, Sent copies). */
         public boolean lookInsideVideos = true;
         /** Time allowed for that in this scan; the rest is looked at next time. */

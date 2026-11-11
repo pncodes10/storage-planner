@@ -31,6 +31,8 @@ public final class Policy {
     public boolean useHistory = true;    // what the user decided before on the same kind of suggestion
     /** Look inside videos during the scan (a few frames each). Off: videos are judged by length and place only. */
     public boolean lookInsideVideos = true;
+    /** Read Marathi and Hindi text (Devanagari script) on pictures, for greetings and forwards in those languages. */
+    public boolean readIndic = true;
 
     /** Debug (Algorithm Lab): record every step of every decision in Assessment.trace. Off in a scan. */
     public boolean trace;
@@ -38,7 +40,7 @@ public final class Policy {
     public Policy copy() {
         Policy p = new Policy();
         p.sensitivity = sensitivity; p.useSource = useSource; p.useContent = useContent; p.usePeople = usePeople; p.useQuality = useQuality;
-        p.useAge = useAge; p.useEvent = useEvent; p.useMotion = useMotion; p.useHistory = useHistory; p.lookInsideVideos = lookInsideVideos;
+        p.useAge = useAge; p.useEvent = useEvent; p.useMotion = useMotion; p.useHistory = useHistory; p.lookInsideVideos = lookInsideVideos; p.readIndic = readIndic;
         p.kept = kept; p.accepted = accepted; p.trace = trace;
         return p;
     }

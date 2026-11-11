@@ -45,6 +45,12 @@ public interface Platform {
      */
     TextRules.Words readText(String path, int[] argb, int w, int h);
 
+    /**
+     * The same for Marathi and Hindi text (Devanagari script), which the main reader cannot read.
+     * Null when that reader is not available.
+     */
+    TextRules.Words readTextIndic(String path, int[] argb, int w, int h);
+
     /** Image dimensions without decoding pixels: dims receives {w, h}. Returns false if unreadable. */
     boolean imageSize(String path, int[] dims);
 

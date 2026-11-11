@@ -158,6 +158,13 @@ public final class JvmPlatform implements Platform {
         try { return CategoryTest.words(new String(Files.readAllBytes(side.toPath()), StandardCharsets.UTF_8)); } catch (Exception e) { return null; }
     }
 
+    /** Stand-in for the Marathi and Hindi reader: words recorded from the same Tesseract build ("<picture>.indic.json"). */
+    public com.storageplanner.core.TextRules.Words readTextIndic(String path, int[] argb, int w, int h) {
+        File side = new File(path + ".indic.json");
+        if (!side.exists()) return null;
+        try { return CategoryTest.words(new String(Files.readAllBytes(side.toPath()), StandardCharsets.UTF_8)); } catch (Exception e) { return null; }
+    }
+
     public boolean imageSize(String path, int[] dims) {
         try (javax.imageio.stream.ImageInputStream in = ImageIO.createImageInputStream(new File(path))) {
             java.util.Iterator<javax.imageio.ImageReader> it = ImageIO.getImageReaders(in);

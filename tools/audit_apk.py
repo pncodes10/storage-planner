@@ -83,7 +83,7 @@ with zipfile.ZipFile(apk_path) as z:
     off = arsc.header_offset + 30 + len(arsc.filename.encode()) + struct.unpack("<H", raw[arsc.header_offset + 28:arsc.header_offset + 30])[0]
 # 1.6: the offline text reader's files, and nothing else, under assets/ocr/ (checked against the npm releases' hashes)
 OCR_ASSETS = {"assets/ocr/ocr.html", "assets/ocr/tesseract.min.js", "assets/ocr/worker.min.js", "assets/ocr/tesseract-core-simd-lstm.wasm.js",
-              "assets/ocr/tesseract-core-lstm.wasm.js", "assets/ocr/eng.traineddata", "assets/ocr/LICENSE-tesseract.js.md", "assets/ocr/LICENSE-tesseract.js-core"}
+              "assets/ocr/tesseract-core-lstm.wasm.js", "assets/ocr/eng.traineddata", "assets/ocr/mar.traineddata", "assets/ocr/hin.traineddata", "assets/ocr/LICENSE-tesseract.js.md", "assets/ocr/LICENSE-tesseract.js-core"}
 # 1.8: the face detector's weights (YuNet, converted by tools/facemodel/export_yunet.py) and its licence
 FACE_ASSETS = {"assets/faces/yunet.bin", "assets/faces/LICENSE-yunet.txt"}
 other = [n for n in names if n not in ("AndroidManifest.xml", "classes.dex", "resources.arsc")]
@@ -98,7 +98,7 @@ for line in open(pin_file):
     h, n = line.split(); pinned["assets/ocr/" + n] = h
 with zipfile.ZipFile(apk_path) as z:
     bad = [n for n in pinned if hashlib.sha256(z.read(n)).hexdigest() != pinned[n]]
-check("text-reader files are the pinned, unmodified releases (tesseract.js 7.0.0, core 7.0.0, tessdata_fast eng)", not bad, "; ".join(bad))
+check("text-reader files are the pinned, unmodified releases (tesseract.js 7.0.0, core 7.0.0, tessdata_fast eng, mar, hin)", not bad, "; ".join(bad))
 fpinned = {}
 for line in open(os.path.join(os.path.dirname(__file__), "face_assets.sha256")):
     h, n = line.split(); fpinned["assets/faces/" + n] = h

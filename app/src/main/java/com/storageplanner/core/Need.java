@@ -94,7 +94,8 @@ public final class Need {
             else if (shot || chat) base = 40;
         }
         t.score = base;
-        t.r.steps.add("start " + base + "  " + (p.useSource ? (screenRec ? "a screen recording" : camera ? "from your camera" : area.isEmpty() ? "unknown place" : "from " + area)
+        t.r.steps.add("start " + base + "  " + (p.useSource ? (screenRec ? "a screen recording" : camera ? "from your camera" : chat ? "received in a chat"
+                : shot ? "a screenshot" : area.equals("download") ? "a download" : area.isEmpty() ? "unknown place" : "from " + area)
                 : "the same for every file (\"where it came from\" is off)"));
         if (p.useSource && camera && !screenRec) t.r.forIt.add("taken with your camera");
 

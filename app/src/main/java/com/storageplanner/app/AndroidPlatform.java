@@ -322,7 +322,12 @@ public final class AndroidPlatform implements Platform {
     private boolean ocrFailed;
 
     /** Reads the words in a picture with the bundled Tesseract (offline). */
-    public com.storageplanner.core.TextRules.Words readText(String path, int[] argb, int w, int h) {
+    public com.storageplanner.core.TextRules.Words readText(String path, int[] argb, int w, int h) { return readText(argb, w, h, false); }
+
+    /** The same reader with its Marathi and Hindi models (Devanagari script). */
+    public com.storageplanner.core.TextRules.Words readTextIndic(String path, int[] argb, int w, int h) { return readText(argb, w, h, true); }
+
+    private com.storageplanner.core.TextRules.Words readText(int[] argb, int w, int h, boolean indic) {
         if (ocrFailed) return null;
         if (ocr == null) {
             ocr = new OcrEngine(ctx);
@@ -333,7 +338,7 @@ public final class AndroidPlatform implements Platform {
             b = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
             java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(w * h / 4);
             b.compress(Bitmap.CompressFormat.JPEG, 92, bo);
-            return ocr.read(bo.toByteArray(), 60000);
+            return ocr.read(bo.toByteArray(), indic ? 90000 : 60000, indic);
         } catch (Throwable t) {
             return null;
         } finally {

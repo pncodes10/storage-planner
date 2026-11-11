@@ -109,14 +109,17 @@ final class OcrEngine {
     }
 
     /** Reads the text of a JPEG picture. Null if the reader is not running or took longer than timeoutMs. */
-    TextRules.Words read(byte[] jpeg, long timeoutMs) {
+    TextRules.Words read(byte[] jpeg, long timeoutMs) { return read(jpeg, timeoutMs, false); }
+
+    /** indic: read Marathi and Hindi (Devanagari) instead of English. The first such read also loads those models. */
+    TextRules.Words read(byte[] jpeg, long timeoutMs, final boolean indic) {
         if (!ok) return null;
         final int id;
         synchronized (this) { id = ++nextId; }
         CountDownLatch done = new CountDownLatch(1);
         images.put(id, jpeg);
         waiting.put(id, done);
-        main.post(new Runnable() { public void run() { if (web != null) web.evaluateJavascript("read(" + id + ")", null); } });
+        main.post(new Runnable() { public void run() { if (web != null) web.evaluateJavascript((indic ? "readIndic(" : "read(") + id + ")", null); } });
         try { done.await(timeoutMs, TimeUnit.MILLISECONDS); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         images.remove(id); waiting.remove(id);
         String[] r = results.remove(id);

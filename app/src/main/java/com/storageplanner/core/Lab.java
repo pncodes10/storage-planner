@@ -23,6 +23,18 @@ public final class Lab {
         public Pic(String path, String name, long size, long mtime) { this.path = path; this.name = name; this.size = size; this.mtime = mtime; }
     }
 
+    /**
+     * How to treat a picked picture when the user did not say: by its name. Phones and chat apps name files in
+     * fixed ways (IMG-20261110-WA0001.jpg is a WhatsApp image, Screenshot_… a screenshot).
+     */
+    public static String areaFromName(String name) {
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.contains("screenshot")) return "screenshot";
+        if (n.matches("(img|vid|ptt|aud|stk|doc)-\\d{8}-wa\\d+.*") || n.contains("whatsapp")) return "wa_image";
+        if (n.matches("(img|pxl|dsc|mvimg)[_-]?\\d{6,}.*") || n.matches("\\d{8}_\\d{6}.*")) return "camera";
+        return "download";
+    }
+
     /** What a run found that the screen can draw: faces (PhotoQuality.Q.face layout) and eye patches. */
     public static final class Shown {
         public float[] faces;                                  // x, y, eye distance (fractions), eyes-open p, confidence
@@ -397,6 +409,13 @@ public final class Lab {
         if (small != null) {
             TextRules.Words w2 = pf.readText(p.path, small, d[2], d[3]);
             if (w2 != null) o.line("  small copy (" + d[2] + " x " + d[3] + ", the greeting check): " + TextRules.clean(w2));
+            TextRules.Words wi = pf.readTextIndic(p.path, small, d[2], d[3]);
+            if (wi == null) o.line("  Marathi/Hindi reader: not available");
+            else {
+                TextRules.Verdict vi = TextRules.classifyIndic(wi, true);
+                o.line("  Marathi/Hindi reader (" + d[2] + " x " + d[3] + "): " + Sorter.said(wi));
+                o.line("  Marathi/Hindi text says: " + (vi.kind == null ? "nothing specific" : PhotoCategory.label(vi.kind) + " — evidence " + vi.why));
+            }
         }
     }
 
@@ -423,6 +442,8 @@ public final class Lab {
         /** KEEP, PROTECTED, DELETE (in the plan), KEEP, MAKE SMALLER (in the plan), SUGGESTED TO DELETE (your call) or FOR YOU TO DECIDE. */
         public String verdict;
         public String why;
+        /** What the picture was recognised as, with the evidence ("Greetings & forwards: text read …"). */
+        public String what;
     }
 
     /**
@@ -518,16 +539,18 @@ public final class Lab {
 
         // ---- 5. what each picture shows
         o.line("");
-        o.line("STEP 5  what each picture shows (category, code, faces, text)");
+        o.line("STEP 5  what each picture shows (measurements, faces, codes, text read in English and in Marathi/Hindi)");
         Scanner.Options opt = new Scanner.Options();
+        opt.readIndic = policy.readIndic;
+        opt.trace = o;
         try {
             Sorter.sort(pf, new Scanner.Progress() { public void update(String s, int d, int t) {} public boolean cancelled() { return false; } }, r, opt, measured);
         } catch (Throwable t) { o.line("  ! sorting failed: " + t); }
         for (FileItem f : r.files) {
             if (f.category == null) { o.line("  " + f.name() + ": not sorted"); continue; }
-            o.line("  " + f.name() + ": " + PhotoCategory.label(f.category) + "; faces " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces))
+            o.line("  => " + f.name() + ": " + PhotoCategory.label(f.category) + "; faces " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces))
                     + "; code " + (f.code == null ? "none" : f.code) + (f.catDate > 0 ? "; date read " + Report.day(f.catDate) : "")
-                    + (f.textPending ? "; text NOT read (no reader, or out of time)" : f.text == null ? "; no text kept" : "; text \"" + cut(f.text, 80) + "\""));
+                    + (f.textPending ? "; text NOT read (the reader is not available, or it ran out of time)" : f.text == null ? "; no words kept" : "; words kept \"" + cut(f.text, 80) + "\""));
         }
 
         // ---- 6. proposals, judging, plan
@@ -542,6 +565,9 @@ public final class Lab {
             o.line(" " + f.name());
             Conclusion c = new Conclusion();
             c.name = f.name();
+            c.what = f.category == null ? "not a picture the app sorts" : PhotoCategory.label(f.category)
+                    + (f.faces > 0 ? ", " + f.faces + " face(s)" : "") + (f.code != null ? ", code: " + f.code : "")
+                    + (f.text != null ? ", text read: \"" + cut(f.text, 60) + "\"" : f.textPending ? ", text not read" : "");
             out.add(c);
             if (u == null) {
                 o.line("  nothing was proposed for this file");
@@ -558,6 +584,10 @@ public final class Lab {
             }
             Option chosen = plan.chosen.get(u);
             Option del = Review.deleteOption(u);
+            // a deletion the algorithm suggests says more about the picture than a re-encode that is planned anyway
+            String also = chosen != null && !chosen.action.equals("delete")
+                    ? ". Until you decide, the default plan keeps it and makes it smaller (" + chosen.technique + ", frees " + Report.size(chosen.saved) + ")" : "";
+            if (del != null && !del.review && chosen != del) chosen = null;
             if (a != null && a.isProtected() && u.options.isEmpty()) { c.verdict = "PROTECTED"; c.why = "a personal record: nothing is ever suggested for it"; }
             else if (chosen != null) {
                 boolean gone = chosen.action.equals("delete");
@@ -567,7 +597,7 @@ public final class Lab {
                 if (del != null && del != chosen) c.why += ". Also " + (del.review ? "for you to decide" : "suggested") + ": delete as \"" + del.technique + "\"";
             }
             else if (del != null && !del.review) { c.verdict = "SUGGESTED TO DELETE (your call)"; c.why = "delete as \"" + del.technique + "\" (your call, not in the default plan): " + del.why
-                    + (del.evidence == null || del.evidence.isEmpty() ? "" : "; estimate " + del.need + " of 100, " + del.evidence); }
+                    + (del.evidence == null || del.evidence.isEmpty() ? "" : "; estimate " + del.need + " of 100, " + del.evidence) + also; }
             else if (del != null) { c.verdict = "FOR YOU TO DECIDE"; c.why = "\"" + del.technique + "\": " + del.note
                     + (del.evidence == null || del.evidence.isEmpty() ? "" : "; estimate " + del.need + " of 100, " + del.evidence); }
             else if (!u.options.isEmpty()) { c.verdict = "KEEP"; c.why = "only optional steps outside the default plan: " + u.options.get(0).technique; }
@@ -577,13 +607,27 @@ public final class Lab {
             }
         }
 
+        for (int i = 0; i < out.size(); i++) {
+            FileItem f = r.files.get(i); Conclusion c = out.get(i);
+            if (!c.verdict.startsWith("KEEP")) continue;
+            double age = f.ageDays(now);
+            boolean chat = f.area.startsWith("wa_") || f.area.equals("telegram_media");
+            String later = PhotoCategory.GREETING.equals(f.category) && chat && age <= 7 ? "greetings from chats are suggested once they are a week old"
+                    : PhotoCategory.GREETING.equals(f.category) && !chat ? "greetings are only suggested when they were received in a chat app"
+                    : PhotoCategory.OTP.equals(f.category) && age <= 1 ? "one-time codes are suggested once they are a day old"
+                    : PhotoCategory.PAYMENT.equals(f.category) && age <= 90 ? "payment screenshots are looked at again after three months"
+                    : null;
+            if (later != null) c.why += " (for now: " + later + "; this one is " + dur((long) (age * 86400000L)) + " old)";
+        }
+
         // ---- conclusion
         o.line("");
         o.line("==================== CONCLUSION ====================");
         long frees = 0; int keep = 0, plan0 = 0, smaller = 0, sugg = 0, ask = 0;
         for (Conclusion c : out) {
             o.line(c.name + "  ->  " + c.verdict);
-            o.line("      " + c.why);
+            o.line("      what it is: " + c.what);
+            o.line("      why: " + c.why);
             if (c.verdict.startsWith("DELETE")) plan0++; else if (c.verdict.startsWith("KEEP, MAKE")) smaller++;
             else if (c.verdict.startsWith("SUGGESTED")) sugg++; else if (c.verdict.startsWith("FOR YOU")) ask++; else keep++;
         }

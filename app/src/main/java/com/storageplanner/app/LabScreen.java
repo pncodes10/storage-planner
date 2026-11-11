@@ -45,7 +45,7 @@ public final class LabScreen extends Screen {
     private static final String[] AREA_LABEL = {"Camera photo", "Screenshot", "WhatsApp image", "Download"};
 
     private final List<Lab.Pic> pics = new ArrayList<Lab.Pic>();
-    private int current, area;
+    private int current, area = -1;          // area -1 = automatic: by each picture's file name
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean busy, headerWritten;
@@ -145,14 +145,14 @@ public final class LabScreen extends Screen {
         ps.addView(patchRow);
         add(root, ps, 6);
 
-        areaBtn = Ui.button(a, "Treat as: " + AREA_LABEL[area], false);
-        areaBtn.setContentDescription("How to treat the picture when sorting: " + AREA_LABEL[area] + ". Double tap to change.");
+        areaBtn = Ui.button(a, "Treat as: " + areaLabel(), false);
+        areaBtn.setContentDescription("How to treat the picture when sorting: " + areaLabel() + ". Double tap to change.");
         areaBtn.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                area = (area + 1) % AREAS.length;
-                areaBtn.setText("Treat as: " + AREA_LABEL[area]);
-                areaBtn.setContentDescription("How to treat the picture when sorting: " + AREA_LABEL[area] + ". Double tap to change.");
-                for (Lab.Pic p : pics) p.area = AREAS[area];
+                area = area + 1 >= AREAS.length ? -1 : area + 1;
+                areaBtn.setText("Treat as: " + areaLabel());
+                areaBtn.setContentDescription("How to treat the picture when sorting: " + areaLabel() + ". Double tap to change.");
+                for (Lab.Pic p : pics) p.area = area < 0 ? Lab.areaFromName(p.name) : AREAS[area];
             }
         });
         add(root, areaBtn, 10);
@@ -233,6 +233,8 @@ public final class LabScreen extends Screen {
         LinearLayout.LayoutParams l = new LinearLayout.LayoutParams(-1, -2); l.topMargin = dp(top);
         p.addView(v, l);
     }
+
+    private String areaLabel() { return area < 0 ? "Automatic (by file name)" : AREA_LABEL[area]; }
 
     interface Job { void run(Lab.Out o) throws Exception; }
 
@@ -537,7 +539,7 @@ public final class LabScreen extends Screen {
         } finally { in.close(); out.close(); }
         long taken = exifTime(dst);
         Lab.Pic p = new Lab.Pic(dst.getAbsolutePath(), name, size >= 0 ? size : dst.length(), modified > 0 ? modified : taken > 0 ? taken : dst.lastModified());
-        p.area = AREAS[area];
+        p.area = area < 0 ? Lab.areaFromName(name) : AREAS[area];
         LabLog.line(a, String.format(Locale.US, "picked %s -> %s (%d bytes, modified %d, EXIF taken %d)", name, dst.getName(), p.size, modified, taken));
         return p;
     }

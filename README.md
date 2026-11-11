@@ -364,6 +364,19 @@ As everywhere else, the app deletes nothing itself.
 
 The start screen has a switch to turn sorting off.
 
+**Marathi and Hindi (Devanagari).** A colourful picture with lettering on it that the English reader makes
+nothing of is read once more with Tesseract's Marathi and Hindi models (tessdata_fast `mar` and `hin`,
+Apache-2.0, 3.2 MB together), on a 360 px copy and, if that finds nothing, on a 720 px copy. A greeting or
+festival word (शुभेच्छा, शुभकामना, मंगलमय, दिवाळी, पाडवा, सुप्रभात …) read with some confidence makes it a
+**Greeting**. "Lettering" is measured, not guessed: a wide row of large letters, or twenty or more
+letter-shaped marks in two lines. That keeps this second read off ordinary photos. It takes about half a
+second per picture on a desktop. The switch is under **Algorithm settings → Read Marathi and Hindi text**.
+
+Checked on a real forwarded Diwali Padwa greeting (720 × 843, a lamp with a Marathi headline): the English
+reader returned noise, the Marathi/Hindi reader returned बलिप्रतिपदा (96), मंगलमय (87) and शुभेच्छा (46), and
+the picture is sorted as a greeting. The yellow headline line in a decorative face was not read; one
+recognised word is enough.
+
 **The text reader is offline.** It is Tesseract compiled to WebAssembly (tesseract.js 7.0.0, Apache-2.0)
 with the English model from tessdata_fast. It runs in an invisible WebView that can only load files
 packed inside the app:
@@ -372,7 +385,7 @@ packed inside the app:
 - the audit checks that the reader's files are the published releases, byte for byte (pinned SHA-256 hashes);
 - only the text-reader class uses the WebView, and it loads only the bundled page.
 
-The app grew from about 0.1 MB to about 5 MB because of these files.
+The app grew from about 0.1 MB to about 5 MB because of these files, and by about 1.5 MB more with the Marathi and Hindi models.
 
 **Accuracy.** `CategoryTest` runs the real scan on a 399-picture test phone:
 
@@ -439,7 +452,10 @@ JPEG and HEIC) and Samsung Motion Photos ([how](app/src/main/java/com/storagepla
 Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals are only read.
 
 1. **Pick pictures** with the system file picker: one or more, up to 20. Tap a thumbnail to select it.
-   **Treat as** sets how the picture is sorted: camera photo, screenshot, WhatsApp image or download.
+   **Treat as** sets how the picture is sorted. It starts on **Automatic (by file name)**: `IMG-20261110-WA0001.jpg`
+   is a WhatsApp image, `Screenshot_…` a screenshot, `20261103_235249.jpg` a camera photo, anything else a
+   download. Tap it to force camera photo, screenshot, WhatsApp image or download. (The picker hands the Lab a
+   copy, not the folder the picture was in, so the name is all there is to go by. A real analysis uses the folder.)
 2. **Run on the selected picture:**
 
 | Button | What it shows |
@@ -459,7 +475,7 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 
 | Button | What it shows |
 |---|---|
-| Run the algorithm | The whole decision algorithm on the picked pictures, as if they were the only files on the phone, with the current **Algorithm settings**. The log shows six steps (file types, exact copies, picture measurements, near-identical shots, what each picture shows, then every proposal and how it was judged, with the need estimate point by point) and ends with a **CONCLUSION** block: for each picture *Keep*, *Protected*, *Delete (in the plan)*, *Keep, make smaller (in the plan)*, *Suggested to delete (your call)* or *For you to decide*, and why. Nothing is deleted. Because only the picked pictures are compared with each other, pick related pictures together (copies, a burst, photos of one event) |
+| Run the algorithm | The whole decision algorithm on the picked pictures, as if they were the only files on the phone, with the current **Algorithm settings**. The log shows six steps (file types, exact copies, picture measurements, near-identical shots, what each picture shows, then every proposal and how it was judged, with the need estimate point by point). The fifth step prints every measurement and every word each reader returned, with its confidence. It ends with a **CONCLUSION** block: for each picture what it was recognised as, then *Keep*, *Protected*, *Delete (in the plan)*, *Keep, make smaller (in the plan)*, *Suggested to delete (your call)* or *For you to decide*, and why. Nothing is deleted. Because only the picked pictures are compared with each other, pick related pictures together (copies, a burst, photos of one event) |
 | Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
 | Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
 | Exact duplicate check | SHA-256 of each file |
@@ -571,7 +587,7 @@ The app also contains one private, read-only file provider. It isn't exported, a
 - **Picture sorting is new and untested on a phone.**
   - The text reader runs in Android's WebView, which differs between phones; if it cannot start, pictures are sorted without reading text.
   - The first scan with sorting on takes noticeably longer. Estimated from desktop timings, not measured on a phone: about a quarter of a second per picture, plus one to three seconds for each picture whose text is read.
-  - Only English letters are read, so Hindi and other scripts are not.
+  - English, Marathi and Hindi are read. Other scripts (Tamil, Bengali, Gujarati, Urdu …) are not. In Marathi and Hindi only greetings are recognised, not documents, payments or tickets.
   - Greeting images are often missed.
 - **The compression tools are tested on one phone only** (Galaxy S23 FE, Android 16). The HEIC writer depends on each phone's encoders. The path through a dedicated HEIC encoder hasn't run on a phone yet. See the [tools README](app/src/main/java/com/storageplanner/tools/README.md).
 - **The look inside videos has not run on a phone.** It is tested on made-up frames on the desktop. Reading the exact frame at a moment is slower than reading the nearest key frame, and how long it takes on a phone is not measured. A Sent copy that WhatsApp turned or trimmed is not matched (it is then simply not suggested).

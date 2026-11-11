@@ -83,6 +83,50 @@ public final class TextRules {
     static final String[] GREET_WORDS = {"happy", "morning", "blessed", "blessing", "wishes", "birthday", "diwali", "holi", "shubh",
             "suprabhat", "dreams", "evening", "goodnight", "festival", "greetings", "congratulations", "eid", "christmas", "pongal", "navratri"};
 
+    /**
+     * Greeting and festival words in Marathi and Hindi, as the Devanagari reader returns them. Matched at the
+     * start of a word, so endings do not matter (शुभेच्छा, शुभेच्छांसह). Each is specific enough that one
+     * confidently read word on a picture means a greeting.
+     */
+    static final String[] GREET_INDIC = {"शुभेच्छ", "शुभकामना", "सुप्रभात", "शुभ सकाळ", "शुभ रात्री", "शुभ प्रभात", "शुभ दिन", "शुभ संध्या",
+            "मंगलमय", "हार्दिक", "अभिनंदन", "बधाई", "मुबारक", "दिवाळी", "दिवाली", "दीपावली", "दिपावली", "पाडवा", "बलिप्रतिपदा", "भाऊबीज", "भाईदूज",
+            "लक्ष्मीपूजन", "धनत्रयोदशी", "धनतेरस", "दसरा", "दशहरा", "विजयादशमी", "होळी", "होली", "गणेशोत्सव", "गणेश चतुर्थी", "नवरात्र", "संक्रांत",
+            "संक्रांति", "गुढीपाडवा", "रक्षाबंधन", "जन्माष्टमी", "महाशिवरात्री", "नववर्ष", "नूतन वर्ष", "वाढदिवस", "जन्मदिन", "जयंती", "स्वातंत्र्य दिन",
+            "प्रजासत्ताक", "गणतंत्र", "ईद", "नाताळ", "शुभ विवाह", "सुविचार"};
+
+    /** Words of an Indic read that count: read with some confidence, and made of Devanagari letters. */
+    public static String cleanIndic(Words w) {
+        StringBuilder b = new StringBuilder();
+        for (int i = 0; i < w.text.size(); i++) {
+            String t = w.text.get(i);
+            if (w.conf.get(i) < 45) continue;
+            int dev = 0;
+            for (int k = 0; k < t.length(); k++) { char c = t.charAt(k); if (c >= 0x0900 && c <= 0x097F) dev++; }
+            if (dev >= 3 && dev * 3 >= t.length() * 2) b.append(t).append(' ');
+        }
+        return b.toString().replaceAll("[.,!।|:;'\"“”‘’()\\-]+", " ").replaceAll("\\s+", " ").trim();
+    }
+
+    /**
+     * What Marathi or Hindi text on a picture says. Only greetings are recognised: a greeting or festival word on
+     * a colourful picture. Returns a verdict with kind null when it is not one.
+     */
+    public static Verdict classifyIndic(Words w, boolean photoLike) {
+        Verdict v = new Verdict();
+        String t = cleanIndic(w);
+        v.goodWords = t.isEmpty() ? 0 : t.split(" ").length;
+        if (!photoLike || t.isEmpty() || v.goodWords > 40) return v;
+        StringBuilder why = new StringBuilder();
+        int n = 0;
+        for (String k : GREET_INDIC) {
+            int i = t.indexOf(k);
+            while (i > 0 && t.charAt(i - 1) != ' ') i = t.indexOf(k, i + 1);
+            if (i >= 0) { n++; if (why.length() < 60) why.append(why.length() == 0 ? "" : ", ").append('"').append(k).append('"'); }
+        }
+        if (n >= 1) { v.kind = PhotoCategory.GREETING; v.why = why.toString(); v.score = 6 + n; }
+        return v;
+    }
+
     static int prefixHits(String t, String[] keys, StringBuilder why) {
         int n = 0;
         for (String k : keys) {

@@ -34,6 +34,7 @@ final class AnalysisRunner {
             final com.storageplanner.core.Policy policy = AlgorithmScreen.load(app);
             com.storageplanner.core.Policy.active = policy;
             opt.lookInsideVideos = policy.lookInsideVideos;
+            opt.readIndic = policy.readIndic;
             ResultStore.Saved prev = ResultFiles.load(app);               // unchanged pictures are not measured or read again
             if (prev != null) {
                 opt.previous = new java.util.HashMap<String, com.storageplanner.core.FileItem>();

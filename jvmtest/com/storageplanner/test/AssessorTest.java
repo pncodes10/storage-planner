@@ -64,6 +64,7 @@ public final class AssessorTest {
         need();
         videos();
         try { lab(); } catch (Exception e) { check("lab run: " + e, false); }
+        try { indic(); } catch (Exception e) { check("indic: " + e, false); }
         properties();
         System.out.println((checks - bad) + "/" + checks + " assessor checks pass");
         if (bad > 0) System.exit(1);
@@ -445,6 +446,70 @@ public final class AssessorTest {
         dir.delete();
     }
 
+    static TextRules.Words words(Object... textThenConf) {
+        TextRules.Words w = new TextRules.Words();
+        for (int i = 0; i < textThenConf.length; i += 2) w.add((String) textThenConf[i], (Integer) textThenConf[i + 1]);
+        return w;
+    }
+
+    /**
+     * Marathi and Hindi greetings. The words are what the app's own reader (Tesseract, mar+hin, in Chromium) returned
+     * for a real WhatsApp picture: a Diwali Padwa greeting with a lamp, 720 x 843, read at 360 px.
+     */
+    static void indic() throws Exception {
+        final TextRules.Words padwa = words("6", 0, "बलिप्रतिपदा", 96, "व", 91, "'निजितत", 0, "मर्वांना", 74, "मंगलमय", 87, "शुभेच्छा.", 46, "७", 81, "र", 9,
+                "र.", 47, "र»", 23, "2", 63, "टं", 38, "न", 13, ">>", 19, "७2%", 71, "आ", 35, "ळी", 68);
+        TextRules.Verdict v = TextRules.classifyIndic(padwa, true);
+        check("Marathi greeting words are recognised", PhotoCategory.GREETING.equals(v.kind) && v.why.contains("बलिप्रतिपदा") && v.why.contains("शुभेच्छ"));
+        check("the same words on a plain page are not a greeting", TextRules.classifyIndic(padwa, false).kind == null);
+        check("Hindi: शुभकामनाएं", PhotoCategory.GREETING.equals(TextRules.classifyIndic(words("दीपावली", 80, "की", 90, "हार्दिक", 85, "शुभकामनाएं", 70), true).kind));
+        check("ordinary Marathi words are not a greeting", TextRules.classifyIndic(words("आज", 90, "बैठक", 88, "दुपारी", 80, "तीन", 85, "वाजता", 90), true).kind == null);
+        check("badly read words do not count", TextRules.classifyIndic(words("शुभेच्छा", 20, "दिवाळी", 30), true).kind == null);
+        check("a greeting word inside another word does not count", TextRules.classifyIndic(words("अशुभेच्छा", 90), true).kind == null);
+        check("Lab: WhatsApp name -> chat image", Lab.areaFromName("IMG-20261110-WA0001.jpg").equals("wa_image"));
+        check("Lab: camera and screenshot names", Lab.areaFromName("20261103_235249.jpg").equals("camera") && Lab.areaFromName("IMG_20260101_101010.jpg").equals("camera")
+                && Lab.areaFromName("Screenshot_20260101.png").equals("screenshot") && Lab.areaFromName("poster.jpg").equals("download"));
+
+        // ---- the whole run on a colourful picture with a headline: English reads nothing, Marathi reads the greeting
+        java.io.File dir = java.nio.file.Files.createTempDirectory("indic").toFile();
+        byte[] jpeg = new byte[56000]; new Random(9).nextBytes(jpeg); jpeg[0] = (byte) 0xFF; jpeg[1] = (byte) 0xD8; jpeg[2] = (byte) 0xFF;
+        java.io.File f = new java.io.File(dir, "IMG-20261110-WA0001.jpg");
+        java.nio.file.Files.write(f.toPath(), jpeg);
+        for (final double ageDays : new double[]{10, 0.8}) {
+            Lab.Pic pic = new Lab.Pic(f.getPath(), f.getName(), f.length(), NOW - (long) (ageDays * DAY));
+            pic.area = Lab.areaFromName(pic.name);
+            final StringBuilder log = new StringBuilder();
+            final int[] reads = {0, 0};
+            List<Lab.Conclusion> c = Lab.algorithm(new JvmFrames(2) {
+                @Override public int[] argb(String path, int longEdge, int[] dims) {      // orange picture, a white headline of block letters across it
+                    int w = Math.min(longEdge, 720) * 720 / 843, h = Math.min(longEdge, 720) * 843 / 843; h = Math.max(h, 1);
+                    dims[0] = 720; dims[1] = 843; dims[2] = w; dims[3] = h;
+                    int[] px = new int[w * h];
+                    for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                        boolean row = y > h / 12 && y < h / 12 + h / 14, letter = row && x > w / 8 && x < w * 7 / 8 && (x * 24 / w) % 2 == 0;
+                        px[y * w + x] = letter ? 0xFFFFFFFF : 0xFF000000 | (150 + (x * 60 / w)) << 16 | (70 + (y * 50 / h)) << 8 | 30;
+                    }
+                    return px;
+                }
+                @Override public boolean imageSize(String path, int[] dims) { dims[0] = 720; dims[1] = 843; return true; }
+                @Override public TextRules.Words readText(String path, int[] argb, int w, int h) { reads[0]++; return words("afeufeaen", 0, "a", 59, "wate", 23); }
+                @Override public TextRules.Words readTextIndic(String path, int[] argb, int w, int h) { reads[1]++; return padwa; }
+            }, java.util.Arrays.asList(pic), NOW, policy(Policy.BALANCED), new Lab.Out() { public void line(String s) { log.append(s).append('\n'); } });
+            String out = log.toString();
+            if (System.getProperty("show") != null) System.out.println(out);
+            check("greeting run (" + ageDays + " d): English reader tried first, then Marathi/Hindi", reads[0] >= 1 && reads[1] == 1 && out.contains("Marathi/Hindi text says: Greetings & forwards"));
+            check("greeting run (" + ageDays + " d): the conclusion says what it is", c.size() == 1 && c.get(0).what.startsWith("Greetings & forwards") && c.get(0).what.contains("बलिप्रतिपदा"));
+            if (ageDays > 7) check("greeting, ten days old: suggested for deletion, with the estimate", c.get(0).verdict.startsWith("SUGGESTED TO DELETE")
+                    && c.get(0).why.contains("estimate 0 of 100") && out.contains("-30  a greeting image"));
+            else check("greeting from yesterday: kept for now, and the log says when it will be suggested", c.get(0).verdict.startsWith("KEEP")
+                    && c.get(0).why.contains("once they are a week old"));
+        }
+        // the setting: with Marathi/Hindi reading off, it is not recognised
+        Policy off = policy(Policy.BALANCED); off.readIndic = false;
+        check("the setting is carried into the run", !off.copy().readIndic && new Policy().readIndic);
+        f.delete(); dir.delete();
+    }
+
     static String verdict(List<Lab.Conclusion> c, String name) { for (Lab.Conclusion x : c) if (x.name.equals(name)) return x.verdict; return ""; }
     static String why(List<Lab.Conclusion> c, String name) { for (Lab.Conclusion x : c) if (x.name.equals(name)) return x.why; return ""; }
 
@@ -468,6 +533,7 @@ public final class AssessorTest {
         public int[] luma(String path, int[] dims) { return null; } public int[] argb(String path, int longEdge, int[] dims) { return null; }
         public float[] otherFaces(String path, int[] argb, int w, int h) { return null; } public String otherFacesName() { return ""; }
         public TextRules.Words readText(String path, int[] argb, int w, int h) { return null; }
+        public TextRules.Words readTextIndic(String path, int[] argb, int w, int h) { return null; }
         public boolean imageSize(String path, int[] dims) { return false; } public boolean video(FileItem f) { return false; }
         public long audioBitrate(String path) { return 0; } public String[] apkInfo(String path) { return null; }
         public int sdkInt() { return 34; } public long now() { return NOW; }
