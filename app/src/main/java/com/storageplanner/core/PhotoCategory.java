@@ -12,10 +12,10 @@ public final class PhotoCategory {
 
     public static final String QR = "qr", RECEIPT = "receipt", BILL = "bill", DOCUMENT = "document", PAYMENT = "payment", OTP = "otp",
             TICKET = "ticket", CHAT = "chat", GREETING = "greeting", ID = "id", SCREENSHOT = "screenshot", ACCIDENTAL = "accidental",
-            PEOPLE = "people", PHOTO = "photo", GRAPHIC = "graphic";
+            PEOPLE = "people", PHOTO = "photo", GRAPHIC = "graphic", POSTER = "poster";
 
     /** Every category, in the order shown when browsing. */
-    public static final String[] ALL = {PEOPLE, PHOTO, SCREENSHOT, CHAT, PAYMENT, OTP, TICKET, RECEIPT, BILL, DOCUMENT, QR, GREETING, ACCIDENTAL, GRAPHIC, ID};
+    public static final String[] ALL = {PEOPLE, PHOTO, SCREENSHOT, CHAT, PAYMENT, OTP, TICKET, RECEIPT, BILL, DOCUMENT, QR, GREETING, POSTER, ACCIDENTAL, GRAPHIC, ID};
 
     public static String label(String c) {
         if (c == null) return "Not sorted yet";
@@ -35,6 +35,7 @@ public final class PhotoCategory {
             case PEOPLE: return "People";
             case PHOTO: return "Photos without faces";
             case GRAPHIC: return "Graphics & images";
+            case POSTER: return "Posters, memes & forwards";
             default: return c;
         }
     }
@@ -57,6 +58,7 @@ public final class PhotoCategory {
             case PEOPLE: return "Photos with faces.";
             case PHOTO: return "Places, things, food, pets, nature: photos with no faces and no text.";
             case GRAPHIC: return "Images that are not camera photos: stickers, wallpapers, designs.";
+            case POSTER: return "Designed pictures with lettering on them: posters, memes, adverts, quotes, festival cards in any language.";
             default: return "";
         }
     }
@@ -90,12 +92,41 @@ public final class PhotoCategory {
         if (sig == null) { r.category = shot ? SCREENSHOT : PHOTO; return r; }
         if (shot) { r.category = SCREENSHOT; return r; }
         if (accidental(sig)) { r.category = ACCIDENTAL; r.why = sig.darkFrac > 0.6 ? "Almost completely dark" : "Very blurred, no detail"; return r; }
+        String poster = poster(f, sig);
+        if (poster != null && (text == null || text.goodWords < 60)) { r.category = POSTER; r.why = poster; return r; }
         if (text != null && text.goodWords >= 25) { r.category = DOCUMENT; r.why = text.goodWords + " words"; return r; }
         if (sig.flat >= 0.35 && !isCamera(f) && !sig.wordy() && (text == null || text.goodWords < 5)) { r.category = GRAPHIC; return r; }
         if (sig.flat >= 0.35 && !isCamera(f)) { r.category = DOCUMENT; r.why = "Mostly text"; return r; }
         if (sig.wordy() && sig.paper >= 0.3 && sig.flat >= 0.12) { r.category = DOCUMENT; r.why = "Looks like a page of text"; return r; }
         r.category = faces > 0 ? PEOPLE : PHOTO;
         return r;
+    }
+
+    /** Width : height of the frames phone cameras and their crops produce (long side first). */
+    static final double[] CAMERA_SHAPES = {4 / 3.0, 16 / 9.0, 1.0, 3 / 2.0, 2.0, 4000 / 1848.0, 19.5 / 9, 20 / 9.0, 21 / 9.0};
+
+    /** Does the picture have the shape of a camera frame (within 1%)? Chat apps shrink photos but keep their shape. */
+    public static boolean cameraShape(int w, int h) {
+        if (w <= 0 || h <= 0) return true;                       // unknown: do not hold it against the picture
+        double a = (double) Math.max(w, h) / Math.min(w, h);
+        for (double c : CAMERA_SHAPES) if (Math.abs(a - c) <= 0.01 * c) return true;
+        return false;
+    }
+
+    /**
+     * A designed picture with lettering laid over it (poster, meme, advert, quote, festival card), recognised
+     * without reading a word: it must have lettering (a wide row of large letters, or many lines of letters)
+     * and must not look like a camera frame (an odd shape, or large perfectly flat areas). Never a camera
+     * photo or a screenshot. Returns the evidence in words, or null.
+     */
+    public static String poster(FileItem f, ImageSignals.S s) {
+        if (s == null || isCamera(f) || isScreenshot(f) || s.colorful < 15) return null;
+        boolean headline = s.bigText >= 0.25, lines = s.textBlobs >= 60 && s.textLines >= 5;
+        if (!headline && !lines) return null;
+        boolean odd = !cameraShape(f.width, f.height), flat = s.flat >= 0.2;
+        if (!odd && !flat) return null;                           // a photo of a sign or a banner keeps the camera's shape
+        return (headline ? "Large lettering across " + Math.round(100 * s.bigText) + "% of the width" : s.textLines + " lines of lettering")
+                + (odd ? ", not the shape of a camera photo" : ", large flat areas");
     }
 
     /** Dark (lens covered, pocket), almost featureless, or so shaken that nothing is sharp anywhere; never with text. */

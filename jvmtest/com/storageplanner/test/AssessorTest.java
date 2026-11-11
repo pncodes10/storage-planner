@@ -470,6 +470,36 @@ public final class AssessorTest {
         check("Lab: camera and screenshot names", Lab.areaFromName("20261103_235249.jpg").equals("camera") && Lab.areaFromName("IMG_20260101_101010.jpg").equals("camera")
                 && Lab.areaFromName("Screenshot_20260101.png").equals("screenshot") && Lab.areaFromName("poster.jpg").equals("download"));
 
+        // ---- posters, memes and adverts: recognised by lettering and shape, without reading a word
+        check("camera shapes: 4:3, 16:9, 4000x1848, a chat copy of a 16:9 photo", PhotoCategory.cameraShape(4000, 3000) && PhotoCategory.cameraShape(1080, 1920)
+                && PhotoCategory.cameraShape(4000, 1848) && PhotoCategory.cameraShape(1599, 899));
+        check("not camera shapes: 720x843, 1067x1280, 1206x793, 1170x1215", !PhotoCategory.cameraShape(720, 843) && !PhotoCategory.cameraShape(1067, 1280)
+                && !PhotoCategory.cameraShape(1206, 793) && !PhotoCategory.cameraShape(1170, 1215));
+        {
+            Scanner.Result r = phone();
+            String wa = "Android/media/com.whatsapp/WhatsApp/Media/WhatsApp Images/";
+            FileItem meme = photo(r, wa + "IMG-meme.jpg", 200000, 20, "wa_image", 11, 50); meme.width = 1206; meme.height = 793;
+            meme.category = PhotoCategory.POSTER; meme.faces = 3; meme.text = "knew thirty phone numbers heart can't find his way home without gps asks write thanks";
+            FileItem advert = photo(r, wa + "IMG-ad.jpg", 300000, 20, "wa_image", 12, 50); advert.category = PhotoCategory.POSTER; advert.faces = 1; advert.text = "botsolar 8796383291 solarbot.in";
+            FileItem card = photo(r, wa + "IMG-card.jpg", 300000, 20, "wa_image", 13, 50); card.category = PhotoCategory.POSTER; card.faces = 1; card.text = "happy birthday aarav";
+            FileItem quote = photo(r, wa + "IMG-quote.jpg", 100000, 20, "wa_image", 14, 50); quote.category = PhotoCategory.POSTER; quote.faces = 0;
+            FileItem fresh = photo(r, wa + "IMG-new.jpg", 100000, 3, "wa_image", 15, 50); fresh.category = PhotoCategory.POSTER; fresh.faces = 0;
+            FileItem glitter = photo(r, wa + "IMG-diya.jpg", 98000, 13, "wa_image", 16, 50); glitter.category = PhotoCategory.GRAPHIC; glitter.faces = 0;
+            FileItem saved = photo(r, "Pictures/poster.jpg", 100000, 200, "pictures", 17, 50); saved.category = PhotoCategory.POSTER; saved.faces = 0;
+            UnitBuilder ub = new UnitBuilder(r, new Estimates(), 34, policy(Policy.BALANCED)), th = new UnitBuilder(r, new Estimates(), 34, policy(Policy.THOROUGH));
+            Option m = opt(ub, meme.rel, Techniques.FORWARDS), ad = opt(ub, advert.rel, Techniques.FORWARDS), cd = opt(ub, card.rel, Techniques.FORWARDS),
+                    q = opt(ub, quote.rel, Techniques.FORWARDS), g = opt(ub, glitter.rel, Techniques.FORWARDS);
+            check("meme full of text, drawn faces in it: suggested", m != null && !m.review && m.evidence.contains("full of text"));
+            check("advert with a person and a phone number: suggested", ad != null && !ad.review && ad.evidence.contains("an advert"));
+            check("card with a face and few words (may be personal): for you to decide", cd != null && cd.review);
+            check("quote poster without faces: suggested, your call, not in the default plan", q != null && !q.review && q.risk == Option.R4 && !q.safeStep());
+            check("graphic without any readable text: suggested", g != null && !g.review);
+            check("poster from three days ago: nothing yet", !anyDelete(ub, fresh.rel));
+            check("poster the user saved to Pictures: nothing (only chat forwards are suggested)", !anyDelete(ub, saved.rel));
+            check("Thorough: a faceless forward goes into the default plan, a card with a face never does",
+                    opt(th, quote.rel, Techniques.FORWARDS).sure && !opt(th, card.rel, Techniques.FORWARDS).sure);
+        }
+
         // ---- the whole run on a colourful picture with a headline: English reads nothing, Marathi reads the greeting
         java.io.File dir = java.nio.file.Files.createTempDirectory("indic").toFile();
         byte[] jpeg = new byte[56000]; new Random(9).nextBytes(jpeg); jpeg[0] = (byte) 0xFF; jpeg[1] = (byte) 0xD8; jpeg[2] = (byte) 0xFF;

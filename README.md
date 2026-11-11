@@ -174,6 +174,9 @@ reasons are shown on the file's details page ("Do you need it? Estimated 15 of 1
 | Payment screenshot, 200 days old | For you to decide | A record: only its age speaks against it |
 | Greeting image from a chat, a month old | Suggested | Greeting, and old |
 | Greeting image with faces in it | For you to decide | It may be a personal photo with a caption |
+| Meme or poster from a chat, over a week old | Suggested | A designed picture, and old |
+| The same with a phone number or web address on it | Suggested | An advert |
+| Card with a face and only a few words | For you to decide | It may be personal |
 | Old `.zip` in Downloads | Suggested | Archive, and untouched for over six months |
 | Old `.pdf` in Downloads | For you to decide | A document: only its age speaks against it |
 
@@ -331,9 +334,11 @@ The overview has a **Your pictures** section. It shows every category with its c
 | Tickets & passes | Text: PNR, train no., boarding pass, gate, seat, booking ID; the travel date is read | Yes, once the date has passed by a week (or 6 months after saving if no date is found) |
 | Chat screenshots | Screenshot with chat layout and many timestamps | No |
 | Greetings & forwards | A greeting ("Good morning", "Happy Diwali" …) read on an image received in a chat | Yes, if older than a week |
+| Posters, memes & forwards | Recognised **without reading a word**: lettering laid over the picture (a row of large letters across a quarter of the width, or five or more lines of letters) on a picture that does not have the shape of a camera frame, or has large flat areas. Works in any language. Never a camera photo or a screenshot | Yes, if received in a chat more than a week ago. With a face and few words (it may be a personal card): for you to decide |
 | Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp | Yes |
 | ID documents (sensitive) | Text: Government of India, Aadhaar, PAN, passport, licence; Aadhaar and PAN number patterns | **Never.** Other suggestions are removed too; only an identical extra copy may go |
-| Other screenshots, Graphics | Everything else from screenshots, downloads and chat apps | No |
+| Graphics | Chat and download images with large flat areas and little text (stickers, wallpapers, glitter cards) | Yes, if received in a chat more than a week ago |
+| Other screenshots | Everything else from screenshots | No |
 
 **Browsing.**
 - Tap a category for a photo grid (newest first). It has an age filter: any, older than a month, three months or a year.
@@ -371,6 +376,25 @@ festival word (शुभेच्छा, शुभकामना, मंगल�
 **Greeting**. "Lettering" is measured, not guessed: a wide row of large letters, or twenty or more
 letter-shaped marks in two lines. That keeps this second read off ordinary photos. It takes about half a
 second per picture on a desktop. The switch is under **Algorithm settings → Read Marathi and Hindi text**.
+
+The second read was 720 px at first; a busy festival poster only gave up its plain lines at 1000 px, so that
+is the second size now.
+
+**Tried on twelve real pictures** (the app's reader in Chromium, the face detector and the decision code on a
+desktop; ten days after they were received):
+
+| Picture | Sorted as | Decision |
+|---|---|---|
+| Marathi Padwa greeting, lamp and headline | Greeting (words read) | Suggested |
+| "Happy Diwali" in gold glitter on black (no reader could read it) | Graphic (large flat areas) | Suggested |
+| Three-panel comic meme with captions | Poster/meme (lettering, odd shape) | Suggested; the drawn faces count little in a picture full of text |
+| Marathi festival poster with a man's photo, a company logo and a phone number | Poster/meme (lettering, odd shape), an advert | Suggested |
+| The same camera photo three times, byte for byte | Photo | Two deleted by the default plan, one kept |
+| Two more shots of that scene | Photo | One suggested as a near-duplicate, one kept |
+| Photo of a chocolate box, photo of a candle held in a hand | Photo | **Kept.** Nothing measurable says these are not wanted |
+
+The last row is the limit of this approach: whether you still want an ordinary photo of an object is not
+something lettering, faces, blur or shape can tell.
 
 Checked on a real forwarded Diwali Padwa greeting (720 × 843, a lamp with a Marathi headline): the English
 reader returned noise, the Marathi/Hindi reader returned बलिप्रतिपदा (96), मंगलमय (87) and शुभेच्छा (46), and

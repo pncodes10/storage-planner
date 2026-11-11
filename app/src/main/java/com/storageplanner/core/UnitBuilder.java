@@ -183,6 +183,9 @@ public final class UnitBuilder {
                             f.catDate > 0 ? "Ticket for " + Report.day(f.catDate) + ", which has passed" : "Ticket saved " + Math.round(age) + " days ago"));
                 else if (c.equals(PhotoCategory.GREETING) && age > 7 && (a.startsWith("wa_") || a.equals("telegram_media")))
                     u.add(new Option("delete", Techniques.GREETINGS, s, Option.R4, true, "Greeting image received " + Math.round(age) + " days ago"));
+                else if ((c.equals(PhotoCategory.POSTER) || c.equals(PhotoCategory.GRAPHIC)) && age > 7 && (a.startsWith("wa_") || a.equals("telegram_media")))
+                    u.add(new Option("delete", Techniques.FORWARDS, s, Option.R4, true,
+                            (c.equals(PhotoCategory.POSTER) ? "Poster, meme or advert" : "Graphic") + " received " + Math.round(age) + " days ago"));
                 else if (c.equals(PhotoCategory.ACCIDENTAL))
                     u.add(new Option("delete", Techniques.ACCIDENTAL, s, Option.R4, true, "Almost nothing visible in this shot"));
             }

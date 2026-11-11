@@ -81,7 +81,7 @@ public final class Assessor {
     }
 
     /** Suggestions that rest on what the file is, not on another copy of it: Need decides them. */
-    private static final Set<String> NEED_BASED = set(Techniques.BLURRY, Techniques.ACCIDENTAL, Techniques.OTP_SHOTS, Techniques.GREETINGS,
+    private static final Set<String> NEED_BASED = set(Techniques.BLURRY, Techniques.ACCIDENTAL, Techniques.OTP_SHOTS, Techniques.GREETINGS, Techniques.FORWARDS,
             Techniques.OLD_PAYMENTS, Techniques.EXPIRED_TICKETS, Techniques.OLD_DOWNLOADS, Techniques.ACCIDENTAL_VIDEOS,
             Techniques.SCREEN_RECORDINGS);
 
@@ -215,6 +215,7 @@ public final class Assessor {
             if (PhotoCategory.TICKET.equals(cat)) v = Math.max(v, 0.6);
             if (PhotoCategory.OTP.equals(cat)) { v = 0.15; a.labels.add("one-time code"); }
             else if (PhotoCategory.GREETING.equals(cat) && f.faces <= 0) { v = 0.25; a.labels.add("greeting image"); }
+            else if ((PhotoCategory.POSTER.equals(cat) || PhotoCategory.GRAPHIC.equals(cat)) && f.faces <= 0) { v = Math.min(v, 0.3); a.labels.add("designed picture, not a photo"); }
             else if (PhotoCategory.ACCIDENTAL.equals(cat) && f.faces <= 0) { v = Math.min(v, 0.3); a.labels.add("nothing visible"); }
 
             if (PhotoCategory.ID.equals(cat)) { a.sensitive = true; a.labels.add("ID document"); }

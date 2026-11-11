@@ -160,7 +160,7 @@ public final class JvmPlatform implements Platform {
 
     /** Stand-in for the Marathi and Hindi reader: words recorded from the same Tesseract build ("<picture>.indic.json"). */
     public com.storageplanner.core.TextRules.Words readTextIndic(String path, int[] argb, int w, int h) {
-        File side = new File(path + ".indic.json");
+        File big = new File(path + ".indic1000.json"), side = Math.max(w, h) > 360 && big.exists() ? big : new File(path + ".indic.json");
         if (!side.exists()) return null;
         try { return CategoryTest.words(new String(Files.readAllBytes(side.toPath()), StandardCharsets.UTF_8)); } catch (Exception e) { return null; }
     }

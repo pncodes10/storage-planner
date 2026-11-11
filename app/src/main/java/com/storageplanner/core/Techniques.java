@@ -35,6 +35,7 @@ public final class Techniques {
     public static final String EXPIRED_TICKETS = "Tickets for past trips and shows";
     public static final String GREETINGS = "Greeting images from chats";
     public static final String ACCIDENTAL = "Accidental shots";
+    public static final String FORWARDS = "Forwarded posters, memes and graphics";
     public static final String ACCIDENTAL_VIDEOS = "Accidental recordings";
     public static final String SCREEN_RECORDINGS = "Old screen recordings";
     public static final String SENT_VIDEOS = "WhatsApp Sent copies of videos";
@@ -62,6 +63,8 @@ public final class Techniques {
             "Compare each one with the photo that is kept before deleting it.");
         put(LEFTOVER_MEDIA, "Files an app saved in its own folder, left behind after you uninstalled it. They can be photos, recordings or exports you made in that app.",
             "Open each one. Delete it with your file manager only if you do not need it.");
+        put(FORWARDS, "Designed pictures received in chats more than a week ago: posters, memes, adverts, quotes and festival cards. Recognised by the lettering laid over them and by not having the shape of a camera photo, in any language.",
+            "Look at each one; delete it in WhatsApp (Settings > Storage and data > Manage storage) or your gallery. Ones with faces in them are shown for you to decide.");
         put(ACCIDENTAL_VIDEOS, "Videos that are black or show nothing from start to end, or last only a second or two: usually recorded by accident, in a pocket or while reaching for the photo button.",
             "Play each one (a dark video may have been kept for its sound); delete it in your gallery if nothing is in it.");
         put(SCREEN_RECORDINGS, "Recordings of your screen made more than three months ago, usually to show someone something once.",

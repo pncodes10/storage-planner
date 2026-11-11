@@ -147,19 +147,35 @@ final class Sorter {
                         opt.trace.line("    Marathi/Hindi reader at " + edge + " px: " + said(wi));
                         opt.trace.line("    Marathi/Hindi text says: " + (vi.kind == null ? "nothing specific" : PhotoCategory.label(vi.kind) + " (" + vi.why + ")"));
                     }
-                    if (vi.kind != null) { v = vi; words = new TextRules.Words(); for (String x : TextRules.cleanIndic(wi).split(" ")) { words.text.add(x); words.conf.add(90); } break; }
+                    if (vi.kind != null) {                          // keep what the English reader got as well (a phone number, a web address)
+                        v = vi;
+                        TextRules.Words both = new TextRules.Words();
+                        for (String x : TextRules.cleanIndic(wi).split(" ")) { both.text.add(x); both.conf.add(90); }
+                        if (words != null) for (int q = 0; q < words.text.size(); q++) { both.text.add(words.text.get(q)); both.conf.add(words.conf.get(q)); }
+                        words = both;
+                        break;
+                    }
                 }
             } else if (opt.trace != null && v.kind == null)
                 opt.trace.line("    Marathi/Hindi reader: not used (" + (!opt.readIndic ? "switched off" : !poster ? "a screenshot or a picture without colour" : "no lettering on it") + ")");
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, v, f.faces);
             f.category = c.category; f.catDate = c.date; f.textPending = false;
+            // a designed picture may still be personal (a birthday card with your child's photo): look for faces before judging it
+            if (f.faces < 0 && (PhotoCategory.GREETING.equals(c.category) || PhotoCategory.POSTER.equals(c.category) || PhotoCategory.GRAPHIC.equals(c.category))) {
+                try {
+                    int[] px = pf.argb(f.abs, EDGE, dims);
+                    if (px != null) f.faces = faces(pf, f.abs, px, dims[2], dims[3]);
+                } catch (Throwable t) { f.faces = -1; }
+                if (opt.trace != null) opt.trace.line("    a designed picture: faces looked for -> " + (f.faces < 0 ? "detector not available" : String.valueOf(f.faces)));
+            }
+            if (opt.trace != null && !c.why.isEmpty()) opt.trace.line("    sorted as " + PhotoCategory.label(c.category) + ": " + c.why);
             String t = TextRules.clean(words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
     }
 
     /** Second size tried for Marathi and Hindi text when the small copy gave no greeting word. */
-    static final int INDIC_EDGE = 720;
+    static final int INDIC_EDGE = 1000;
 
     /** Lettering laid over the picture: a wide row of large letters, or a fair number of letter-shaped marks. */
     static boolean lettering(ImageSignals.S s) { return s.bigText >= 0.25 || (s.textBlobs >= 20 && s.textLines >= 2); }

@@ -614,6 +614,8 @@ public final class Lab {
             boolean chat = f.area.startsWith("wa_") || f.area.equals("telegram_media");
             String later = PhotoCategory.GREETING.equals(f.category) && chat && age <= 7 ? "greetings from chats are suggested once they are a week old"
                     : PhotoCategory.GREETING.equals(f.category) && !chat ? "greetings are only suggested when they were received in a chat app"
+                    : (PhotoCategory.POSTER.equals(f.category) || PhotoCategory.GRAPHIC.equals(f.category)) && chat && age <= 7 ? "posters, memes and graphics from chats are suggested once they are a week old"
+                    : (PhotoCategory.POSTER.equals(f.category) || PhotoCategory.GRAPHIC.equals(f.category)) && !chat ? "posters and graphics are only suggested when they were received in a chat app"
                     : PhotoCategory.OTP.equals(f.category) && age <= 1 ? "one-time codes are suggested once they are a day old"
                     : PhotoCategory.PAYMENT.equals(f.category) && age <= 90 ? "payment screenshots are looked at again after three months"
                     : null;

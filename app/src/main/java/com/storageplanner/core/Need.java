@@ -108,7 +108,9 @@ public final class Need {
                 if (f.durationMs >= 30000 && f.vFrames > 0 && (f.vDark >= 0.8f || f.vFlat >= 0.8f))
                     t.way(15, "long: it may have been recorded for its sound");
             } else if (PhotoCategory.OTP.equals(cat)) t.way(-40, "a one-time code");
-            else if (PhotoCategory.GREETING.equals(cat)) t.way(-30, "a greeting image");
+            else if (PhotoCategory.GREETING.equals(cat)) t.way(-30, advert(f) ? "a greeting image with an advert on it" : "a greeting image");
+            else if (PhotoCategory.POSTER.equals(cat)) t.way(advert(f) ? -35 : -25, advert(f) ? "an advert (a designed picture with a phone number or web address)" : "a poster or meme, not a photo");
+            else if (PhotoCategory.GRAPHIC.equals(cat) && chat) t.way(-25, "a graphic, not a photo");
             else if (PhotoCategory.ACCIDENTAL.equals(cat)) t.way(-35, "nothing to see in it");
             else if (PhotoCategory.TICKET.equals(cat)) {
                 if (f.catDate > 0 && ar.now - f.catDate > 30 * DAY) t.way(-15, "a ticket for " + Report.day(f.catDate) + ", over a month ago");
@@ -133,7 +135,9 @@ public final class Need {
         // ---- people
         if (p.usePeople) {
             int faces = video ? f.vFaces : f.faces;
-            if (faces > 0 || PhotoCategory.PEOPLE.equals(cat)) t.way(35, faces > 1 ? "people in it" : "a person in it");
+            boolean designed = PhotoCategory.POSTER.equals(cat) || PhotoCategory.GREETING.equals(cat) || PhotoCategory.GRAPHIC.equals(cat);
+            if (faces > 0 && designed && wordy(f)) t.way(15, "faces, but in a picture full of text (a meme or a poster, not a portrait)");
+            else if (faces > 0 || PhotoCategory.PEOPLE.equals(cat)) t.way(35, faces > 1 ? "people in it" : "a person in it");
         }
 
         // ---- quality
@@ -155,7 +159,9 @@ public final class Need {
                 if (screenRec && age > 90) t.way(-15, "recorded " + days(age) + " ago");
             }
             else if (PhotoCategory.OTP.equals(cat)) t.way(-20, "the code stopped working " + days(age) + " ago");
-            else if (PhotoCategory.GREETING.equals(cat)) { if (age > 7) t.way(-15, "received " + days(age) + " ago"); }
+            else if (PhotoCategory.GREETING.equals(cat) || ((PhotoCategory.POSTER.equals(cat) || PhotoCategory.GRAPHIC.equals(cat)) && chat)) {
+                if (age > 7) t.way(-15, "received " + days(age) + " ago");
+            }
             else if (PhotoCategory.TICKET.equals(cat)) { if (age > 180) t.way(-20, "saved " + days(age) + " ago"); else if (age > 30) t.way(-10, "saved " + days(age) + " ago"); }
             else if (shot) { if (age > 180) t.way(-20, "a screenshot from " + days(age) + " ago"); else if (age > 30) t.way(-10, "a screenshot from " + days(age) + " ago"); }
             else if (area.equals("download")) { if (age > 180) t.way(-15, "downloaded " + days(age) + " ago and not changed since"); }
@@ -188,6 +194,23 @@ public final class Need {
     }
 
     static final long DAY = 86400000L;
+    private static final java.util.regex.Pattern PHONE_OR_SITE = java.util.regex.Pattern.compile(
+            "(?<!\\d)(\\+?91[ -]?)?[6-9]\\d{9}(?!\\d)|\\bwww\\.|[a-z0-9-]{3,}\\.(in|com|org|net|co)\\b");
+
+    /** Eight or more real words were read in it (three letters or more each). */
+    static boolean wordy(FileItem f) {
+        if (f.text == null) return false;
+        int n = 0;
+        for (String w : f.text.split(" ")) {
+            int letters = 0;
+            for (int i = 0; i < w.length(); i++) if (Character.isLetter(w.charAt(i))) letters++;
+            if (letters >= 3 && letters * 4 >= w.length() * 3) n++;
+        }
+        return n >= 8;
+    }
+
+    /** The text read in the picture carries a phone number or a web address. */
+    static boolean advert(FileItem f) { return f.text != null && PHONE_OR_SITE.matcher(f.text).find(); }
 
     public static boolean isVideo(FileItem f) {
         if ("mp4".equals(f.type) || "mkv".equals(f.type)) return !in(Assessor.ext(f.rel), "m4a", "aac", "3ga");
