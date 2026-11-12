@@ -12,6 +12,8 @@ public interface V2Store extends java.io.Closeable {
     RelationshipTable relationships();
     Table<DuplicateGroup> duplicateGroups();
     Table<BackupRecord> backups();
+    /** PHASE_3 2.1 (A-1). */
+    Table<PairCheck> pairChecks();
     RecommendationTable recommendations();
     Table<ActionPlan> actionPlans();
     JournalTable operations();

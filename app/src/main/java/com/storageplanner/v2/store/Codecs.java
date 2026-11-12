@@ -279,18 +279,10 @@ public final class Codecs {
         Object get(EmbeddingRecord r, int i) { return i == 0 ? r.fileId : r.modelId; }
         EmbeddingRecord make(Object[] v) { EmbeddingRecord r = new EmbeddingRecord(); r.fileId = s(v[0]); r.modelId = s(v[1]); return r; }
     };
-    public static final Codec<Relationship> RELATIONSHIP = new Simple<Relationship>("file_relationships", "edgeId", "src", "dst") {
-        Object get(Relationship r, int i) { return i == 0 ? r.edgeId : i == 1 ? r.src : r.dst; }
-        Relationship make(Object[] v) { Relationship r = new Relationship(); r.edgeId = s(v[0]); r.src = s(v[1]); r.dst = s(v[2]); return r; }
-    };
-    public static final Codec<DuplicateGroup> DUPLICATE_GROUP = new Simple<DuplicateGroup>("duplicate_groups", "groupId") {
-        Object get(DuplicateGroup r, int i) { return r.groupId; }
-        DuplicateGroup make(Object[] v) { DuplicateGroup r = new DuplicateGroup(); r.groupId = s(v[0]); return r; }
-    };
-    public static final Codec<BackupRecord> BACKUP = new Simple<BackupRecord>("backup_records", "backupId") {
-        Object get(BackupRecord r, int i) { return r.backupId; }
-        BackupRecord make(Object[] v) { BackupRecord r = new BackupRecord(); r.backupId = s(v[0]); return r; }
-    };
+    public static final Codec<Relationship> RELATIONSHIP = GraphCodecs.RELATIONSHIP;
+    public static final Codec<DuplicateGroup> DUPLICATE_GROUP = GraphCodecs.DUPLICATE_GROUP;
+    public static final Codec<BackupRecord> BACKUP = GraphCodecs.BACKUP;
+    public static final Codec<PairCheck> PAIR_CHECK = GraphCodecs.PAIR_CHECK;
     public static final Codec<Recommendation> RECOMMENDATION = new Simple<Recommendation>("recommendations", "recommendationId", "fileId") {
         Object get(Recommendation r, int i) { return i == 0 ? r.recommendationId : r.fileId; }
         Recommendation make(Object[] v) { Recommendation r = new Recommendation(); r.recommendationId = s(v[0]); r.fileId = s(v[1]); return r; }

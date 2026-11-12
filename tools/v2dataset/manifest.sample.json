@@ -34,7 +34,7 @@
  },
  "summary": {
   "files": 2409,
-  "total_bytes": 716153174,
+  "total_bytes": 716153851,
   "real": 1773,
   "synthetic": 636,
   "must_never_delete": 178,

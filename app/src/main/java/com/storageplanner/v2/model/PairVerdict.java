@@ -1,0 +1,4 @@
+package com.storageplanner.v2.model;
+
+/** PHASE_3 / ARCHITECTURE 2.6-2.8. */
+public enum PairVerdict { SAME_CONTENT, LOCAL_EDIT, COLOR_EDIT, GEOMETRIC_EDIT, NEAR_SCENE, DIFFERENT, AMBIGUOUS, NOT_COMPARABLE }

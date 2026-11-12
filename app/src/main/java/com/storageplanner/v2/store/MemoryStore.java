@@ -38,6 +38,7 @@ public final class MemoryStore implements V2Store {
     private final RelMem relationships = new RelMem();
     private final MemTable<DuplicateGroup> duplicateGroups = new MemTable<DuplicateGroup>(Codecs.DUPLICATE_GROUP);
     private final MemTable<BackupRecord> backups = new MemTable<BackupRecord>(Codecs.BACKUP);
+    private final MemTable<PairCheck> pairChecks = new MemTable<PairCheck>(Codecs.PAIR_CHECK);
     private final RecMem recommendations = new RecMem();
     private final MemTable<ActionPlan> actionPlans = new MemTable<ActionPlan>(Codecs.ACTION_PLAN);
     private final JournalMem operations = new JournalMem();
@@ -50,7 +51,7 @@ public final class MemoryStore implements V2Store {
 
     /** All tables in ARCHITECTURE 4.1 order (the snapshot order). */
     final List<MemTable<?>> tables = Arrays.<MemTable<?>>asList(files, features, hashes, embeddings, relationships, duplicateGroups,
-            backups, recommendations, actionPlans, operations, feedback, preferences, models, scanSessions, volumes, directories);
+            backups, pairChecks, recommendations, actionPlans, operations, feedback, preferences, models, scanSessions, volumes, directories);
 
     private MemoryStore(BlobStore blobs, long snapshotEveryMs, Clock clock) {
         this.blobs = blobs; this.snapshotEveryMs = snapshotEveryMs; this.clock = clock;
@@ -94,6 +95,7 @@ public final class MemoryStore implements V2Store {
     public RelationshipTable relationships() { return relationships; }
     public Table<DuplicateGroup> duplicateGroups() { return duplicateGroups; }
     public Table<BackupRecord> backups() { return backups; }
+    public Table<PairCheck> pairChecks() { return pairChecks; }
     public RecommendationTable recommendations() { return recommendations; }
     public Table<ActionPlan> actionPlans() { return actionPlans; }
     public JournalTable operations() { return operations; }
