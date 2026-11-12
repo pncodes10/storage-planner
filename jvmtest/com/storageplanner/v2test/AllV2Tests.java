@@ -20,6 +20,8 @@ public final class AllV2Tests {
             {"StoreOracleTest", (Suite) StoreOracleTest::run},
             {"DiskKillTest", (Suite) DiskKillTest::run},
             {"ResetSafetyTest", (Suite) ResetSafetyTest::run},
+            {"DiskCorruptionTest", (Suite) DiskCorruptionTest::run},
+            {"DiskSpaceTest", (Suite) DiskSpaceTest::run},
             {"CapabilityRegistryTest", (Suite) CapabilityRegistryTest::run},
             {"VolumeRegistryTest", (Suite) VolumeRegistryTest::run},
             {"WalkerTest", (Suite) WalkerTest::run},

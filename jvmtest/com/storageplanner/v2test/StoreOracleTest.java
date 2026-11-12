@@ -26,7 +26,7 @@ public final class StoreOracleTest {
     static final String[] SHAS = {null, null, "aa", "bb"};
     static final OpPhase[] PHASES = OpPhase.values();
 
-    static long ops, seqs, reopens, crashes, powerLosses, interleaved, checked;
+    static long ops, seqs, reopens, crashes, powerLosses, interleaved, checked, compactionsForced, compactionsTotal;
 
     static String pick(Random r, String[] a) { return a[r.nextInt(a.length)]; }
     static String path(Random r) { String d = pick(r, DIRS); String n = pick(r, NAMES); return d.isEmpty() ? n : d + "/" + n; }
@@ -143,6 +143,8 @@ public final class StoreOracleTest {
         int[] lru = {0, 3, 4096};
         o.lruRecords = lru[r.nextInt(lru.length)];
         o.indexAtClose = r.nextInt(4) != 0;
+        long[] cmin = {0, 4096, 64L << 20};         // S4: compaction at checkpoints whenever garbage ≥ max(min, live)
+        o.compactMinGarbage = cmin[r.nextInt(cmin.length)];
         return o;
     }
 
@@ -162,6 +164,13 @@ public final class StoreOracleTest {
         try {
             for (i = 0; i < nOps; i++) {
                 ops++;
+                if (i % 50 == 49) {                                                     // S4: compaction forced every 50 ops
+                    m.flush();
+                    if (d.compactNow()) compactionsForced++;
+                    same("dump after compaction", dump(m), dump(d));
+                    lastCk = d.checkpointsWritten(); durableM = copy(m);
+                    continue;
+                }
                 int p = r.nextInt(1000);
                 int id = r.nextInt(5) == 0 ? TableIds.FILES : 1 + r.nextInt(TableIds.COUNT);
                 if (p < 330) {                                                          // put
@@ -250,6 +259,7 @@ public final class StoreOracleTest {
                 }
             }
             m.commit(); d.commit();
+            compactionsTotal += d.compactions();
             same("final dump", dump(m), dump(d));
             d.close();
             DiskStore again = DiskStore.open(blobs, ckEvery, clock, o);
@@ -271,6 +281,7 @@ public final class StoreOracleTest {
         T.section("StoreOracle");
         int seeds = Integer.getInteger("v2.oracleSeeds", 300);
         int nOps = Integer.getInteger("v2.oracleOps", 300);
+        compactionsForced = compactionsTotal = 0;
         ops = seqs = reopens = crashes = powerLosses = interleaved = checked = 0;
         int failed = 0;
         for (long seed = 1; seed <= seeds; seed++) {
@@ -279,7 +290,8 @@ public final class StoreOracleTest {
             if (f != null) { failed++; if (failed <= 3) System.out.println("  " + f); }
         }
         System.out.println("  oracle: " + seqs + " sequences, " + ops + " ops, " + checked + " comparisons, " + reopens + " reopens ("
-                + crashes + " kills, " + powerLosses + " power losses), " + interleaved + " interleaved iterations");
+                + crashes + " kills, " + powerLosses + " power losses), " + interleaved + " interleaved iterations, "
+                + compactionsForced + " forced compactions (+ " + compactionsTotal + " counted by the last store instances)");
         T.eq("oracle sequences failing (of " + seeds + ")", 0, failed);
         return T.finish("StoreOracleTest");
     }

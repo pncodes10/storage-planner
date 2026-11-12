@@ -17,7 +17,11 @@ final class StageTimer implements Stage {
     public String id() { return s.id(); }
     public StageOutcome run(StageContext ctx) throws StoreException {
         long t0 = System.nanoTime();
-        try { return s.run(ctx); }
+        try {
+            StageOutcome o = s.run(ctx);
+            if (V2Cli.afterStage != null) V2Cli.afterStage.accept(s.id(), ctx.store);
+            return o;
+        }
         finally { Long v = ms.get(s.id()); ms.put(s.id(), (v == null ? 0 : v) + (System.nanoTime() - t0) / 1000000L); }
     }
 }

@@ -47,17 +47,5 @@ assert s["resumedCount"] == 1 and s["state"] == "COMPLETED", s
 EOF2
 done
 # ---- store equality (PHASE_S_STORE 5.2): memory vs disk, --assess --target-bytes max, identical apart from timings ----
-$CLI scan "$T" --out "$WORK/eq-memory.json" --state-dir "$WORK/eq-memory" --store memory --now $NOW --target-bytes max >/dev/null
-$CLI scan "$T" --out "$WORK/eq-disk.json" --state-dir "$WORK/eq-disk" --store disk --now $NOW --target-bytes max >/dev/null
-python3 -I - "$WORK/eq-memory.json" "$WORK/eq-disk.json" <<'EOF2'
-import json, sys
-def strip(x):
-    if isinstance(x, dict): return {k: strip(v) for k, v in x.items() if k != "timings"}
-    if isinstance(x, list): return [strip(v) for v in x]
-    return x
-a, b = [strip(json.load(open(p, encoding="utf-8"))) for p in sys.argv[1:3]]
-if json.dumps(a, sort_keys=False) != json.dumps(b, sort_keys=False):
-    print("store equality: FAILED (memory and disk results differ)"); sys.exit(1)
-print("store equality: memory and disk results identical (timings removed)")
-EOF2
+CLASSES="$CLS" NOW=$NOW bash "$REPO/tools/v2eval/store_equal.sh" "$T"
 echo "v2 run_tests: ALL PASSED"

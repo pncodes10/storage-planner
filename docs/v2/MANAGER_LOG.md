@@ -85,29 +85,27 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (22:17 UTC, 12 Nov)
+## State (22:53 UTC, 12 Nov)
 
 - Phases 1-5 and Phase A done; CI run 60 is the build to test on the phone.
-- Store: slices S0-S2 done (DiskStore core), S3 partly. 38 suites green
-  (re-run by the lead) incl. memory-vs-disk result equality on the dataset.
-  Tests: 2,000 randomised sequences against the in-memory store (968k
-  comparisons), 3,000 store-level kill trials, 200 pipeline kill-and-resume
-  trials, wrong-record injection on all 17 tables, 68 corruption cases; all
-  pass. Index cost 265 bytes per file at 100k files. Production still uses
-  the in-memory store; the disk store is reachable only from the CLI and tests.
-- Bug found and fixed on the way: a codec dropped the archive-entry offset on
-  every reload, so archive backups were no longer verified after a restart
-  (missed savings, not a wrong delete).
-- Fourth and fifth 5-hour usage limits hit (12:50 and 17:40 UTC).
-- Store implementer for S3-S5: running.
+- Store: slices S0-S4 done (core, damage handling, compaction and low-space
+  stop). 40 suites green (re-run by the lead); dataset results byte-identical
+  through both stores and unchanged from before. At 100k files the disk store
+  holds 315 bytes per file in memory against 2,537 for the in-memory store;
+  whole-run peak is 2,951 bytes per file (was 5,082). Production still uses
+  the in-memory store, so the phone limit has not moved yet.
+- Container restarted at ~22:20 UTC; data and commits intact, one agent
+  relaunched.
+- Store implementer for S5 onward: running.
 - Open: dataset label fix (A27), ClassicParityTest and five other tests, 7 minor
   Phase A review findings.
 
 ## Next steps
 
-1. Store S3 (damage handling in the pipeline), S4-S6 (stage memory changes,
-   switch production to the disk store, capacity guard), S7 (decode budget).
-   Exit: 150k-file scale test under -Xmx148m; dataset results unchanged.
+1. Store S5 (stage memory changes: six callers, the duplicate-graph stage is
+   the largest), S6 (switch production to the disk store, capacity guard),
+   S7 (decode budget). Exit: 150k-file scale test under -Xmx148m; dataset
+   results unchanged.
 2. Dataset label fix (A27) and missing tests.
 3. Phase 6 (content signals, A28), then 7-10.
 4. If an agent stops with a usage-limit error: wait for the reset time in the

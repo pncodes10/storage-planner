@@ -29,6 +29,7 @@ public final class KillingBlobStore implements BlobStore {
     public long appendedBytes() { return appended; }
     public KillingBlobStore haltProcess(boolean h) { halt = h; return this; }
     public int replaceCommits() { return commits; }
+    public int truncates() { return truncates; }
 
     private void kill(String why) {
         if (halt) { System.out.flush(); System.err.flush(); Runtime.getRuntime().halt(137); }

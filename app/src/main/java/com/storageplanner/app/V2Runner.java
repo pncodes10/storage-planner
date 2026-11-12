@@ -30,6 +30,7 @@ import com.storageplanner.v2.stage.PipelineConfig;
 import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
 import com.storageplanner.v2.stage.StageOutcome;
+import com.storageplanner.v2.store.SpaceProbe;
 import com.storageplanner.v2.store.Stores;
 import com.storageplanner.v2.store.StoreException;
 import com.storageplanner.v2.store.V2Store;
@@ -88,7 +89,7 @@ final class V2Runner {
             o.message = V2Capacity.OUT_OF_MEMORY;
         } catch (Throwable t) {
             o.ok = false;
-            o.message = "Analysis failed (v2): " + t;
+            o.message = com.storageplanner.v2.store.StoreLowSpace.in(t) != null ? V2Capacity.LOW_STORAGE : "Analysis failed (v2): " + t;
         } finally {
             ResultFiles.setRunning(app, false);
             AnalysisState.finished(o.message, o.ok);
@@ -111,13 +112,14 @@ final class V2Runner {
         PipelineConfig cfg = new PipelineConfig();
         cfg.maxTier = 3;
         V2Store store;
-        if (fresh) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
-        else try { store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); }
-        catch (StoreException e) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
+        SpaceProbe space = space(dev);
+        if (fresh) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
+        else try { store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); }
+        catch (StoreException e) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
         List<Stage> stages = Pipeline.defaultStages(cfg, dev);
         stages.add(new com.storageplanner.v2.graph.GraphStage());
         // memory guard (REVIEW_A M-1): right after discovery, before any extraction, the record count must fit the heap
-        final long[] guard = {-1, -1};          // {files found, limit} when the guard stopped the run
+        final long[] guard = {-1, -1, 0};       // {files found, limit, 1 = disk} when the guard stopped the run
         for (int i = 0; i < stages.size(); i++) {
             if ("T1_METADATA".equals(stages.get(i).id())) { stages.set(i, new CapacityGuard(stages.get(i), usedBefore, guard)); break; }
         }
@@ -131,7 +133,7 @@ final class V2Runner {
         PipelineResult res = new Pipeline(dev, store, cfg, stages).run(control);
         stages.clear();                         // GRAPH keeps its signature cache (~50 MB) and node copies: let them go now
         if (guard[0] >= 0) {
-            o.message = V2Capacity.tooManyMessage(guard[0], guard[1]);
+            o.message = guard[2] == 1 ? V2Capacity.notEnoughStorageMessage(guard[0]) : V2Capacity.tooManyMessage(guard[0], guard[1]);
             return;
         }
         if (AnalysisState.cancelled || res.outcome != StageOutcome.DONE) {
@@ -169,6 +171,10 @@ final class V2Runner {
             long files = ctx.store.files().size();          // every record in memory, including ones kept from earlier scans
             long limit = V2Capacity.maxFiles(Runtime.getRuntime().maxMemory(), usedBefore);
             if (files > limit) { out[0] = files; out[1] = limit; return StageOutcome.CANCELLED; }
+            if (STORE_KIND == Stores.Kind.DISK) {        // PHASE_S_STORE 3.12: disk preflight with the heap guard
+                long free = ctx.device.resources().sample().storageFreeBytes;
+                if (!V2Capacity.diskFits(files, free)) { out[0] = files; out[1] = free; out[2] = 1; return StageOutcome.CANCELLED; }
+            }
             return inner.run(ctx);
         }
     }
@@ -197,6 +203,16 @@ final class V2Runner {
     }
 
     private static final class Built { V2Adapter.Adapted adapted; int sdk; boolean appStats; }
+
+    /** Free bytes of the shared root (same /data partition as getFilesDir()), for the DiskStore reserve checks (3.12). */
+    private static SpaceProbe space(final AndroidV2Device dev) {
+        return new SpaceProbe() {
+            public long freeBytes() {
+                com.storageplanner.v2.device.ResourceState s = dev.resources().sample();
+                return s == null ? -1 : s.storageFreeBytes;
+            }
+        };
+    }
 
     private static AndroidV2Device device(Context app, AndroidPlatform pf) {
         List<AppItem> classic = pf.apps();
@@ -231,6 +247,8 @@ final class V2Runner {
         in.recs = recs; in.files = fm; in.keepers = Plans.keepers(store);
         Plans.Made m = Plans.make(in, ActionPlan.MAX_SAFE, null, false);
         Plans.version(store, m.plan, now, scanId);
+        ScanSession ss = store.scanSessions().get(ScanSession.keyOf(scanId));   // F-07: damage found by ASSESS/PLAN is counted too
+        if (Pipeline.noteDamaged(store, ss, now)) store.scanSessions().put(ss);
         store.flush();
         Built b = new Built();
         b.sdk = lastSdk; b.appStats = lastStats;

@@ -198,7 +198,7 @@ Deviations (with reasons):
 * An empty commit increments commitSeq without a COMMIT frame (replay checks increasing commitSeq ≤ the manifest's).
 * Keys: unpaired surrogates are stored as 3-byte sequences (WTF-8) rather than replaced by `?` as `getBytes` would.
 
-## S3 — crash safety on the pipeline; CLI `--store` (partly done)
+## S3 — crash safety on the pipeline; CLI `--store` (done)
 
 Done (both scripts green; production pipeline still uses MemoryStore only — `Stores` is used by the CLI alone):
 * `v2.store.Stores` (5.1): `Kind {MEMORY, DISK}`, `open/create`. `V2Cli --store memory|disk` (default memory; without
@@ -237,7 +237,71 @@ Found and fixed on the way:
 Numbers: dataset (2,414 files, `--target-bytes max --snapshot-every-ms -1`, two runs over one state dir per store): memory
 vs disk **identical apart from timings on both runs**. run_tests tree: identical. DiskKillTest 200/200.
 
-Not done (next implementer starts here, in this order):
+Second part (done; continued from the predecessor's uncommitted start on step 1, which was coherent and green):
+* **Retry and events (3.11).** `Stores.corruption(Throwable)` finds a `StoreCorruption` in a cause chain. `V2Cli.run` and
+  `V2Runner.run`: a StoreCorruption anywhere in the run (pipeline, ASSESS, PLAN, JSON) ⇒ one automatic retry on
+  `Stores.create` (`cfg.storeReset` ⇒ `D_STORE_RESET`); a second one ⇒ exit 3 / the message "v2's saved data was damaged
+  and has been reset; please run again." A failed open already started fresh. The CLI now builds the JSON in memory, so a
+  run that hits corruption leaves no partial result file. `Pipeline.noteDamaged(store, session, now)`: the session carries
+  one `D_STORE_DAMAGED` event, detail = `stats().damaged`, refreshed at pause/cancel/completion and again after ASSESS/PLAN
+  (CLI: session put + flush + coverage events; `V2Runner.analyse`: before its flush). MemoryStore never reports damage, so
+  no MemoryStore output changes.
+* **`file_hashes` moved to the fail-closed class** (`TableIds.derived` = features, embeddings, pair checks). The 3.11 rule
+  "a table whose test fails moves to the next row" applied: DiskCorruptionTest's F-07 case damaged a hash after T3; GRAPH
+  read it as absent, the exact-copy edge disappeared and ASSESS rated `Download/copy é 4.png` NO_VERIFIED_BACKUP instead of
+  VERIFIED_BACKUP. Now that read throws, the run retries on a fresh store and equals clean.
+* Test hooks (jvmtest only): `V2Cli.afterStage` (called by `StageTimer` after each stage, F-07 injection),
+  `V2Cli.retryOnCorruption`, `V2Cli.diskOptions` (DiskStore tunables for the CLI), `PowerLossBlobStore.flip`,
+  `DiskStore.debugSegmentName(loc)`. `ScaleRun --store disk` (DiskStore over a temp dir; prints disk bytes and `stats()`).
+* **`DiskCorruptionTest`** (AllV2Tests, 35 checks, ≈ 4 s), CLI in process on the DiskKillTest tree: features / pair-checks
+  frame flipped (store reopened from its index so the damage is met on read) ⇒ completes, equals MemoryStore's second run,
+  `D_STORE_DAMAGED` = 1, no reset, the record is re-derived; files / hashes / relationships frame flipped ⇒ with the retry
+  disabled the run throws StoreCorruption and the store refuses to open, the next run starts fresh (`D_STORE_RESET`) and
+  equals clean; with the retry the same happens in one invocation; flipped or truncated index file ⇒ refused at open,
+  rebuilt, result identical, no reset; random garbage after durable on every segment ⇒ ignored; damaged manifest ⇒ fresh
+  store, equals clean. **F-07**: features of two images damaged after T3 and of a third after GRAPH in the same run ⇒ the
+  run completes, `D_STORE_DAMAGED` = 3, removal recommendations and plan items ⊆ clean's, no file NO_VERIFIED_BACKUP or
+  perceptual FALSE that clean did not have, result differs from clean (the test bites); the next run's open meets the
+  damage below durable with no index file (F-05) ⇒ fresh store, equals clean. Hash damaged after T3 ⇒ automatic retry,
+  equals clean.
+* **F-12 at pipeline level** (DiskKillTest, now 14 checks): (a) a run with an index file at every checkpoint
+  (`indexTailBytes` 0) killed right after the n-th index `replace` (8 points spread over the run's 28 index writes) ⇒ the
+  reopen rejects that index every time and the resumed run equals clean (the last points fall after COMPLETED: compared
+  with MemoryStore's second run); (b) a second run checkpointing only at stage ends killed at 6 points of its appended
+  bytes ⇒ log bytes beyond durable remain, no index file, reopen by scan never replays them, resume equals MemoryStore's
+  second run; (c) evolving tree: three runs over one persistent store, files added (incl. a new PNG with existing pixels),
+  removed, moved (also across `😀` dirs) and modified between runs ⇒ DiskStore equals MemoryStore on every run with only
+  `timings` removed.
+* **`tools/v2eval/store_equal.sh TREE [CLI opts]`** (5.2; `CLASSES=`, `NOW=`, `KEEP=`): memory vs disk, fresh state dirs,
+  `--assess --target-bytes max`, byte-identical after removing `timings`. `run_tests.sh` now calls it on its tree.
+* **ScenarioFixtureTest with a store parameter**: `RiskFx.storeKind`; the fixtures run directly, through a MemoryStore and
+  through a DiskStore (records written, read back through the codecs, `GraphView.of(store)`, the store's features); every
+  assertion holds each time and all 120 store verdicts (60 per kind) equal the direct ones.
+
+S3 numbers: run_tests 39 suites, 0 failures (≈ 34 s). DiskKillTest 200 trials: 200 killed (20 after completion, 66 with
+power loss), 200 equal (37 s). Dataset (both modes, `--target-bytes max`): CLI JSON without timings byte-identical to the
+HEAD 1e09e80 baseline (retaken: `<scratchpad>/v2out/head-{mem,disk}/`, script `<scratchpad>/v2out/gate.sh OUT CLASSES STORE`,
+compare `cmp.sh BASE NEW`) for memory and disk; phase-4/phase-5 outputs identical (exit 1 both, the known
+`IMG-20240122-WA0001.jpg` exposure FAIL). Heap per file at 100k (MemoryStore, `run_scale.sh 100000 --profile`) unchanged
+from S0: after DISCOVER 1,288, T3 2,367, GRAPH (stage referenced) 3,647, store after GRAPH 2,537, ASSESS verdicts 5,082,
+store + fm + recs 3,063, + plan 3,120, adapted 2,778, store only 2,565.
+
+S3 deviations:
+* `file_hashes` fails closed (above), so 3.11's derived class is features, embeddings, pair checks.
+* Derived damage found in a store without an index file covering it is caught again by the next open's rebuild by scan
+  (F-05) and resets the store. The CLI and the app never `close()` the store, so a small store usually has no index file;
+  the derived "absent + re-extract" path then only applies within the run that met the damage or when an index exists.
+  Safe (fail closed), costs a rescan; closing the store at the end of a run (writes the index) would avoid it — left for S6.
+* Damage met by ASSESS/PLAN after the pipeline is recorded in the session afterwards (`noteDamaged` after PLAN), not by
+  the pipeline itself.
+* The automatic retry re-runs the whole CLI invocation / `runInner` (scan included) on `Stores.create`, as designed; with a
+  `--halt-after-commits` kill the retry gets a new KillingBlobStore.
+* `ScenarioFixtureTest` has no store today (RiskFx builds a GraphView directly), so the "store parameter" round-trips the
+  fixture records through each store kind; it starts to matter with S5's store-backed GraphView.
+
+Next: S4 (compaction and space), design 3.10, 3.12 and the S4 list in section 6.
+
+Former "not done" list (all done in the second part above):
 1. `D_STORE_DAMAGED` session event with the damaged count (from `DiskStore.damagedKeys()`), and the `V2Runner`/CLI rule
    "StoreCorruption or failed open ⇒ one automatic retry with a fresh store" (the CLI already falls back to `create` on a
    failed open and sets `cfg.storeReset`, giving `D_STORE_RESET`).
@@ -249,3 +313,77 @@ Not done (next implementer starts here, in this order):
    (store level: `DiskStoreTest.indexMismatch`), pre-filled stale segment with a forced rebuild (store level: done), multi-run
    evolving tree (files added/removed/moved/modified between three runs) vs MemoryStore.
 4. `tools/v2eval/store_equal.sh <tree>` and `ScenarioFixtureTest` with a store parameter (5.2).
+
+## S4 — compaction and space (done)
+
+Exists (production MemoryStore paths unchanged; DiskStore still only via the CLI `--store disk`, tests and `ScaleRun`):
+* **Compaction** (`DiskStore.compact`, 3.10 + F-02/F-11): checked at the end of every checkpoint; trigger
+  garbage ≥ max(`Options.compactMinGarbage` = 64 MiB, live) and garbage above what the last compaction left (segment
+  headers), never with a damaged mark, a broken store or low space. Steps: truncate the target set's segments 1…hw and its
+  index file; every live record, table by table in key order, re-encoded (txn 0) into target segments (rotation at
+  `maxSegmentBytes`; a seq beyond the target hw is first raised in a manifest of the current gen, F-02 c); sync; in-memory
+  slots switched to the new locators; index file of the new set; manifest gen+1/set (commit point); truncate the old set
+  1…hw and its index. A damaged derived record met by the copy is dropped (it read as absent anyway, counted); a damaged
+  fail-closed record throws StoreCorruption (store marked damaged). `compactNow()` (= flush + compact) for tests.
+* **Base segments**: the HEADER of a compacted segment carries `"base":true`; replay/rebuild applies its frames directly
+  (they are committed by the manifest that names them), so a rebuild after a compaction never buffers the whole store as one
+  txn. `checkHeader` (gen/set/seq) applies as before.
+* **Space** (3.12): `v2.store.SpaceProbe` (`freeBytes()`, −1 unknown), `Options.space/reserveBytes (256 MiB)/
+  spaceCheckBytes (8 MiB)/finalAllowanceBytes (1 MiB)`. Checked after every `spaceCheckBytes` appended, at every new
+  segment and before a compaction. Below the reserve: `StoreLowSpace` (unchecked, message `D_LOW_STORAGE: …`; `put` cannot
+  throw a checked exception) and the store is low: further frames only within the final allowance, then refused. Compaction
+  skipped (counted) when free < live + reserve. `commit()` now clears its undo list only after the COMMIT frame was
+  written, so a COMMIT refused for space (or failed I/O) is undone by the caller's rollback.
+* `Pipeline.fail` adds session event `D_LOW_STORAGE` when the failure is a StoreLowSpace. CLI: StoreLowSpace outside a stage
+  ⇒ exit 3. `V2Runner`: message `V2Capacity.LOW_STORAGE`; `Stores.open/create(…, SpaceProbe)` wired from
+  `device.resources().sample().storageFreeBytes`; `CapacityGuard` runs the disk preflight when `STORE_KIND == DISK`
+  (inactive while MEMORY): `V2Capacity.diskNeeded(files)` = files × 8 KiB + 64 MiB + 256 MiB reserve,
+  `diskFits`, `notEnoughStorageMessage` ("Not enough free storage for v2's working data (about N MB needed)…").
+* `tools/v2eval/run_scale_tests.sh [s4-disk]` (new, not in run_tests): 100k DiskStore run, store files ≤ 2 × live + 64 MiB.
+
+Tests:
+* `DiskStoreTest` (115 checks): compaction of a store with 3× garbage equals the oracle, old set truncated, reopen from the
+  new index and by scan of the base segments equal, writes after it, a second compaction back to set a, reopen (index and
+  scan); **kill at every replace commit (after and before) and every truncate inside a compaction, each also with power
+  loss: 90/90 trials reopen exactly at the state and stay usable** (write, compact, reopen); damaged feature dropped and
+  counted, damaged files record fails closed. Space: puts stop with D_LOW_STORAGE within one check interval; rollback +
+  FAILED session + flush fit the allowance and are durable; then refused; appended bytes past the crossing ≤ check
+  interval + allowance + one frame; next open with space works; compaction skipped below live + reserve and runs above;
+  a store opened below the reserve refuses its first append.
+* `StoreOracleTest`: `compactMinGarbage` randomised {0, 4 KiB, 64 MiB} (0 = compaction at most checkpoints) and a forced
+  `compactNow()` every 50 ops. 2,000 seeds × 300 ops: 983,212 comparisons, 11,852 reopens (3,942 kills, 3,932 power
+  losses), 12,000 forced compactions, 0 failures (32 s).
+* `DiskKillTest` (19 checks): the kill loop is a method; new section "compaction kills" (`compactMinGarbage` 0, 64 KiB
+  segments; the probe run truncates > 10 times; store files ≤ 2 × live + 64 KiB after it). **200 + 200 trials: 200/200 equal
+  without and 200/200 with forced compaction** (66 with power loss each; 73 s).
+* `DiskSpaceTest` (new, 9 checks): CLI on the 300-file tree, fake probe below the reserve from the middle of T1's appends:
+  exit 3, `D_LOW_STORAGE`, no result file, appended past the crossing within the bound, session FAILED/durable with the
+  event, stopped in T1; space back ⇒ next run COMPLETED with removals and plan equal to clean. Preflight figures and message.
+* Mutation checks (scratch copies): base frames not applied on replay ⇒ DiskStoreTest "rebuild by scan of compacted
+  segments" fails; old set truncated before the manifest ⇒ compaction kills fail (74/90).
+
+Numbers:
+* run_tests: 40 suites, 0 failures (≈ 47 s). check_android_compile OK.
+* Scale test s4-disk (synth 100k, DiskStore, -Xmx2g): completes in 89 s; 2 compactions during the run; at the end store
+  files 265.4 MB (incl. a 22.7 MB index file) vs live 242.8 MB (2,428 B/file live, ≤ 2.6 KB target) ⇒ ≤ 2 × live + 64 MiB.
+* Dataset (both modes, `--target-bytes max`): CLI JSON without timings byte-identical to the HEAD 1e09e80 baseline for
+  memory and disk; phase-4/phase-5 outputs identical (exit 1, the known exposure FAIL; DDRR 0/178). Synth 10k: disk run
+  byte-identical (timings removed) to the HEAD memory baseline, kept for S5 at `<scratchpad>/v2out/head-synth10k/standard.json`
+  (`--store memory --target-bytes max --now 1792000000000` on `<scratchpad>/v2scale/tree-10000-0.3-7`).
+* Heap per file at 100k after S4: MemoryStore path unchanged (as S3: store after GRAPH 2,537, ASSESS peak 5,082, end
+  2,565). DiskStore (`run_scale.sh 100000 --store disk --profile`): after DISCOVER 150, T1 188, T2 284, T3 230, GRAPH (stage
+  referenced) 2,951, store after GRAPH 315, ASSESS verdicts 2,941, store + fm + recs 1,547, + plan 1,621, adapted 568, store
+  only at the end 303 B/file. The pipeline's working sets (S5) now dominate.
+
+Deviations:
+* Compacted segments carry no COMMIT frame (the design's step 2 says "then one COMMIT"): a single COMMIT would make a
+  rebuild-by-scan buffer every record's value as one txn (≈ 250 MB at 100k); the manifest naming the segments is the commit,
+  and the HEADER flag `base` says so.
+* `StoreLowSpace` is unchecked instead of `StoreException("D_LOW_STORAGE")` from `put` (the Table interface has no checked
+  exception); `commit()/flush()` turn it into `StoreException`. Pipeline turns a stage's StoreLowSpace into the FAILED path
+  as designed.
+* The disk preflight lives in `V2Runner.CapacityGuard` (inactive until S6 switches the kind); the CLI has none (its tests use
+  a fake probe for the in-run reserve). F-17 (count check inside DISCOVER) is still for S6.
+
+Next: S5 (streaming callers, design section 4 items 1–6 with the F-10 pins), one item at a time with golden equality on
+the dataset (`<scratchpad>/v2out/head-mem/` baseline), synth 10k and the fixtures.

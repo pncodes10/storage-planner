@@ -36,6 +36,18 @@ public final class V2Cli {
 
     /** In-process tests (DiskKillTest): replaces the state dir's BlobStore (e.g. by a killing or power-loss fake). */
     static java.util.function.Function<BlobStore, BlobStore> blobsHook;
+    /** In-process tests (DiskCorruptionTest): called after each stage returns, with its id and the store (F-07 injection). */
+    static java.util.function.BiConsumer<String, V2Store> afterStage;
+    /** In-process tests: false ⇒ a StoreCorruption propagates out of {@link #run} instead of the automatic retry. */
+    static boolean retryOnCorruption = true;
+    /** In-process tests: DiskStore tunables (e.g. an index file at every checkpoint); null = the defaults. */
+    static com.storageplanner.v2.store.DiskStore.Options diskOptions;
+
+    private static V2Store openStore(com.storageplanner.v2.store.Stores.Kind k, BlobStore b, long every, SystemClock c, boolean create) throws StoreException {
+        if (k == com.storageplanner.v2.store.Stores.Kind.DISK && diskOptions != null)
+            return create ? com.storageplanner.v2.store.DiskStore.create(b, every, c, diskOptions) : com.storageplanner.v2.store.DiskStore.open(b, every, c, diskOptions);
+        return create ? com.storageplanner.v2.store.Stores.create(k, b, every, c) : com.storageplanner.v2.store.Stores.open(k, b, every, c);
+    }
 
     public static void main(String[] args) {
         int rc = run(args, System.out, System.err);
@@ -55,6 +67,7 @@ public final class V2Cli {
      * message. No result JSON is written by a run that hit corruption.
      */
     public static int run(String[] args, PrintStream out, PrintStream err) {
+        if (!retryOnCorruption) return runOnce(args, out, err, false);
         try { return runOnce(args, out, err, false); }
         catch (com.storageplanner.v2.store.StoreCorruption e) {
             err.println("store damaged, retrying once with a fresh store: " + e.getMessage());
@@ -153,12 +166,12 @@ public final class V2Cli {
                 if (blobsHook != null) blobs = blobsHook.apply(blobs);
                 if (halt > 0) blobs = new KillingBlobStore(blobs).killAfterReplaceCommits(halt).haltProcess(true);
                 if (fresh) {
-                    store = com.storageplanner.v2.store.Stores.create(storeKind, blobs, snapEvery, clock);
+                    store = openStore(storeKind, blobs, snapEvery, clock, true);
                     cfg.storeReset = true;
-                } else try { store = com.storageplanner.v2.store.Stores.open(storeKind, blobs, snapEvery, clock); }
+                } else try { store = openStore(storeKind, blobs, snapEvery, clock, false); }
                 catch (StoreException e) {
                     err.println("store unreadable, starting fresh: " + e.getMessage());
-                    store = com.storageplanner.v2.store.Stores.create(storeKind, blobs, snapEvery, clock);
+                    store = openStore(storeKind, blobs, snapEvery, clock, true);
                     cfg.storeReset = true;
                 }
             } else if (storeKind == com.storageplanner.v2.store.Stores.Kind.DISK) {
@@ -187,6 +200,8 @@ public final class V2Cli {
         PipelineResult res;
         try {
             res = new Pipeline(dev, store, cfg, stages).run(null);
+        } catch (com.storageplanner.v2.store.StoreLowSpace e) {
+            err.println("store: " + e.getMessage()); return 3;
         } catch (StoreException e) {
             com.storageplanner.v2.store.StoreCorruption c = com.storageplanner.v2.store.Stores.corruption(e);
             if (c != null) throw c;
@@ -221,6 +236,12 @@ public final class V2Cli {
             }
             StageTimer.ms.put("ASSESS", (System.nanoTime() - ta) / 1000000L);
         }
+        // F-07: derived records found damaged by ASSESS/PLAN are counted in the session too (never for MemoryStore)
+        if (Pipeline.noteDamaged(store, res.session, clock.nowMillis())) {
+            try { store.scanSessions().put(res.session); store.flush(); }
+            catch (StoreException e) { err.println("store error: " + e.getMessage()); return 3; }
+            res.coverage.events = res.session.events; res.coverage.eventsDropped = res.session.eventsDropped;
+        }
         if (pairsOut != null) {
             try { PairsDump.write(store, gs, manifest, randomPairs, pairsOut, err); }
             catch (IOException e) { err.println("pairs: " + e); return 3; }
@@ -245,10 +266,13 @@ public final class V2Cli {
             err.println(String.format(Locale.ROOT, "memory: files=%d features=%d hashes=%d heapBefore=%d heapAfter=%d retainedPerFile=%.0f B snapshotBytes=%d snapshotPerFile=%.0f B",
                     nf, store.features().size(), store.hashes().size(), heapBefore, heapAfter, nf == 0 ? 0.0 : (heapAfter - heapBefore) / (double) nf, snap, nf == 0 ? 0.0 : snap / (double) nf));
         }
+        // built in memory first: a StoreCorruption while reading the store for the JSON leaves no partial result file
+        StringWriter sw = new StringWriter();
+        JsonWriter w = new JsonWriter(sw, pretty);
+        V2Json.writeResult(w, store, r.path, volumeId, opt, res.session, res.coverage, clock.nowMillis(), t);
+        sw.write('\n');
         try (Writer wr = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(outFile), StandardCharsets.UTF_8))) {
-            JsonWriter w = new JsonWriter(wr, pretty);
-            V2Json.writeResult(w, store, r.path, volumeId, opt, res.session, res.coverage, clock.nowMillis(), t);
-            wr.write('\n');
+            wr.write(sw.toString());
         } catch (IOException e) {
             err.println("cannot write " + outFile + ": " + e); return 3;
         }

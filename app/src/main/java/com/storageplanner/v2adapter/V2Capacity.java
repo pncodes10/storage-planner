@@ -44,6 +44,30 @@ public final class V2Capacity {
                 + "It stopped before reading them. Nothing was changed. Choose Classic (default) on the start screen and tap Analyse.", files, Math.max(0, limit));
     }
 
+    // ---- disk (PHASE_S_STORE 3.12, REVIEW_S F-11): only when the run uses the disk store
+
+    /** Worst case per file: live + garbage up to max(64 MiB, live) + a compaction copy of live (3 × 2.5 KiB), plus index files. */
+    public static final long DISK_BYTES_PER_FILE = 8L * 1024;
+    public static final long DISK_FIXED = 64L * 1024 * 1024;
+    /** The store never writes the device below this (DiskStore.Options.reserveBytes). */
+    public static final long LOW_SPACE_RESERVE = 256L * 1024 * 1024;
+
+    /** Free storage the run needs for this many file records (preflight right after DISCOVER). */
+    public static long diskNeeded(long files) { return Math.max(0, files) * DISK_BYTES_PER_FILE + DISK_FIXED + LOW_SPACE_RESERVE; }
+
+    /** Whether the run may go on; an unknown free size (−1) does not stop it (the in-run reserve check still applies). */
+    public static boolean diskFits(long files, long freeBytes) { return freeBytes < 0 || freeBytes >= diskNeeded(files); }
+
+    /** Shown when the preflight stops v2 before extraction. */
+    public static String notEnoughStorageMessage(long files) {
+        return String.format(Locale.ROOT, "Not enough free storage for v2's working data (about %,d MB needed). It stopped before reading the files. "
+                + "Nothing was changed.", (diskNeeded(files) + (1 << 20) - 1) >> 20);
+    }
+
+    /** Shown when the free storage fell below the reserve during the run (D_LOW_STORAGE). */
+    public static final String LOW_STORAGE = "v2 stopped because the phone's free storage fell below 256 MB while it was working. Nothing was changed. "
+            + "Free some space and run again.";
+
     /** Shown when the heap ran out anyway (last resort). */
     public static final String OUT_OF_MEMORY = "v2 ran out of memory: it cannot handle this many files yet. Nothing was changed. "
             + "Choose Classic (default) on the start screen and tap Analyse.";

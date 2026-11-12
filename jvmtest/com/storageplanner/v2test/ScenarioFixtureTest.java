@@ -10,9 +10,29 @@ public final class ScenarioFixtureTest {
     static boolean removal(Verdict v) { return v.action == Action.DELETE || v.action == Action.QUARANTINE; }
     static void expect(String name, Verdict v, Tier tier, String code) { T.eq(name + " tier", tier, v.tier); T.eq(name + " code", code, RiskFx.code(v)); }
 
+    /**
+     * PHASE_S_STORE 5.2: the fixtures run three times: records assessed directly, then through a MemoryStore and a DiskStore
+     * (RiskFx.storeKind); every assertion must hold each time and the store verdicts must equal the direct ones.
+     */
     public static int run(String[] args) {
+        int rc = 0;
+        RiskFx.storeMismatches = 0; RiskFx.storeVerdicts = 0;
+        try {
+            for (com.storageplanner.v2.store.Stores.Kind k : new com.storageplanner.v2.store.Stores.Kind[]{null,
+                    com.storageplanner.v2.store.Stores.Kind.MEMORY, com.storageplanner.v2.store.Stores.Kind.DISK}) {
+                RiskFx.storeKind = k;
+                rc |= runOnce(k == null ? "" : " [" + k + "]");
+            }
+        } finally { RiskFx.storeKind = null; }
+        T.section("store parameter");
+        System.out.println("  store verdicts compared with the direct ones: " + RiskFx.storeVerdicts + ", mismatches " + RiskFx.storeMismatches);
+        T.check("verdicts through MemoryStore and DiskStore equal the direct ones", RiskFx.storeVerdicts > 100 && RiskFx.storeMismatches == 0);
+        return rc | T.finish("ScenarioFixtureTest [stores]");
+    }
+
+    static int runOnce(String tag) {
         for (PresentationPolicy pol : new PresentationPolicy[]{PresentationPolicy.STANDARD, PresentationPolicy.AGGRESSIVE}) {
-            T.section("S01 " + pol.name);
+            T.section("S01 " + pol.name + tag);
             RiskFx x = new RiskFx();
             FileRecord blurry = x.file("DCIM/Camera/IMG_20211226_131543.jpg", "camera", "jpeg", 3 * MB); x.pixels(blurry, 0.01, 30); x.add(blurry);
             Verdict v = x.v(blurry, pol); expect("blurry family photo", v, null, null); T.check("no removal", !removal(v));
@@ -21,7 +41,7 @@ public final class ScenarioFixtureTest {
             T.check("pocket shot never SAFE/NO_LOSS", v.tier != Tier.SAFE && v.tier != Tier.NO_LOSS);
             T.check("pocket shot: YOUR_CALL only via Y_LOW_QUALITY", v.tier != Tier.YOUR_CALL || "Y_LOW_QUALITY".equals(RiskFx.code(v)));
 
-            T.section("S02 " + pol.name);
+            T.section("S02 " + pol.name + tag);
             x = new RiskFx();
             FileRecord st = x.add("Documents/Bank/Ayesha_Statement_2018_03.pdf", "document", "pdf", 200000);
             expect("old statement", x.v(st, pol), Tier.PROTECTED, "P_UNIQUE_RECORD");
@@ -41,7 +61,7 @@ public final class ScenarioFixtureTest {
             FileRecord old = x.file("Documents/Notes/old_letter.pdf", "document", "pdf", 5000); old.createdAt = RiskFx.NOW - 3650 * RiskFx.DAY; x.add(old);
             v = x.v(old, pol); T.check("10-year-old unique document not removed", !removal(v));
 
-            T.section("S03 " + pol.name);
+            T.section("S03 " + pol.name + tag);
             x = new RiskFx();
             FileRecord orig = x.add("DCIM/Camera/IMG_1.jpg", "camera", "jpeg", 3 * MB), copy = x.add("Pictures/IMG_1.jpg", "pictures", "jpeg", 3 * MB);
             x.exact(orig, copy, true);
@@ -51,7 +71,7 @@ public final class ScenarioFixtureTest {
             x.exact(u1, u2, false);
             expect("unverified exact copy", x.v(u2, pol), Tier.REVIEW, "R_UNCERTAIN_COPY");
 
-            T.section("S04 " + pol.name);
+            T.section("S04 " + pol.name + tag);
             x = new RiskFx();
             FileRecord eo = x.add("DCIM/Camera/IMG_3.jpg", "camera", "jpeg", 3 * MB), ed = x.add("Pictures/Edited/IMG_3_edit.jpg", "pictures", "jpeg", 2 * MB);
             x.edge(ed.fileId, eo.fileId, RelType.EDITED_FROM, Verification.VERIFIED, 0.9); x.group(NearGroupKind.EDIT_FAMILY, eo, ed);
@@ -62,7 +82,7 @@ public final class ScenarioFixtureTest {
             if (pol == PresentationPolicy.STANDARD) expect("burst sibling", v, Tier.REVIEW, "R_SIMILAR_SHOT");
             else T.check("burst sibling never SAFE/NO_LOSS", v.tier != Tier.SAFE && v.tier != Tier.NO_LOSS);
 
-            T.section("S05 " + pol.name);
+            T.section("S05 " + pol.name + tag);
             x = new RiskFx();
             FileRecord wa = x.add("WhatsApp/Media/WhatsApp Images/IMG-20210101-WA0001.jpg", "wa_image", "jpeg", 200000);
             v = x.v(wa, pol); T.eq("unique chat copy KEEP", null, v.tier);
@@ -73,7 +93,7 @@ public final class ScenarioFixtureTest {
             x.ce(co2, wc2, RelType.COMPRESSED_FROM, 0.95);
             v = x.v(wc2, pol); T.check("small chat copy never SAFE/NO_LOSS", v.tier != Tier.SAFE && v.tier != Tier.NO_LOSS);
 
-            T.section("S06 " + pol.name);
+            T.section("S06 " + pol.name + tag);
             x = new RiskFx();
             FileRecord a1 = x.file("Download/m.apk", "download", "apk", 40 * MB); x.apk(a1, "com.inst", InstallState.SAME_VERSION, Tri.TRUE); x.add(a1);
             expect("same version+signer", x.v(a1, pol), Tier.NO_LOSS, "N_INSTALLER_INSTALLED");
@@ -84,7 +104,7 @@ public final class ScenarioFixtureTest {
             FileRecord a4 = x.file("Download/beta.apk", "download", "apk", 40 * MB); x.apk(a4, "com.inst", InstallState.INSTALLED_OLDER, Tri.TRUE); x.add(a4);
             expect("newer than installed", x.v(a4, pol), Tier.REVIEW, "R_INSTALLER_NEWER");
 
-            T.section("S07 " + pol.name);
+            T.section("S07 " + pol.name + tag);
             x = new RiskFx();
             FileRecord ni = x.file("Download/Dict.apk", "download", "apk", 40 * MB); x.apk(ni, "com.gone", InstallState.NOT_INSTALLED, Tri.UNKNOWN); x.add(ni);
             expect("not installed", x.v(ni, pol), Tier.REVIEW, "R_INSTALLER_NOT_INSTALLED");
@@ -94,17 +114,17 @@ public final class ScenarioFixtureTest {
             FileRecord exe = x.add("Download/setup.exe", "download", "unknown", 5 * MB);
             T.check("exe never removed", !removal(x.v(exe, pol)));
 
-            T.section("S08 " + pol.name);
+            T.section("S08 " + pol.name + tag);
             x = new RiskFx();
             FileRecord vid = x.file("DCIM/Camera/VID_1.mp4", "camera", "mp4", 900 * MB); vid.extractionStatus = ExtractionStatus.PARTIAL; vid.extractionConfidence = 0.6; x.add(vid);
             v = x.v(vid, pol); T.eq("long video KEEP", null, v.tier); T.check("no transform", v.transform == null);
 
-            T.section("S09 " + pol.name);
+            T.section("S09 " + pol.name + tag);
             x = new RiskFx();
             FileRecord enc = x.file("Documents/locked.pdf", "document", "pdf", 90000); enc.integrity = Integrity.ENCRYPTED; x.add(enc);
             expect("encrypted pdf", x.v(enc, pol), Tier.REVIEW, "R_ENCRYPTED");
 
-            T.section("S10 " + pol.name);
+            T.section("S10 " + pol.name + tag);
             x = new RiskFx();
             FileRecord gz = x.file("Backups/Gallery_backup.zip", "user_other", "zip", 5 * MB); x.add(gz);
             ArchiveInfo ai = new ArchiveInfo(); ai.listingStatus = "OK"; ai.entries = new java.util.ArrayList<ArchiveEntry>(); x.feat(gz).archive = ai;
@@ -114,7 +134,7 @@ public final class ScenarioFixtureTest {
             T.check("corrupt evidence listed", v.assessment.recoveryEvidence.contains("x:b-" + p1.fileId + "-" + gz.fileId));
             expect("archive with corrupt entry", x.v(gz, pol), Tier.REVIEW, "R_ARCHIVE_UNSAFE");
 
-            T.section("S11 " + pol.name);
+            T.section("S11 " + pol.name + tag);
             x = new RiskFx();
             FileRecord z = x.file("Documents/Important_Papers.zip", "document", "zip", 2 * MB); x.add(z);
             ArchiveInfo zi = new ArchiveInfo(); zi.listingStatus = "OK"; zi.entries = new java.util.ArrayList<ArchiveEntry>();
@@ -128,6 +148,6 @@ public final class ScenarioFixtureTest {
             ArchiveInfo ti = new ArchiveInfo(); ti.listingStatus = "OK"; ti.pathTraversal = Tri.TRUE; x.feat(tz).archive = ti;
             expect("traversal zip", x.v(tz, pol), Tier.REVIEW, "R_ARCHIVE_UNSAFE");
         }
-        return T.finish("ScenarioFixtureTest");
+        return T.finish("ScenarioFixtureTest" + tag);
     }
 }

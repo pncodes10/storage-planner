@@ -52,7 +52,8 @@ import java.util.Map;
  * (today the body of {@code V2Runner.analyse}: ASSESS, recommendations, hash-on-demand, app subjects, PLAN, adapter; S5 moves
  * it to {@code V2Analysis} and this class then calls that). Prints used heap per phase.
  *
- * <pre>ScaleRun ROOT [--store memory] [--profile] [--histograms DIR] [--tables] [--no-adapter]</pre>
+ * <pre>ScaleRun ROOT [--store memory|disk] [--profile] [--histograms DIR] [--tables] [--no-adapter]</pre>
+ * {@code --store disk}: a DiskStore over a fresh directory under $TMPDIR (removed at the end); {@code --tables} is memory only.
  * Without --profile only the end-to-end time and the final line are printed (for runs under a hard -Xmx cap).
  * Exit 0 on success; an OutOfMemoryError propagates (exit 1, "OOM" on stderr).
  */
@@ -69,16 +70,33 @@ public final class ScaleRun {
             else if (a[i].equals("--tables")) { tables = true; profile = true; }
             else if (a[i].equals("--no-adapter")) adapter = false;
             else if (root == null) root = a[i];
-            else { System.err.println("usage: ScaleRun ROOT [--store memory] [--profile] [--histograms DIR] [--tables] [--no-adapter]"); System.exit(2); }
+            else { System.err.println("usage: ScaleRun ROOT [--store memory|disk] [--profile] [--histograms DIR] [--tables] [--no-adapter]"); System.exit(2); }
         }
         if (root == null) { System.err.println("ROOT missing"); System.exit(2); }
-        if (!store.equals("memory")) { System.err.println("--store " + store + ": not available yet (slice S2/S6)"); System.exit(2); }
+        if (!store.equals("memory") && !store.equals("disk")) { System.err.println("--store memory|disk"); System.exit(2); }
+        if (store.equals("disk") && tables) { System.err.println("--tables: memory store only"); System.exit(2); }
         if (histDir != null) new File(histDir).mkdirs();
+        java.nio.file.Path stateDir = null;
         try {
-            run(root, MemoryStore.volatileStore(), profile ? new HeapProfile(histDir, System.out) : null, tables, adapter, System.out);
+            V2Store st;
+            if (store.equals("disk")) {
+                stateDir = java.nio.file.Files.createTempDirectory("v2scale-ds");
+                st = com.storageplanner.v2.store.DiskStore.create(new DirBlobStore(stateDir), -1, new SystemClock(NOW));
+            } else st = MemoryStore.volatileStore();
+            run(root, st, profile ? new HeapProfile(histDir, System.out) : null, tables, adapter, System.out);
+            if (stateDir != null) {
+                long disk = 0;
+                for (File f : stateDir.toFile().listFiles()) disk += f.length();
+                com.storageplanner.v2.store.StoreStats ss = st.stats();
+                com.storageplanner.v2.store.DiskStore ds = (com.storageplanner.v2.store.DiskStore) st;
+                System.out.println("disk store: " + disk + " bytes on disk (all files), " + ss + " compactions=" + ds.compactions()
+                        + " skipped=" + ds.compactionsSkipped() + " liveBytes=" + ss.liveBytes + " fileBytes=" + disk);
+            }
         } catch (OutOfMemoryError e) {
             System.err.println("OOM: " + e.getMessage());
             System.exit(1);
+        } finally {
+            if (stateDir != null) { File[] fs = stateDir.toFile().listFiles(); if (fs != null) for (File f : fs) f.delete(); stateDir.toFile().delete(); }
         }
     }
 

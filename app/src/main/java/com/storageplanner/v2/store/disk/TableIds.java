@@ -33,7 +33,9 @@ public final class TableIds {
 
     /**
      * Derived per-file tables (3.11): a damaged record reads as absent, so the stage re-extracts it. Every other table
-     * fails closed.
+     * fails closed. {@code file_hashes} moved to the fail-closed row in S3 (the rule "a table whose test fails moves to the
+     * next row"): a hash damaged after T2 and read by GRAPH in the same run removes an exact-copy edge, and ASSESS then rates
+     * that copy NO_VERIFIED_BACKUP instead of VERIFIED_BACKUP (DiskCorruptionTest F-07).
      */
-    public static boolean derived(int id) { return id == FEATURES || id == HASHES || id == EMBEDDINGS || id == PAIR_CHECKS; }
+    public static boolean derived(int id) { return id == FEATURES || id == EMBEDDINGS || id == PAIR_CHECKS; }
 }

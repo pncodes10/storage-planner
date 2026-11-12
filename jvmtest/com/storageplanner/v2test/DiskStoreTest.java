@@ -622,6 +622,178 @@ public final class DiskStoreTest {
         T.check("damaged manifest refused", !opens(dm));
     }
 
+    // ------------------------------------------------------------------ S4: compaction and space
+
+    static String writeSome(MemoryStore m, DiskStore s, Random r, int n) throws StoreException {
+        for (int i = 0; i < n; i++) {
+            int id = r.nextInt(4) == 0 ? TableIds.FILES : 1 + r.nextInt(TableIds.COUNT);
+            Record rec = StoreOracleTest.make(id, r);
+            boolean rm = r.nextInt(5) == 0;
+            StoreOracleTest.write(m, id, rec, rm);
+            StoreOracleTest.write(s, id, rec, rm);
+        }
+        m.commit(); s.flush();
+        return StoreOracleTest.dump(m);
+    }
+
+    static boolean allEmpty(PowerLossBlobStore b, String prefix) {
+        for (String n : b.names()) if (n.startsWith(prefix) && b.bytes(n).length > 0) return false;
+        return true;
+    }
+
+    static void compaction() throws Exception {
+        T.section("S4 compaction");
+        DiskStore.Options o = small();
+        o.compactMinGarbage = 1L << 40;                 // only compactNow() in this section
+        PowerLossBlobStore base = new PowerLossBlobStore();
+        DiskStore s = DiskStore.create(base, 0, CLOCK, o);
+        MemoryStore m = MemoryStore.volatileStore();
+        Random r = new Random(17);
+        for (int round = 0; round < 6; round++) writeSome(m, s, r, 150);
+        StorePersistenceTest.fill(s, "C"); StorePersistenceTest.fill(m, "C"); m.commit(); s.flush();
+        String state = StoreOracleTest.dump(m);
+        T.eq("store equals the oracle before compaction", state, StoreOracleTest.dump(s));
+        StoreStats before = s.stats();
+        s.close();
+        PowerLossBlobStore pc = copy(base);
+        KillingBlobStore probe = new KillingBlobStore(pc);
+        DiskStore p = DiskStore.open(probe, 0, CLOCK, o);
+        int r0 = probe.replaceCommits(), t0 = probe.truncates();
+        T.check("compaction ran", p.compactNow() && p.compactions() == 1);
+        int reps = probe.replaceCommits() - r0, truncs = probe.truncates() - t0;
+        StoreStats after = p.stats();
+        T.check("garbage gone (" + before.garbageBytes + " → " + after.garbageBytes + " B, live " + before.liveBytes + " → " + after.liveBytes + ")",
+                before.garbageBytes > 3 * before.liveBytes && after.garbageBytes < after.liveBytes / 10 && after.liveBytes <= before.liveBytes);
+        T.eq("compacted store equals the oracle", state, StoreOracleTest.dump(p));
+        T.check("old set truncated (segments and index)", allEmpty(pc, "ds-a"));
+        DiskStore ri = DiskStore.open(copy(pc), 0, CLOCK, o);
+        T.check("reopen from the new index", ri.loadedFromIndex());
+        T.eq("reopen from the new index equals", state, StoreOracleTest.dump(ri));
+        PowerLossBlobStore noIdx = copy(pc);
+        for (String n : noIdx.names()) if (n.endsWith(".idx")) noIdx.setBytes(n, new byte[0]);
+        DiskStore rs = DiskStore.open(noIdx, 0, CLOCK, o);
+        T.check("index removed: rebuilt by scan of the base segments", !rs.loadedFromIndex());
+        T.eq("rebuild by scan of compacted segments equals", state, StoreOracleTest.dump(rs));
+        // writes after a compaction, a second compaction (back to set a), reopen
+        String state2 = writeSome(m, p, r, 200);
+        T.eq("writes after compaction", state2, StoreOracleTest.dump(p));
+        T.check("second compaction", p.compactNow() && allEmpty(pc, "ds-b"));
+        T.eq("after the second compaction", state2, StoreOracleTest.dump(p));
+        p.close();
+        T.eq("reopen after the second compaction", state2, StoreOracleTest.dump(DiskStore.open(copy(pc), 0, CLOCK, o)));
+        PowerLossBlobStore noIdx2 = copy(pc);
+        for (String n : noIdx2.names()) if (n.endsWith(".idx")) noIdx2.setBytes(n, new byte[0]);
+        T.eq("…and by scan", state2, StoreOracleTest.dump(DiskStore.open(noIdx2, 0, CLOCK, o)));
+
+        // kill at every replace and truncate inside a compaction (and with power loss): reopen = the state, then usable
+        T.check("compaction has replace (" + reps + ") and truncate (" + truncs + ") commits", reps >= 2 && truncs >= 3);
+        int trials = 0, ok = 0, killedN = 0;
+        Random rr = new Random(5);
+        for (int kind = 0; kind < 3; kind++) {
+            int max = kind == 2 ? truncs : reps;
+            for (int k = 1; k <= max; k++) for (int pl = 0; pl < 2; pl++) {
+                trials++;
+                PowerLossBlobStore c = copy(base);
+                KillingBlobStore kb = new KillingBlobStore(c);
+                if (kind == 0) kb.killAfterReplaceCommits(r0 + k); else if (kind == 1) kb.killBeforeReplaceCommit(r0 + k); else kb.killBeforeTruncate(t0 + k);
+                DiskStore d = DiskStore.open(kb, 0, CLOCK, o);
+                boolean killed = false;
+                try { d.compactNow(); } catch (SimulatedKill e) { killed = true; }
+                if (killed) killedN++;
+                if (pl == 1) c.powerLoss(rr, rr.nextBoolean(), rr.nextBoolean());
+                boolean good;
+                try {
+                    DiskStore re = DiskStore.open(c, 0, CLOCK, o);
+                    good = state.equals(StoreOracleTest.dump(re));
+                    re.files().put(StoreContractTest.file("after-kill", "x/after", 3, Presence.PRESENT, 1));
+                    re.compactNow();
+                    re.close();
+                    DiskStore again = DiskStore.open(c, 0, CLOCK, o);
+                    good = good && again.files().get("after-kill") != null && again.files().size() == re.files().size();
+                } catch (StoreException e) { good = false; System.out.println("  compaction kill " + kind + "/" + k + ": " + e.getMessage()); }
+                if (good) ok++;
+                else System.out.println("  compaction kill kind " + kind + " k " + k + " power " + pl + ": state differs");
+            }
+        }
+        T.eq("compaction kills: reopened store equals the state and stays usable", trials, ok);
+        T.eq("every compaction trial was killed", trials, killedN);
+
+        // a damaged derived record is dropped by the compaction (it reads as absent anyway); a damaged files record fails closed
+        PowerLossBlobStore dd = copy(pc);
+        DiskStore d0 = DiskStore.open(dd, 0, CLOCK, o);
+        String fk = null, xk = null;
+        for (String k : d0.features().keys()) { fk = k; break; }
+        for (String k : d0.files().keys()) { xk = k; break; }
+        long[] lf = d0.debugLocator(TableIds.FEATURES, fk), lx = d0.debugLocator(TableIds.FILES, xk);
+        PowerLossBlobStore dx = copy(dd);
+        dd.flip(d0.debugSegmentName(lf[0]), (lf[0] & 0xFFFFFFFFFFFFL) + lf[2] / 2, 4);
+        dx.flip(d0.debugSegmentName(lx[0]), (lx[0] & 0xFFFFFFFFFFFFL) + lx[2] / 2, 4);
+        DiskStore d1 = DiskStore.open(dd, 0, CLOCK, o);
+        int nf = d1.features().size();
+        T.check("damaged feature dropped by compaction and counted", d1.compactNow() && d1.features().size() == nf - 1 && d1.stats().damaged == 1
+                && d1.features().get(fk) == null);
+        DiskStore d2 = DiskStore.open(dx, 0, CLOCK, o);
+        boolean threw = false;
+        try { d2.compactNow(); } catch (StoreCorruption e) { threw = true; }
+        T.check("damaged files record: compaction fails closed, next open refuses", threw && !opens(dx));
+    }
+
+    /** 3.12: below the reserve the store stops appending, then accepts only the final allowance; compaction is skipped. */
+    static void space() throws Exception {
+        T.section("S4 space");
+        final long[] free = {1L << 40};
+        DiskStore.Options o = small();
+        o.space = new SpaceProbe() { public long freeBytes() { return free[0]; } };
+        o.reserveBytes = 1 << 20; o.spaceCheckBytes = 2048; o.finalAllowanceBytes = 4096; o.compactMinGarbage = 1L << 40;
+        PowerLossBlobStore b = new PowerLossBlobStore();
+        KillingBlobStore kb = new KillingBlobStore(b);
+        DiskStore s = DiskStore.create(kb, 0, CLOCK, o);
+        MemoryStore m = MemoryStore.volatileStore();
+        Random r = new Random(3);
+        writeSome(m, s, r, 100);
+        String durableState = StoreOracleTest.dump(m);
+        free[0] = o.reserveBytes - 1;
+        long crossing = kb.appendedBytes();
+        boolean low = false;
+        int n = 0;
+        try {
+            for (n = 0; n < 100000; n++) s.files().put(StoreContractTest.file("low" + n, "low/" + n, n, Presence.PRESENT, 1));
+        } catch (StoreLowSpace e) { low = true; }
+        T.check("puts stop with D_LOW_STORAGE after at most one check interval (" + n + " puts)", low && s.lowSpace()
+                && kb.appendedBytes() - crossing <= o.spaceCheckBytes + 4096);
+        // Pipeline.fail: rollback, the FAILED session, flush — within the final allowance
+        s.rollback();
+        ScanSession ss = new ScanSession(); ss.scanId = 7; ss.kind = ScanKind.FULL; ss.state = ScanState.FAILED; ss.lastError = "D_LOW_STORAGE";
+        s.scanSessions().put(ss);
+        s.flush();
+        long afterFail = kb.appendedBytes();
+        boolean refused = false;
+        try { for (int i = 0; i < 1000; i++) s.files().put(StoreContractTest.file("more" + i, "more/" + i, i, Presence.PRESENT, 1)); }
+        catch (StoreLowSpace e) { refused = true; }
+        T.check("then only the final allowance: appended past the crossing ≤ check interval + allowance + one frame",
+                refused && kb.appendedBytes() - crossing <= o.spaceCheckBytes + o.finalAllowanceBytes + 4096 && afterFail > crossing);
+        DiskStore re = DiskStore.open(b, 0, CLOCK, o);
+        ScanSession got = re.scanSessions().get(ScanSession.keyOf(7));
+        T.check("the FAILED session is durable; the rolled-back puts are not", got != null && got.state == ScanState.FAILED && re.files().get("low0") == null);
+        T.check("durable state = before the crossing + the session", re.scanSessions().size() >= 1 && re.files().size() == m.files().size());
+        free[0] = 1L << 40;
+        DiskStore ok = DiskStore.open(b, 0, CLOCK, o);
+        ok.files().put(StoreContractTest.file("later", "later/x", 1, Presence.PRESENT, 1));
+        ok.flush();
+        T.check("space back: the next open works", DiskStore.open(b, 0, CLOCK, o).files().get("later") != null);
+        // compaction skipped when free < live + reserve
+        free[0] = o.reserveBytes + ok.stats().liveBytes - 1;
+        T.check("compaction skipped below live + reserve", !ok.compactNow() && ok.compactionsSkipped() == 1 && ok.compactions() == 0);
+        free[0] = o.reserveBytes + ok.stats().liveBytes + 1;
+        T.check("compaction runs with live + reserve free", ok.compactNow() && ok.compactions() == 1);
+        // a store that starts below the reserve refuses its first append
+        free[0] = 10;
+        DiskStore st = DiskStore.open(b, 0, CLOCK, o);
+        boolean first = false;
+        try { st.files().put(StoreContractTest.file("x0", "x/0", 1, Presence.PRESENT, 1)); } catch (StoreLowSpace e) { first = true; }
+        T.check("below the reserve at open: the first append refused", first);
+    }
+
     // ------------------------------------------------------------------ F-03 in the store
 
     static void nonBmpOrder() throws Exception {
@@ -665,6 +837,8 @@ public final class DiskStoreTest {
         wrongRecord();
         damage();
         nonBmpOrder();
+        compaction();
+        space();
         return T.finish("DiskStoreTest");
     }
 

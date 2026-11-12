@@ -133,6 +133,8 @@ public final class PowerLossBlobStore implements BlobStore {
     /** Direct access for corruption injection. */
     public synchronized byte[] bytes(String name) { F x = f(name, false); return x == null ? null : Arrays.copyOf(x.data, x.len); }
     public synchronized void setBytes(String name, byte[] b) { F x = new F(); x.write(b, 0, b.length); x.synced = x.len; x.durableExists = true; files.put(name, x); }
+    /** Flips bits of one byte in place (lengths and sync state unchanged): damage under an open store (F-07). */
+    public synchronized void flip(String name, long pos, int mask) { F x = f(name, false); x.data[(int) pos] ^= (byte) mask; }
     public synchronized List<String> names() { return new ArrayList<String>(files.keySet()); }
     public synchronized int replaces() { return replaces; }
 }

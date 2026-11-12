@@ -140,18 +140,30 @@ public final class Pipeline {
     }
 
     /**
-     * PHASE_S_STORE 3.11 / F-07: derived records (features, hashes, embeddings, pair checks) found damaged during this run
+     * PHASE_S_STORE 3.11 / F-07: derived records (features, embeddings, pair checks) found damaged during this run
      * read as absent; the session records how many, so the coverage report shows the result rests on re-extracted or unknown
      * data. One event per session (detail = the store's running count); MemoryStore never reports damage.
      */
-    private void noteDamaged(ScanSession session, Clock clock) {
+    private void noteDamaged(ScanSession session, Clock clock) { noteDamaged(store, session, clock.nowMillis()); }
+
+    /**
+     * The same after the pipeline (ASSESS/PLAN read features too): updates the session's D_STORE_DAMAGED event in memory and
+     * returns true when it changed; the caller puts the session and flushes. Nothing happens while the store saw no damage.
+     */
+    public static boolean noteDamaged(V2Store store, ScanSession session, long now) {
         long d = store.stats().damaged;
-        if (d <= 0) return;
+        if (d <= 0 || session == null) return false;
+        String det = Long.toString(d);
         for (int i = session.events.size() - 1; i >= 0; i--) {
             com.storageplanner.v2.model.ScanEvent e = session.events.get(i);
-            if ("D_STORE_DAMAGED".equals(e.code)) { session.events.remove(i); break; }
+            if ("D_STORE_DAMAGED".equals(e.code)) {
+                if (det.equals(e.detail)) return false;
+                session.events.remove(i);
+                break;
+            }
         }
-        session.event(clock.nowMillis(), "D_STORE_DAMAGED", null, null, Long.toString(d));
+        session.event(now, "D_STORE_DAMAGED", null, null, det);
+        return true;
     }
 
     /** Uncommitted work is dropped; the committed session is marked FAILED and made durable. */
@@ -161,6 +173,8 @@ public final class Pipeline {
         if (s == null) return;
         s.state = ScanState.FAILED;
         s.lastError = Text.truncate(e.getClass().getSimpleName() + ": " + e.getMessage(), 200);
+        if (com.storageplanner.v2.store.StoreLowSpace.in(e) != null)       // 3.12: the run stopped at the storage reserve
+            s.event(device.clock().nowMillis(), com.storageplanner.v2.store.StoreLowSpace.CODE, null, null, null);
         s.endedAt = device.clock().nowMillis();
         store.scanSessions().put(s);
         store.flush();

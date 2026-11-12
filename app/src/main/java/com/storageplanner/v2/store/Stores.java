@@ -22,6 +22,20 @@ public final class Stores {
         return null;
     }
 
+    /** As {@link #open(Kind, BlobStore, long, Clock)}, with a free-space probe for DiskStore (3.12); MemoryStore ignores it. */
+    public static V2Store open(Kind kind, BlobStore blobs, long checkpointEveryMs, Clock clock, SpaceProbe space) throws StoreException {
+        if (kind != Kind.DISK) return MemoryStore.open(blobs, checkpointEveryMs, clock);
+        DiskStore.Options o = new DiskStore.Options(); o.space = space;
+        return DiskStore.open(blobs, checkpointEveryMs, clock, o);
+    }
+
+    /** As {@link #create(Kind, BlobStore, long, Clock)}, with a free-space probe for DiskStore. */
+    public static V2Store create(Kind kind, BlobStore blobs, long checkpointEveryMs, Clock clock, SpaceProbe space) throws StoreException {
+        if (kind != Kind.DISK) return MemoryStore.create(blobs, checkpointEveryMs, clock);
+        DiskStore.Options o = new DiskStore.Options(); o.space = space;
+        return DiskStore.create(blobs, checkpointEveryMs, clock, o);
+    }
+
     /** An empty persistent store of this kind (after a reset). */
     public static V2Store create(Kind kind, BlobStore blobs, long checkpointEveryMs, Clock clock) throws StoreException {
         return kind == Kind.DISK ? DiskStore.create(blobs, checkpointEveryMs, clock) : MemoryStore.create(blobs, checkpointEveryMs, clock);

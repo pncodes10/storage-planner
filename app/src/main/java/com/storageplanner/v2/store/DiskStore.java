@@ -39,7 +39,7 @@ import java.util.zip.CheckedOutputStream;
  * <p>
  * Safety rules: every read verifies the frame it got (CRC, type PUT, table, key bytes, value hash, decoded record key);
  * a mismatch on a CRC-valid frame is a locator bug and throws {@link StoreCorruption} for every table (F-04). A damaged
- * frame of a derived table (features, hashes, embeddings, pair checks) reads as absent and is counted; of any other
+ * frame of a derived table (features, embeddings, pair checks) reads as absent and is counted; of any other
  * table it throws {@link StoreCorruption} and marks the manifest damaged, so the next open refuses (3.11). Damage inside
  * the durable range at open fails the open (F-05). Single writer; every public method synchronizes on the store.
  */
@@ -62,6 +62,16 @@ public final class DiskStore implements V2Store {
         public long lruBytes = 8L << 20;
         /** Write the index file at close() (3.4). */
         public boolean indexAtClose = true;
+        /** Compaction trigger, checked at every checkpoint (3.10, F-11): garbage ≥ max(compactMinGarbage, live). */
+        public long compactMinGarbage = 64L << 20;
+        /** Free space of the store's partition (3.12); null = no space checks. */
+        public SpaceProbe space;
+        /** Never write the device below this (3.12; LOW_SPACE_RESERVE). */
+        public long reserveBytes = 256L << 20;
+        /** Free space is checked after this many appended bytes, at each new segment and before a compaction. */
+        public long spaceCheckBytes = 8L << 20;
+        /** After the reserve was crossed, only this many more bytes of frames (Pipeline.fail's FAILED session). */
+        public long finalAllowanceBytes = 1L << 20;
     }
 
     final Object lock = this;
@@ -112,6 +122,12 @@ public final class DiskStore implements V2Store {
     private boolean loadedFromIndex;
     private boolean damagedMark;             // fail-closed damage seen: every manifest from now on says damaged:true
     private final TreeSet<String> damagedKeys = new TreeSet<String>();
+    // space (3.12) and compaction (3.10)
+    private long sinceSpaceCheck;
+    private boolean lowSpace;
+    private long lowSpaceUsed;
+    private long baseGarbage;                // garbage right after the last compaction (segment headers): never a trigger
+    private int compactions, compactionsSkipped;
 
     private static final class Undo {
         final DTable<?> t; final String key; final boolean existed; final long loc, hash; final int flen;
@@ -305,6 +321,11 @@ public final class DiskStore implements V2Store {
         undo.clear(); txnFrames = 0; dirty = false;
     }
 
+    private static boolean isBase(Frame h) {
+        try { return Json.bool(Json.parseObject(new String(h.val, StandardCharsets.UTF_8)), "base", false); }
+        catch (JsonException e) { return false; }
+    }
+
     private void checkHeader(Frame h, Manifest m, int seq) throws StoreException {
         if (h.type != Frame.HEADER) throw new StoreException("segment " + seq + " does not start with a HEADER");
         Map<String, Object> j;
@@ -339,9 +360,10 @@ public final class DiskStore implements V2Store {
             if (rr == null) throw new StoreException("segment missing: " + sg.name);
             try {
                 SegmentReader r = new SegmentReader(rr, 1 << 16);
-                if (pos == 0) {
-                    try { pos = r.readAt(0, sg.limit).length; } catch (FrameException e) { throw new StoreException("bad header: " + e.getMessage()); }
-                }
+                Frame hf;
+                try { hf = r.readAt(0, sg.limit); } catch (FrameException e) { throw new StoreException("bad header: " + e.getMessage()); }
+                boolean base = isBase(hf);              // a compacted segment: its frames are committed by the manifest
+                if (pos == 0) pos = hf.length;
                 while (pos < sg.limit) {
                     Frame f;
                     try { f = r.readAt(pos, sg.limit); }
@@ -350,11 +372,13 @@ public final class DiskStore implements V2Store {
                     switch (f.type) {
                         case Frame.PUT:
                         case Frame.DEL: {
+                            boolean secondary = byId[f.table].hasSecondary();
+                            Change ch = new Change(f.table, f.key, f.type == Frame.PUT, l, f.type == Frame.PUT ? fnv(f.val) : 0, f.length,
+                                    f.type == Frame.PUT && secondary ? f.val : null);
+                            if (base) { apply(ch); break; }
                             ArrayList<Change> c = pending.get(f.txn);
                             if (c == null) pending.put(f.txn, c = new ArrayList<Change>());
-                            boolean secondary = byId[f.table].hasSecondary();
-                            c.add(new Change(f.table, f.key, f.type == Frame.PUT, l, f.type == Frame.PUT ? fnv(f.val) : 0, f.length,
-                                    f.type == Frame.PUT && secondary ? f.val : null));
+                            c.add(ch);
                             break;
                         }
                         case Frame.COMMIT: {
@@ -470,11 +494,11 @@ public final class DiskStore implements V2Store {
     }
 
     /** Writes ds-<set>.idx covering the current lengths; the caller writes the manifest naming it right after (F-01 rule 3). */
-    private void writeIndex() throws IOException {
+    private void writeIndex(long gen, String set) throws IOException {
         long seqNo = idxSeq + 1;
         final TreeMap<Integer, Long> cv = new TreeMap<Integer, Long>();
         for (Seg sg : segs.values()) cv.put(sg.seq, sg.seq == writerSeq ? writer.length() : sg.limit);
-        String name = idxName(durable.set);
+        String name = idxName(set);
         BlobStore.AtomicWrite aw = blobs.replace(name);
         boolean ok = false;
         try {
@@ -482,7 +506,7 @@ public final class DiskStore implements V2Store {
             final DataOutputStream out = new DataOutputStream(co);
             out.write(IDX_MAGIC);
             out.writeInt(IDX_VERSION);
-            out.writeLong(durable.gen);
+            out.writeLong(gen);
             out.writeLong(seqNo);
             out.writeInt(cv.size());
             for (Map.Entry<Integer, Long> e : cv.entrySet()) { out.writeInt(e.getKey()); out.writeLong(e.getValue()); }
@@ -671,7 +695,7 @@ public final class DiskStore implements V2Store {
             m.live = liveBytes; m.garbage = disk - liveBytes;
             long tail = uncoveredTail();
             if (tail > 0 && (forceIndex || tail > opt.indexTailBytes)) {
-                writeIndex();
+                writeIndex(m.gen, m.set);
                 m.idxName = idxName(m.set); m.idxSeq = idxSeq; m.idxCrc = idxCrc;
             } else if (idxValid) {
                 m.idxName = idxName(m.set); m.idxSeq = idxSeq; m.idxCrc = idxCrc;
@@ -680,6 +704,7 @@ public final class DiskStore implements V2Store {
             }
             writeManifest(blobs, m);
             durable = m;
+            if (compactionDue()) compact();            // F-11: at any checkpoint where the trigger holds
         } catch (IOException e) {
             broken = true;
             throw new StoreException("checkpoint failed: " + e, e);
@@ -693,12 +718,14 @@ public final class DiskStore implements V2Store {
 
     public synchronized void commit() throws StoreException {
         if (broken) throw new StoreException("store write failed earlier");
-        undo.clear();
         commitSeq++;
         if (txnFrames > 0) {
+            // a COMMIT that cannot be written leaves the txn open (undo kept), so the caller's rollback undoes it
             try { append(Frame.commit(txn, commitSeq)); }
-            catch (StoreCorruption e) { throw new StoreException(e.getMessage(), e); }
+            catch (StoreCorruption e) { commitSeq--; throw new StoreException(e.getMessage(), e); }
+            catch (StoreLowSpace e) { commitSeq--; throw new StoreException(e.getMessage(), e); }
         }
+        undo.clear();
         txnFrames = 0;
         txn = txnNext++;
         if (!dirty) return;
@@ -769,9 +796,17 @@ public final class DiskStore implements V2Store {
 
     private long append(byte[] frame) {
         if (broken) throw new StoreCorruption("store write failed earlier");
+        if (lowSpace) {
+            if (lowSpaceUsed + frame.length > opt.finalAllowanceBytes) throw new StoreLowSpace("the final allowance after the reserve is used up");
+            lowSpaceUsed += frame.length;
+        } else if (opt.space != null && sinceSpaceCheck >= opt.spaceCheckBytes) {
+            sinceSpaceCheck = 0;
+            checkSpace();
+        }
         try {
             if (writer == null) startSegment();
             long pos = writer.append(frame);
+            sinceSpaceCheck += frame.length;
             dirty = true;
             return ((long) writerSeq << 48) | pos;
         } catch (IOException e) {
@@ -782,6 +817,7 @@ public final class DiskStore implements V2Store {
 
     /** Starts the next segment: raise the high-water mark in the manifest first (F-02 c), then truncate + HEADER (F-02 a). */
     private void startSegment() throws IOException {
+        if (opt.space != null && !lowSpace) checkSpace();
         int next = segs.isEmpty() ? 1 : segs.lastKey() + 1;
         if (next > 0xFFFF) throw new IOException("segment numbers exhausted");
         if (next > hwOf(durable)) {
@@ -793,11 +829,138 @@ public final class DiskStore implements V2Store {
         String name = segName(durable.set, next);
         SegmentReader old = readers.remove(next);
         if (old != null) old.close();
-        String header = "{\"version\":" + VERSION + ",\"schema\":" + schemaOnDisk + ",\"gen\":" + durable.gen + ",\"set\":\"" + durable.set
-                + "\",\"seq\":" + next + ",\"epoch\":" + durable.commitSeq + "}";
-        writer = SegmentWriter.start(blobs, name, header);
+        writer = SegmentWriter.start(blobs, name, header(durable.gen, durable.set, next, durable.commitSeq, false));
         writerSeq = next;
         segs.put(next, new Seg(next, name, 0));
+    }
+
+    private String header(long gen, String set, int seq, long epoch, boolean base) {
+        return "{\"version\":" + VERSION + ",\"schema\":" + schemaOnDisk + ",\"gen\":" + gen + ",\"set\":\"" + set
+                + "\",\"seq\":" + seq + ",\"epoch\":" + epoch + (base ? ",\"base\":true" : "") + "}";
+    }
+
+    /** Below the reserve: no more appends except the final allowance (3.12). */
+    private void checkSpace() {
+        long free = opt.space.freeBytes();
+        if (free >= 0 && free < opt.reserveBytes) {
+            lowSpace = true;
+            throw new StoreLowSpace(free + " bytes free, below the reserve of " + opt.reserveBytes);
+        }
+    }
+
+    // ================================================================ compaction (3.10)
+
+    private long diskBytes() {
+        long d = 0;
+        for (Seg sg : segs.values()) d += sg.seq == writerSeq ? writer.length() : sg.limit;
+        return d;
+    }
+
+    private boolean compactionDue() {
+        long garbage = diskBytes() - liveBytes;
+        return !damagedMark && !broken && !lowSpace && garbage > baseGarbage && garbage >= Math.max(opt.compactMinGarbage, liveBytes);
+    }
+
+    /** flush(), then compact now unless free space forbids it (tests; the store compacts by itself at checkpoints). */
+    public synchronized boolean compactNow() throws StoreException {
+        flush();
+        if (damagedMark || broken || lowSpace) return false;
+        try { return compact(); }
+        catch (IOException e) { broken = true; throw new StoreException("compaction failed: " + e, e); }
+    }
+
+    /**
+     * Generation G → G+1, set {@code from} → {@code to}, at a checkpoint (commit boundary, nothing pending): (1) truncate
+     * the target set's segments up to its high-water mark and its index file; (2) every live record, table by table in key
+     * order, into new target segments whose HEADER says {@code "base":true} (their frames are committed by the manifest that
+     * names them, so no COMMIT frames); (3) sync, index file; (4) manifest gen+1/set: the commit point; (5) truncate the old
+     * set. A crash before (4) leaves gen G intact; after it, stale old-set files are truncated by the next compaction or reset.
+     * Skipped when free space is below live + reserve.
+     */
+    private boolean compact() throws IOException {
+        if (opt.space != null) {
+            long free = opt.space.freeBytes();
+            if (free >= 0 && free < liveBytes + opt.reserveBytes) { compactionsSkipped++; return false; }
+        }
+        String from = durable.set, to = "a".equals(from) ? "b" : "a";
+        long gen = durable.gen + 1;
+        closeWriter();
+        int hwTo = "a".equals(to) ? durable.hwA : durable.hwB, hwFrom = hwOf(durable);
+        for (int i = 1; i <= hwTo; i++) truncateIfNonEmpty(blobs, segName(to, i));
+        truncateIfNonEmpty(blobs, idxName(to));
+        TreeMap<Integer, Seg> ns = new TreeMap<Integer, Seg>();
+        int[] moved = new int[Math.max(16, slotTop)];
+        long[] nl = new long[moved.length];
+        int[] nlen = new int[moved.length];
+        int nm = 0;
+        ArrayList<Object[]> dropped = new ArrayList<Object[]>();
+        SegmentWriter w = null;
+        int seq = 0;
+        long live = 0;
+        try {
+            for (int id = 1; id <= TableIds.COUNT; id++) {
+                DTable<?> t = byId[id];
+                for (String key : t.prim.keys()) {
+                    int slot = t.prim.get(key);
+                    Frame f = verifiedFrame(t, key, slot);
+                    if (f == null) { dropped.add(new Object[]{t, key}); continue; }   // damaged derived record: absent
+                    byte[] fr = Frame.encode(Frame.PUT, id, 0, f.key, f.val);
+                    if (w == null || (w.length() > Frame.MIN_FRAME * 4L && w.length() + fr.length > opt.maxSegmentBytes)) {
+                        if (w != null) { w.sync(); ns.get(seq).limit = w.length(); w.close(); w = null; }
+                        seq++;
+                        if (seq > 0xFFFF) throw new IOException("segment numbers exhausted");
+                        if (seq > hwTo) {                    // F-02 c: raise the target set's hw in a manifest first
+                            Manifest hm = durable.copy();
+                            if ("a".equals(to)) hm.hwA = seq; else hm.hwB = seq;
+                            writeManifest(blobs, hm);
+                            durable = hm;
+                            hwTo = seq;
+                        }
+                        String name = segName(to, seq);
+                        w = SegmentWriter.start(blobs, name, header(gen, to, seq, commitSeq, true));
+                        ns.put(seq, new Seg(seq, name, 0));
+                    }
+                    long pos = w.append(fr);
+                    moved[nm] = slot; nl[nm] = ((long) seq << 48) | pos; nlen[nm] = fr.length; nm++;
+                    live += fr.length;
+                }
+            }
+            if (w != null) { w.sync(); ns.get(seq).limit = w.length(); w.close(); w = null; }
+        } finally {
+            if (w != null) try { w.close(); } catch (IOException ignored) { /* the compaction failed anyway */ }
+        }
+        // the new generation in memory (the old segments stay intact until step 5, so a failure below leaves gen G durable)
+        for (int i = 0; i < nm; i++) setSlot(moved[i], nl[i], sHash(moved[i]), nlen[i]);
+        for (Object[] d : dropped) {
+            DTable<?> t = (DTable<?>) d[0];
+            int slot = t.prim.remove((String) d[1]);
+            if (slot >= 0) freeSlot(slot);
+        }
+        closeReaders();
+        segs.clear();
+        segs.putAll(ns);
+        covers.clear();
+        idxValid = false;
+        liveBytes = live;
+        Manifest m = durable.copy();
+        m.gen = gen; m.set = to;
+        if ("a".equals(to)) m.hwA = Math.max(m.hwA, seq); else m.hwB = Math.max(m.hwB, seq);
+        m.segments = new ArrayList<Manifest.SegEntry>();
+        long disk = 0;
+        for (Seg sg : segs.values()) { m.segments.add(new Manifest.SegEntry(sg.name, sg.seq, sg.limit)); disk += sg.limit; }
+        m.live = live; m.garbage = disk - live; m.damaged = false;
+        m.idxName = null;
+        if (!segs.isEmpty()) {
+            writeIndex(gen, to);
+            m.idxName = idxName(to); m.idxSeq = idxSeq; m.idxCrc = idxCrc;
+        }
+        writeManifest(blobs, m);                     // the commit point
+        durable = m;
+        for (int i = 1; i <= hwFrom; i++) truncateIfNonEmpty(blobs, segName(from, i));
+        truncateIfNonEmpty(blobs, idxName(from));
+        baseGarbage = disk - live;
+        compactions++;
+        return true;
     }
 
     // ================================================================ read path (3.6, F-04)
@@ -960,6 +1123,11 @@ public final class DiskStore implements V2Store {
     public synchronized long commitSeq() { return commitSeq; }
     public synchronized long changedPutsSinceOpen() { return changedPuts; }
     public synchronized int checkpointsWritten() { return checkpoints; }
+    /** Compactions done / skipped for lack of free space since open (3.10, 3.12). */
+    public synchronized int compactions() { return compactions; }
+    public synchronized int compactionsSkipped() { return compactionsSkipped; }
+    /** Whether the free space fell below the reserve (3.12); then only the final allowance is accepted. */
+    public synchronized boolean lowSpace() { return lowSpace; }
     /** Whether open() used the index file (else it rebuilt the indexes by scanning the log). */
     public synchronized boolean loadedFromIndex() { return loadedFromIndex; }
     /** Keys of derived tables found damaged since open ("table\0key"). */
@@ -990,6 +1158,12 @@ public final class DiskStore implements V2Store {
     public synchronized long[] debugLocator(int tableId, String key) {
         int s = byId[tableId].prim.get(key);
         return s < 0 ? null : new long[]{sLoc(s), sHash(s), sLen(s)};
+    }
+
+    /** Tests only (damage injection): the blob name of the segment a locator points into, or null. */
+    public synchronized String debugSegmentName(long loc) {
+        Seg s = segs.get((int) (loc >>> 48));
+        return s == null ? null : s.name;
     }
 
     /** Tests only (F-04 injection): points key's slot at another locator, as a locator bug would. */
