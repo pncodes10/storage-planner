@@ -20,7 +20,7 @@ RELS = {"EXACT_DUPLICATE", "VISUALLY_SIMILAR", "EDITED_FROM", "COMPRESSED_FROM",
         "CONTAINED_IN", "COMPANION_OF", "VERSION_OF", "THUMBNAIL_OF"}
 IMP = {"critical", "high", "medium", "low", "disposable"}
 META = {"manifest.json", "scenarios.json", ".v2dataset", "installed_apps.json", "mutations.json",
-        "pdf_passwords.json", "backup_manifest.json", "mutate.py"}
+        "pdf_passwords.json", "backup_manifest.json", "mutate.py", ".rebuilt_ok"}
 
 
 def sha(p):
@@ -29,6 +29,36 @@ def sha(p):
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
     return h.hexdigest()
+
+
+def hash_collision_problems(files):
+    """Identical content must be declared: files sharing a sha256 must be linked by
+    EXACT_DUPLICATE edges (directly or via a common original), and no two members
+    of one hard_negative_group may share a sha256."""
+    parent = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for e in files:
+        for r in e["relationships"]:
+            if r["type"] == "EXACT_DUPLICATE":
+                parent[find(e["path"])] = find(r["target"])
+    by_hash, out = {}, []
+    for e in files:
+        if e.get("sha256"):
+            by_hash.setdefault(e["sha256"], []).append(e)
+    for h, grp in sorted(by_hash.items()):
+        for i, x in enumerate(grp):
+            for y in grp[i + 1:]:
+                if find(x["path"]) != find(y["path"]):
+                    out.append(f"identical sha256 without EXACT_DUPLICATE link: {x['path']} == {y['path']}")
+                hg = x.get("hard_negative_group")
+                if hg and hg == y.get("hard_negative_group"):
+                    out.append(f"hard_negative_group {hg} members identical: {x['path']} == {y['path']}")
+    return out
 
 
 def main():
@@ -79,6 +109,7 @@ def main():
         for r in e["relationships"]:
             if r["type"] == "EXACT_DUPLICATE" and r["target"] in by and by[r["target"]]["sha256"] != e["sha256"]:
                 errs.append(f"EXACT_DUPLICATE hash differs: {e['path']}")
+    errs += hash_collision_problems(m["files"])
     sc = json.load(open(os.path.join(a.root, "scenarios.json"), encoding="utf-8"))
     for s in sc["scenarios"]:
         if s["instances"] < 3:
