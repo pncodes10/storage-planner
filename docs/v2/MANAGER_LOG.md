@@ -26,6 +26,7 @@ check-in reads this file first. Spec: `Storage_Planner_Technical_Specification_v
 | D5 | Drive videos skipped. | Drive tool caps downloads at 10 MB; smallest video is 18.6 MB. No direct Google API access used. |
 | D6 | Hourly scheduled check-in wakes this session. | Owner asked that work continue unattended. |
 | D7 | Relaunched the survey and dataset agents at 22:25 UTC. | Both had been silently stopped at 20:25/20:33 by the owner's interrupts (made to reconnect Drive), and could not be resumed. Two hours lost. Lesson: after any interrupt, check that background agents are still alive. |
+| D8 | At most two Opus agents at a time; work committed as soon as it exists. | Both running agents hit the account's 5-hour usage limit at ~22:50 UTC and were stopped until 01:20 UTC (2.5 h lost). Resumed 01:27 UTC from their saved state. |
 
 ## Architecture decisions (after the codebase survey, 22:30 UTC)
 
@@ -57,18 +58,21 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State
+## State (01:27 UTC, 12 Nov)
 
-- Codebase survey: done 22:30 UTC.
-- Architect agent: writing `docs/v2/ARCHITECTURE.md`, `PHASE_1.md`, `PHASE_2.md` (started 22:32 UTC). Next: reviewer agent, then implementer.
-- Dataset builder agent: relaunched 22:25 UTC, running.
-- Phase 1: design in progress.
+- Design drafts committed: `ARCHITECTURE.md`, `PHASE_1.md`, `PHASE_2.md` (not yet reviewed).
+  Architect agent resumed to finish and report.
+- Dataset builder resumed; scripts in `tools/v2dataset/` committed as work in
+  progress; `/home/user/sp-dataset/` partly built (688 MB).
+- Lost time so far: 2 h (interrupts killed agents) + 2.5 h (usage limit).
 
 ## Next steps
 
-1. When the survey reports: record the architecture decisions (language, package
-   name, test harness, where the algorithm switch goes) here.
-2. Phase 1: planner agent expands it -> reviewer agent -> implementer agent.
-3. When the dataset builder reports: review gaps, commit `tools/v2dataset/`.
-4. Continue phases 2–10 in order. Each ML piece must show a measured gain on the
-   dataset before it becomes a dependency (spec section 17).
+1. Architect reports -> reviewer agent checks the three documents against the
+   spec and the code -> architect/implementer applies the review.
+2. Implementer agent builds Phase 1, then Phase 2 (tests must pass on the JVM).
+3. Dataset builder reports -> review gaps.
+4. Phases 3-5 (relationships, risk engine, planner) -> first scored run on both
+   datasets -> Phase A (app switch) -> phases 6-10 as far as the session allows.
+5. If an agent stops with a usage-limit error: wait for the reset time in the
+   error, then resume it with a message rather than starting over.
