@@ -109,7 +109,37 @@ public final class FaultyStorageAccess implements StorageAccess {
         return inner.stat(volumeId, path);
     }
 
-    public ReadableFile open(String volumeId, String path) throws IOException { return inner.open(volumeId, path); }
+    // Phase 2 open/read hooks
+    private final Set<String> denyOpen = new HashSet<String>();
+    private final Map<String, Long> failReadAfter = new HashMap<String, Long>();
+    private final Map<String, Runnable> mutateAfterOpen = new HashMap<String, Runnable>();
+    /** Bytes read through open() files, per path (tests of "not read"). */
+    public final Map<String, Long> bytesRead = new HashMap<String, Long>();
+    public int opens;
+    public FaultyStorageAccess denyOpen(String path) { denyOpen.add(path); return this; }
+    public FaultyStorageAccess failReadAfter(String path, long bytes) { failReadAfter.put(path, bytes); return this; }
+    public FaultyStorageAccess mutateAfterOpen(String path, Runnable r) { mutateAfterOpen.put(path, r); return this; }
+    public long totalBytesRead() { long n = 0; for (long v : bytesRead.values()) n += v; return n; }
+
+    public ReadableFile open(String volumeId, final String path) throws IOException {
+        if (denyOpen.contains(path)) throw new java.nio.file.AccessDeniedException(path);
+        final ReadableFile f = inner.open(volumeId, path);
+        opens++;
+        Runnable m = mutateAfterOpen.remove(path);
+        if (m != null) m.run();
+        final Long limit = failReadAfter.get(path);
+        return new ReadableFile() {
+            long done;
+            public long size() throws IOException { return f.size(); }
+            public int read(long position, byte[] buf, int off, int len) throws IOException {
+                if (limit != null && done + len > limit) throw new IOException("injected read error after " + limit + " bytes");
+                int n = f.read(position, buf, off, len);
+                if (n > 0) { done += n; Long v = bytesRead.get(path); bytesRead.put(path, (v == null ? 0 : v) + n); }
+                return n;
+            }
+            public void close() throws IOException { f.close(); }
+        };
+    }
 
     public String dirIdentity(String volumeId, String dirPath) {
         String a = alias.get(dirPath);

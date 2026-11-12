@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 /** Dates in file names (PHASE_2 4). First valid match wins. */
 public final class NameDates {
     private NameDates() {}
-    static final Pattern CAM = Pattern.compile("^(?:IMG|VID|PXL|MVIMG|PANO|BURST\\d*|DSC|MOV)?[_-]?(\\d{8})[_-](\\d{6})(\\d{0,3})(?:\\D.*)?$");
+    static final Pattern CAM = Pattern.compile("^(?:IMG|VID|PXL|MVIMG|PANO|BURST\\d*|DSC|MOV)?[_-]?(\\d{8})[_-]?(\\d{6})(\\d{0,3})(?:\\D.*)?$");
     static final Pattern SHOT1 = Pattern.compile("^Screenshot[_ -](\\d{8})[-_](\\d{6}).*$");
     static final Pattern SHOT2 = Pattern.compile("^Screenshot[_ ](\\d{4})-(\\d{2})-(\\d{2})[-_ ](\\d{2})[-.](\\d{2})[-.](\\d{2}).*$");
     static final Pattern WA = Pattern.compile("^(?:IMG|VID|AUD|PTT|DOC|STK)-(\\d{8})-WA\\d{4}.*$");

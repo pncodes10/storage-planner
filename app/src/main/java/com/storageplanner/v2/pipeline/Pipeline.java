@@ -43,7 +43,7 @@ public final class Pipeline {
         }
         l.add(new DiscoveryEngine(new com.storageplanner.v2.discovery.WalkLimits(), installed));
         if (config.maxTier >= 1) l.add(new com.storageplanner.v2.features.T1MetadataStage());
-        if (config.maxTier >= 2) l.add(new com.storageplanner.v2.features.T2HashStructStage());
+        if (config.maxTier >= 2) l.add(new com.storageplanner.v2.features.T2HashStructStage(false));
         if (config.maxTier >= 3) l.add(new com.storageplanner.v2.features.T3ImageStage());
         return l;
     }

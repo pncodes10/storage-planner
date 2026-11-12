@@ -16,6 +16,8 @@ public final class Hashing {
     /** A per-thread SHA-256 instance, reset. */
     public static MessageDigest sha256() { MessageDigest d = SHA.get(); d.reset(); return d; }
     public static byte[] sha256(byte[] data) { return sha256().digest(data); }
+    /** A new SHA-256 instance (for a second digest alongside sha256()). */
+    public static MessageDigest sha256Fresh() { try { return MessageDigest.getInstance("SHA-256"); } catch (NoSuchAlgorithmException e) { throw new IllegalStateException(e); } }
     public static String sha256Hex(byte[] data) { return Hex.of(sha256(data)); }
     public static String sha256Hex(String utf8) { return sha256Hex(utf8.getBytes(StandardCharsets.UTF_8)); }
     public static long crc32(byte[] data, int off, int len) { CRC32 c = new CRC32(); c.update(data, off, len); return c.getValue(); }

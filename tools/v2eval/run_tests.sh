@@ -12,7 +12,7 @@ mkdir -p "$CLS"
 cd "$REPO"
 
 SRC=$(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google app/src/main/java/com/storageplanner/v2 \
-           jvmtest/com/storageplanner/v2test -name '*.java' | sort)
+           jvmtest/com/storageplanner/v2test jvmtest/com/storageplanner/core -name '*.java' | sort)
 javac --release 8 -encoding UTF-8 -nowarn -d "$CLS" $SRC
 
 java -Dv2.repo="$REPO" -cp "$CLS" com.storageplanner.v2test.AllV2Tests "$@"

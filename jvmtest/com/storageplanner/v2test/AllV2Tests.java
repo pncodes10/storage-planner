@@ -23,6 +23,13 @@ public final class AllV2Tests {
             {"PermissionChangeTest", (Suite) PermissionChangeTest::run},
             {"CoverageTest", (Suite) CoverageTest::run},
             {"V2CliTest", (Suite) V2CliTest::run},
+            {"TypeDetectorTest", (Suite) TypeDetectorTest::run},
+            {"HashStageTest", (Suite) HashStageTest::run},
+            {"ImageTest", (Suite) ImageTest::run},
+            {"ZipApkTest", (Suite) ZipApkTest::run},
+            {"PdfProbeTest", (Suite) PdfProbeTest::run},
+            {"Mp4ProbeTest", (Suite) Mp4ProbeTest::run},
+            {"IncrementalExtractionTest", (Suite) IncrementalExtractionTest::run},
         };
         List<String> only = Arrays.asList(args);
         int failures = 0, ran = 0;

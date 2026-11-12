@@ -12,6 +12,15 @@ public final class Probes {
         String name = name(p);
         try {
             switch (p) {
+                case Extractors.JPEG: ImageProbes.jpeg(c); break;
+                case Extractors.PNG: ImageProbes.png(c); break;
+                case Extractors.GIF: ImageProbes.gif(c); break;
+                case Extractors.WEBP: ImageProbes.webp(c); break;
+                case Extractors.BMP: ImageProbes.bmp(c); break;
+                case Extractors.EXIF: ImageProbes.tiff(c); break;
+                case Extractors.HEIF: HeifProbe.probe(c); break;
+                case Extractors.PDF: PdfProbe.probe(c); break;
+                case Extractors.MP4: Mp4Probe.probe(c); break;
                 default: break;
             }
         } catch (RuntimeException e) {

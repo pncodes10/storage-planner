@@ -47,7 +47,7 @@ public final class IntegrityProbe {
             if (Bytes.indexOf(tl, eoi, tl.length, "ftyp") >= 0) return Integrity.OK;
             if (Bytes.indexOf(tl, Math.max(eoi, tl.length - 4096), tl.length, "SEFT") >= 0
                     || Bytes.indexOf(tl, Math.max(eoi, tl.length - 4096), tl.length, "SEFH") >= 0) return Integrity.OK;
-            c.problem("jpeg:TRAILING_DATA");
+            c.fr.problem("jpeg:TRAILING_DATA");
             return Integrity.UNKNOWN;
         }
         c.fr.problem("jpeg:NO_EOI_IN_TAIL");

@@ -38,6 +38,12 @@ public final class Fx implements AutoCloseable {
     public WalkLimits lim = new WalkLimits();
     public Set<String> installed;
     public TestControl control;
+    /** Phase 2: extraction tiers run by scan() (0 = discovery only), hash policy, installed apps, decoder, budget. */
+    public int maxTier = 0;
+    public boolean hashAll;
+    public com.storageplanner.v2.device.InstalledApps apps;
+    public com.storageplanner.v2.device.MediaDecoder media;
+    public com.storageplanner.v2.stage.Budget budget;
     private final List<TempTree> extra = new ArrayList<TempTree>();
 
     public static Fx create() throws IOException { return new Fx(TempTree.create(), Tri.TRUE); }
@@ -79,7 +85,12 @@ public final class Fx implements AutoCloseable {
         cfg.kind = kind; cfg.resume = resume;
         List<Stage> stages = new ArrayList<Stage>();
         stages.add(new DiscoveryEngine(lim, installed));
-        return new Pipeline(new JvmDevice(sa, clock, new JvmResourceMonitor(), blobs), store, cfg, stages).run(control);
+        cfg.maxTier = maxTier;
+        if (budget != null) cfg.budget = budget;
+        if (maxTier >= 1) stages.add(new com.storageplanner.v2.features.T1MetadataStage());
+        if (maxTier >= 2) stages.add(new com.storageplanner.v2.features.T2HashStructStage(hashAll));
+        if (maxTier >= 3) stages.add(new com.storageplanner.v2.features.T3ImageStage());
+        return new Pipeline(new JvmDevice(sa, clock, new JvmResourceMonitor(), blobs, media, apps), store, cfg, stages).run(control);
     }
 
     public FileRecord f(String path) { return store.files().byPath("primary", path); }
