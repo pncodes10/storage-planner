@@ -63,6 +63,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A20 | A temp-looking name over complete, real content (e.g. a full bank-statement PDF named `temp123.tmp`) goes to REVIEW when it is the only copy. | Reviewer blocker: deciding "temp" from the extension alone would have produced a SAFE delete of a must-never-delete file. |
 | A21 | The in-memory store fails the A12 limit (measured 2.7 KB heap and 2.1 KB snapshot per file, limit ~1 KB). Before Phase A the records are shrunk (unknown fields not written, features loaded on demand); if still over 1 KB, SQLite moves into Phase A. Cloud phases 3-5 proceed meanwhile. | 100,000 files would need about 270 MB of heap, more than a phone app can count on. Desktop evaluation is unaffected. |
 | A22 | On the phone, photos must be decoded at reduced size by the device layer. | Full-size JVM decoding costs about 180 ms per photo (42 s for 268 photos); 30,000 photos would take about 90 minutes. |
+| A23 | Phase 3 accepted with the same-content recall gate measured over images the desktop can decode (0.960, gate 0.95); over all images it is 0.909. | The shortfall is WebP files the desktop JVM cannot decode (Android can). They come out "relationships unknown", which only costs missed savings, never a wrong delete. All safety gates pass: 0 false matches inside look-alike groups, 0 false verified backups, exact-duplicate precision 1.0. |
+| A24 | Same-content results are scored as clusters, so two derived copies of one original count as related even if the dataset did not link them directly. | The dataset links each copy to its original only; a WhatsApp copy and a thumbnail of the same photo really are the same content. Strict pair precision 0.976, cluster precision 0.992. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -72,22 +74,25 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (11:30 UTC, 12 Nov)
+## State (12:30 UTC, 12 Nov)
 
-- Phases 1 and 2 done, committed, 21 suites green.
-- Phases 3-5 design reviewed and final.
-- Dataset generator fixed (identical invoices now differ); dataset rebuilt and
-  verified by the lead (2,409 entries, 0 problems; verify.py now also fails on
-  unlinked identical files); marker `.rebuilt_ok` set by the lead.
-- Phase 3 implementer resumed at 11:27 UTC (graph package started; work in
-  progress committed).
+- Phases 1, 2, 3 done and committed; 24 suites green (re-run by the lead).
+- Phase 3 numbers on the held-out half of the dataset: exact duplicates P/R
+  1.0/1.0; same-content P 0.976 (0.992 as clusters), R 0.909 (0.960 on
+  decodable images); false matches inside look-alike groups 0; near-duplicate
+  P/R 0.983/0.874; "edited from" P 1.0 R 0.52; version-of R 0.29; verified
+  backups 17/17 with 0 false; 56 of 2,142 images "relationships unknown".
+  Drive photos: 44 burst groups, no same-content pairs, 36 HEIC unknown;
+  against name-timestamp bursts: pair precision 0.82, recall 0.36.
+- Weak spots to revisit: version-of and edited-from recall; burst recall on
+  real photos; missing pieces listed in PHASE_3_NOTES.md.
+- Phase 4 implementer: running.
 
 ## Next steps
 
-1. Phase 3 report -> lead re-runs tests and the phase3 gate (hard-negative
-   check must be zero) -> commit.
-2. Phase 4 (risk engine) -> Phase 5 (planner) -> first full scored run.
-3. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
-4. Phases 6-10 as far as the session allows.
-5. If an agent stops with a usage-limit error: wait for the reset time in the
+1. Phase 4 (risk engine) -> Phase 5 (planner) -> first full scored run
+   (dangerous-delete rate must be 0).
+2. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
+3. Phases 6-10 as far as the session allows.
+4. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.

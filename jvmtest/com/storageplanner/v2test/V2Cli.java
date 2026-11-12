@@ -32,7 +32,7 @@ public final class V2Cli {
     private V2Cli() {}
 
     static final String USAGE = "usage: V2Cli scan <root> --out <result.json> [--state-dir D] [--volume-id primary] [--kind full|incremental]"
-            + " [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--pretty]";
+            + " [--graph] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--pretty]";
 
     public static void main(String[] args) {
         int rc = run(args, System.out, System.err);
@@ -60,6 +60,7 @@ public final class V2Cli {
         Long now = null; long snapEvery = -1; int halt = -1;
         String installedApps = null; long budgetMs = -1, budgetBytes = -1; boolean measureMemory = false;
         V2Json.Options opt = new V2Json.Options();
+        boolean graph = false; String pairsOut = null, manifest = null; int randomPairs = 600;
         try {
             for (int i = 0; i < a.size(); i++) {
                 String s = a.get(i);
@@ -83,6 +84,10 @@ public final class V2Cli {
                 else if (s.equals("--budget-ms")) budgetMs = Long.parseLong(a.get(++i));
                 else if (s.equals("--budget-bytes")) budgetBytes = Long.parseLong(a.get(++i));
                 else if (s.equals("--measure-memory")) measureMemory = true;
+                else if (s.equals("--graph")) graph = true;
+                else if (s.equals("--pairs-out")) pairsOut = a.get(++i);
+                else if (s.equals("--manifest")) manifest = a.get(++i);
+                else if (s.equals("--random")) randomPairs = Integer.parseInt(a.get(++i));
                 else if (s.startsWith("--")) { err.println("unknown option " + s); err.println(USAGE); return 2; }
                 else if (root == null) root = s;
                 else if (outFile == null) outFile = s;
@@ -138,6 +143,8 @@ public final class V2Cli {
         if (cfg.maxTier >= 1) stages.add(StageTimer.wrap(new T1MetadataStage()));
         if (cfg.maxTier >= 2) stages.add(StageTimer.wrap(new T2HashStructStage(opt.hash.equals("all"))));
         if (cfg.maxTier >= 3) stages.add(StageTimer.wrap(new T3ImageStage()));
+        com.storageplanner.v2.graph.GraphStage gs = new com.storageplanner.v2.graph.GraphStage();
+        if (graph || pairsOut != null) stages.add(StageTimer.wrap(gs));
         long heapBefore = measureMemory ? usedHeapAfterGc() : 0;
         PipelineResult res;
         try {
@@ -146,6 +153,11 @@ public final class V2Cli {
             err.println("store error: " + e.getMessage()); return 3;
         }
         long totalMs = (System.nanoTime() - t0) / 1000000L;
+        if (graph || pairsOut != null) V2Json.graphCoverage = gs.coverage;
+        if (pairsOut != null) {
+            try { PairsDump.write(store, gs, manifest, randomPairs, pairsOut, err); }
+            catch (IOException e) { err.println("pairs: " + e); return 3; }
+        }
         V2Json.Timings t = new V2Json.Timings();
         t.totalMs = totalMs;
         for (Map.Entry<String, Long> e : StageTimer.ms.entrySet()) t.stages.put(e.getKey(), e.getValue());

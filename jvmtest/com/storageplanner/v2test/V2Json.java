@@ -20,6 +20,8 @@ public final class V2Json {
 
     public static final class Timings { public long totalMs; public Map<String, Long> stages = new LinkedHashMap<String, Long>(); public double filesPerSecond; public long bytesRead; public long peakHeapBytes; }
 
+    public static java.util.Map<String, Long> graphCoverage;
+
     public static void writeResult(JsonWriter w, V2Store store, String root, String volumeId, Options opt, ScanSession s,
                                    CoverageReport cov, long generatedAt, Timings t) {
         w.beginObject();
@@ -56,8 +58,18 @@ public final class V2Json {
         w.name("files").beginArray();
         for (FileRecord f : files) writeFile(w, f, s.scanId, store);
         w.endArray();
-        w.name("relationships").beginArray().endArray();
-        w.name("duplicateGroups").beginArray().endArray();
+        w.name("relationships").beginArray();
+        for (Relationship e : store.relationships().all()) com.storageplanner.v2.store.Codecs.RELATIONSHIP.write(w, e);
+        w.endArray();
+        w.name("duplicateGroups").beginArray();
+        for (DuplicateGroup g : store.duplicateGroups().all()) com.storageplanner.v2.store.Codecs.DUPLICATE_GROUP.write(w, g);
+        w.endArray();
+        if (graphCoverage != null) {   // only when GRAPH ran (keeps the Phase 1-2 result layout otherwise)
+            w.name("backups").beginArray();
+            for (BackupRecord b : store.backups().all()) com.storageplanner.v2.store.Codecs.BACKUP.write(w, b);
+            w.endArray();
+            w.name("graphCoverage").any(graphCoverage);
+        }
         w.name("recommendations").beginArray().endArray();
         w.name("plan").nullValue();
         w.name("coverage");
@@ -98,7 +110,8 @@ public final class V2Json {
         w.name("pdf"); FeatureCodec.writePdf(w, fr == null ? null : fr.pdf);
         w.name("archive"); FeatureCodec.writeArchive(w, fr == null ? null : fr.archive, 200);
         w.name("category").value(f.category).name("categoryConfidence").nullValue()
-         .name("duplicateGroupId").value(f.duplicateGroupId).name("assessment").nullValue();
+         .name("duplicateGroupId").value(f.duplicateGroupId).name("perceptualStatus").value(fr == null ? null : fr.extra.get("graph.perceptual"))
+         .name("assessment").nullValue();
         w.endObject();
     }
 }

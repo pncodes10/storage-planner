@@ -17,6 +17,8 @@ Usage (stdlib only; run with `python3 -I`):
 Exit status: 0 pass, 1 gate failure / difference, 2 usage error.
 """
 import argparse
+import os
+import hashlib
 import collections
 import json
 import sys
@@ -118,6 +120,8 @@ def discovery(args):
                   % (len(real_missing), len(size_mismatch), restricted_reported), file=sys.stderr)
         if n >= 2:
             ok = phase2(args, r) and ok
+        if n >= 3:
+            ok = phase3(args, r) and ok
         print("GATE %s %s" % (args.gate, "PASSED" if ok else "FAILED"))
         return 0 if ok else 1
     return 0
@@ -373,6 +377,282 @@ def phase2(args, r):
     return ok
 
 
+CE_TYPES = ("COMPRESSED_FROM", "THUMBNAIL_OF", "VERSION_OF")
+NEAR_TYPES = ("EDITED_FROM",) + CE_TYPES
+IMAGE_TYPES = {"jpeg", "png", "webp", "gif", "bmp", "heic", "heif", "avif", "tiff", "dng"}
+
+
+def fold_of(root):
+    return hashlib.sha256(root.encode("utf-8")).digest()[0] & 1
+
+
+def phase3(args, r):
+    """PHASE_3 11.3 / 15. Accuracy rows on --fold (F-03), safety rows on all pairs."""
+    root = args.dataset.rstrip("/")
+    man = manifest_files(args.dataset)
+    mby = {nfc(e["path"]): e for e in man if "symlink_target" not in e}
+    rby = {nfc(f["path"]): f for f in r["files"] if f.get("presence") == "PRESENT"}
+    path_of = {f["fileId"]: nfc(f["path"]) for f in r["files"]}
+    want_fold = None if args.fold == "all" else int(args.fold)
+    rows, ok = [], True
+
+    def row(name, value, gate=None, passed=None):
+        nonlocal ok
+        if passed is False:
+            ok = False
+        rows.append((name, value, gate or "", "" if passed is None else ("PASS" if passed else "FAIL")))
+
+    def is_img(p):
+        f = rby.get(p)
+        return f is not None and (f.get("type") in IMAGE_TYPES or f.get("image") is not None)
+
+    def node(ref):
+        if "!" in ref:
+            fid, ent = ref.split("!", 1)
+            return path_of.get(fid, fid) + "!" + nfc(ent)
+        return path_of.get(ref, ref)
+
+    hn = {p: e["hard_negative_group"] for p, e in mby.items() if e.get("hard_negative_group")}
+    # manifest sha classes
+    sha_cls = collections.defaultdict(list)
+    for p, e in mby.items():
+        if e.get("sha256") and (e.get("size") or 0) >= 1 and p in rby:
+            sha_cls[e["sha256"]].append(p)
+    cls_of = {p: tuple(sorted(v)) for v in sha_cls.values() for p in v}
+    # result exact groups
+    groups = r.get("duplicateGroups") or []
+    gcls = {}
+    for g in groups:
+        if g.get("exact"):
+            mem = tuple(sorted(path_of[m] for m in g["members"]))
+            for m in mem:
+                gcls[m] = mem
+
+    def expand(a, b, cls):
+        out = set()
+        for x in cls.get(a, (a,)):
+            for y in cls.get(b, (b,)):
+                if x != y:
+                    out.add(tuple(sorted((x, y))))
+        return out
+
+    # ---- exact clusters (F-04)
+    truth_x = pairs_of(v for v in sha_cls.values() if len(v) > 1)
+    pred_x = pairs_of(set(gcls.values()))
+    tp = len(pred_x & truth_x)
+    px = tp / len(pred_x) if pred_x else 1.0
+    rx = tp / len(truth_x) if truth_x else 1.0
+    row("exact cluster precision (truth = manifest sha256)", "%d/%d = %.4f" % (tp, len(pred_x), px), "= 1.000", px == 1.0)
+    row("exact cluster recall", "%d/%d = %.4f" % (tp, len(truth_x), rx), ">= 0.99", rx >= 0.99)
+    lab = set()
+    for p, e in mby.items():
+        for rel in e.get("relationships", []):
+            if rel["type"] == "EXACT_DUPLICATE":
+                lab.add(tuple(sorted((p, nfc(rel["target"])))))
+    row("  label-only / sha-only pairs", "%d / %d" % (len(lab - truth_x), len(truth_x - lab)))
+
+    # ---- manifest labelled edges
+    labelled = collections.defaultdict(set)   # type -> {(src, dst, root)}
+    for p, e in mby.items():
+        for rel in e.get("relationships", []):
+            t = nfc(rel["target"])
+            labelled[rel["type"]].add((p, t, hn.get(p) or t))
+    edges = r.get("relationships") or []
+    pred = collections.defaultdict(set)
+    for e in edges:
+        pred[(e["type"], e["verification"])].add((node(e["src"]), node(e["dst"])))
+
+    def in_fold(root_):
+        return want_fold is None or fold_of(root_) == want_fold
+
+    label_root = {}
+    for t_, lst in labelled.items():
+        for a_, b_, rt_ in lst:
+            label_root[tuple(sorted((a_, b_.split("!")[0])))] = rt_
+
+    def pred_fold(a, b):
+        q = tuple(sorted((a.split("!")[0], b.split("!")[0])))
+        if q in label_root:
+            return in_fold(label_root[q])
+        g = hn.get(a) if hn.get(a) and hn.get(a) == hn.get(b) else None
+        return in_fold(g or b.split("!")[0])
+
+    # ---- content equivalence: compared as clusters (PHASE_3_NOTES D-9): truth = transitive closure of labelled
+    # COMPRESSED/THUMBNAIL/VERSION image pairs and manifest sha classes; prediction = closure of VERIFIED edges of those
+    # types and result exact groups. Pairs that are byte-identical on both sides are left to the exact rows.
+    def ce_pairs(links, cls):
+        par = {}
+
+        def find(x):
+            par.setdefault(x, x)
+            while par[x] != x:
+                par[x] = par[par[x]]
+                x = par[x]
+            return x
+        for a_, b_ in links:
+            for x in (a_, b_):
+                for y in cls.get(x, (x,)):
+                    par[find(y)] = find(x)
+            par[find(a_)] = find(b_)
+        comps = collections.defaultdict(list)
+        for x in list(par):
+            comps[find(x)].append(x)
+        return {q for q in pairs_of(comps.values()) if cls_of.get(q[0]) is None or cls_of.get(q[0]) != cls_of.get(q[1])}
+    lab_ce = [(a, b, rt) for t in CE_TYPES for a, b, rt in labelled[t] if is_img(a) and is_img(b)]
+    tr_ce_all = ce_pairs([(a, b) for a, b, _ in lab_ce], cls_of)
+    root_of = {}
+    for a, b, rt in sorted(lab_ce, key=lambda x: x[2]):
+        root_of.setdefault(a, rt); root_of.setdefault(b, rt)
+    tr_root = {q: min(root_of.get(q[0], q[0]), root_of.get(q[1], q[1])) for q in tr_ce_all}
+    pr_ce_all = ce_pairs([(a, b) for t in CE_TYPES for a, b in pred[(t, "VERIFIED")]], gcls)
+    tr_ce = {q for q in tr_ce_all if in_fold(tr_root[q])}
+    pr_ce = {q for q in pr_ce_all if (in_fold(tr_root[q]) if q in tr_root else pred_fold(q[0], q[1]))}
+    tp = len(pr_ce & tr_ce)
+    pc = tp / len(pr_ce) if pr_ce else 1.0
+    rc = tp / len(tr_ce) if tr_ce else 1.0
+    hn_false = sorted(q for q in pr_ce_all | pred_x if hn.get(q[0]) and hn.get(q[0]) == hn.get(q[1]))
+    def same_source(q):
+        sa = (mby.get(q[0]) or {}).get("source") or {}
+        sb = (mby.get(q[1]) or {}).get("source") or {}
+        edited = any(x["type"] == "EDITED_FROM" for p_ in q for x in (mby.get(p_) or {}).get("relationships", []))
+        return not edited and sa.get("id") not in (None, "synthetic") and sa.get("id") == sb.get("id")
+    gap = {q for q in pr_ce - tr_ce if same_source(q)}
+    pc2 = tp / (len(pr_ce) - len(gap)) if len(pr_ce) > len(gap) else 1.0
+    row("content-equivalence precision (fold %s), strict" % args.fold, "%d/%d = %.4f" % (tp, len(pr_ce), pc), ">= 0.99 (see next)", None)
+    row("content-equivalence precision, unlabelled same-source pairs excluded",
+        "%d/%d = %.4f (%d same-source pairs: %s)" % (tp, len(pr_ce) - len(gap), pc2, len(gap), sorted(gap)[:3]), ">= 0.99", pc2 >= 0.99)
+    for q in sorted(pr_ce - tr_ce - gap)[:8]:
+        row("    CE false pair", "%s ~ %s" % q)
+    for q in sorted(tr_ce - pr_ce)[:15]:
+        row("    CE missed pair", "%s ~ %s" % q)
+    row("content-equivalence recall (fold %s)" % args.fold, "%d/%d = %.4f" % (tp, len(tr_ce), rc), ">= 0.95", rc >= 0.95)
+    nodec = {p_ for p_, f_ in rby.items() if ((f_.get("image") or {}).get("decodeStatus") or "OK") != "OK"}
+    tr_dec = {q for q in tr_ce if q[0] not in nodec and q[1] not in nodec}
+    tpd = len(pr_ce & tr_dec)
+    row("  recall, pairs with an undecodable member (WebP/HEIC on the JVM) excluded", "%d/%d = %.4f (%d excluded: relationships unknown)"
+        % (tpd, len(tr_dec), tpd / len(tr_dec) if tr_dec else 1.0, len(tr_ce) - len(tr_dec)))
+    row("hn_false_pairs (interchangeable inside a hard-negative group, all pairs)", "%d" % len(hn_false), "= 0", not hn_false)
+    any_hn = sum(1 for e in edges if hn.get(node(e["src"])) and hn.get(node(e["src"])) == hn.get(node(e["dst"])))
+    row("  any edge inside a hard-negative group", "%d" % any_hn)
+
+    # ---- near duplicates (A-4): NEAR_TYPES edges + VS clusters
+    def closure(pairs):
+        parent = {}
+
+        def find(x):
+            parent.setdefault(x, x)
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+        for a, b in pairs:
+            parent[find(a)] = find(b)
+        comps = collections.defaultdict(list)
+        for x in list(parent):
+            comps[find(x)].append(x)
+        return comps.values()
+    tr_n, tr_root_n = set(), {}
+    for t in NEAR_TYPES:
+        for a, b, rt in labelled[t]:
+            if is_img(a) and is_img(b):
+                for q in expand(a, b, cls_of):
+                    tr_root_n[q] = rt
+    vs_pairs = [(a, b) for a, b, _ in labelled["VISUALLY_SIMILAR"] if a in rby and b in rby]
+    vs_root = {}
+    for a, b, rt in labelled["VISUALLY_SIMILAR"]:
+        vs_root.setdefault(a, rt); vs_root.setdefault(b, rt)
+    for c in closure(vs_pairs):
+        rt = min(vs_root.get(x, x) for x in c)
+        for q in pairs_of([c]):
+            tr_root_n[q] = rt
+    tr_n = {q for q, rt in tr_root_n.items() if in_fold(rt)}
+    pr_n_all = set()
+    for t in NEAR_TYPES:
+        for v in ("VERIFIED", "UNVERIFIED"):
+            for a, b in pred[(t, v)]:
+                if is_img(a) and is_img(b):
+                    pr_n_all |= expand(a, b, gcls)
+    for g in groups:
+        if g.get("kind") == "BURST":
+            pr_n_all |= pairs_of([[path_of[m] for m in g["members"]]])
+    pr_n = {q for q in pr_n_all if (in_fold(tr_root_n[q]) if q in tr_root_n else pred_fold(q[0], q[1]))}
+    tp = len(pr_n & tr_n)
+    pn = tp / len(pr_n) if pr_n else 1.0
+    rn = tp / len(tr_n) if tr_n else 1.0
+    gap_n = {q for q in pr_n - tr_n if same_source(q)}
+    pn2 = tp / (len(pr_n) - len(gap_n)) if len(pr_n) > len(gap_n) else 1.0
+    row("near-duplicate precision (A-4, fold %s), strict" % args.fold, "%d/%d = %.4f" % (tp, len(pr_n), pn), "", None)
+    row("near-duplicate precision, unlabelled same-source pairs excluded", "%d/%d = %.4f" % (tp, len(pr_n) - len(gap_n), pn2), ">= 0.95", pn2 >= 0.95)
+    for q in sorted(pr_n - tr_n - gap_n)[:12]:
+        row("    near false pair", "%s ~ %s" % q)
+    row("near-duplicate recall (A-4, fold %s)" % args.fold, "%d/%d = %.4f" % (tp, len(tr_n), rn), ">= 0.80", rn >= 0.80)
+
+    # ---- per type, directed
+    for t in ("EXACT_DUPLICATE",) + NEAR_TYPES + ("VISUALLY_SIMILAR", "BACKED_UP_BY", "COMPANION_OF"):
+        src_t = ("BACKED_UP_BY", "CONTAINED_IN") if t == "BACKED_UP_BY" else (t,)
+        tr = {(a, b) for tt in src_t for a, b, rt in labelled[tt] if in_fold(rt)}
+        pr = {(a, b) for v in ("VERIFIED", "UNVERIFIED") for a, b in pred[(t, v)] if pred_fold(a, b)}
+        if t in ("EXACT_DUPLICATE", "VISUALLY_SIMILAR"):
+            tr = {tuple(sorted(x)) for x in tr}
+            pr = {tuple(sorted(x)) for x in pr}
+        if t == "BACKED_UP_BY":
+            pr = {(a, b.split("!")[0]) for a, b in pr}
+        tp = len(tr & pr)
+        p_ = tp / len(pr) if pr else float("nan")
+        r_ = tp / len(tr) if tr else float("nan")
+        f_ = 2 * p_ * r_ / (p_ + r_) if pr and tr and (p_ + r_) else float("nan")
+        gate = passed = None
+        if t == "EDITED_FROM":
+            gate, passed = ">= 0.90 P", (not pr) or p_ >= 0.90
+        row("  %-16s TP %3d  pred %3d  truth %3d  P %.3f R %.3f F1 %.3f" % (t, tp, len(pr), len(tr), p_, r_, f_), "", gate, passed)
+
+    # ---- backups
+    try:
+        bman = load(root + "/backup_manifest.json")
+    except (OSError, ValueError):
+        bman = {}
+    # truth: (archive, sha) of labelled BACKED_UP_BY / CONTAINED_IN subjects and backup_manifest intact members
+    good = set()
+    for tt in ("BACKED_UP_BY", "CONTAINED_IN"):
+        for a, b, _ in labelled[tt]:
+            if a in mby:
+                good.add((b, mby[a].get("sha256")))
+    for arch, v in bman.items():
+        for m_ in v.get("intact", []):
+            for p_, e_ in mby.items():
+                if os.path.basename(p_) == os.path.basename(m_) and p_.startswith("DCIM/"):
+                    good.add((nfc(arch), e_.get("sha256")))
+    # false_verified: the archive member's bytes (read here with zipfile) differ from the subject's manifest sha256
+    import zipfile
+    fv, ver = [], 0
+    for a, b in pred[("BACKED_UP_BY", "VERIFIED")]:
+        ver += 1
+        arch, ent = b.split("!", 1)
+        try:
+            with zipfile.ZipFile(root + "/" + arch) as z:
+                h = hashlib.sha256(z.read(ent)).hexdigest()
+        except Exception:
+            h = None
+        if h is None or h != (mby.get(a) or {}).get("sha256"):
+            fv.append((a, b))
+    row("backup false_verified", "%d (of %d VERIFIED)" % (len(fv), ver), "= 0", not fv)
+    tr_b = {(a, t) for tt in ("BACKED_UP_BY", "CONTAINED_IN") for a, t, _ in labelled[tt]}
+    pr_b = {(a, b.split("!")[0]) for a, b in pred[("BACKED_UP_BY", "VERIFIED")]}
+    rb = len(tr_b & pr_b) / len(tr_b) if tr_b else 1.0
+    row("BACKED_UP_BY recall (VERIFIED)", "%d/%d = %.3f" % (len(tr_b & pr_b), len(tr_b), rb), ">= 0.9", rb >= 0.9)
+
+    unk = sum(1 for f in rby.values() if f.get("perceptualStatus") == "UNKNOWN")
+    imgs = sum(1 for f in rby.values() if f.get("perceptualStatus") is not None)
+    row("images with relationships unknown", "%d of %d images" % (unk, imgs))
+    gcov = r.get("graphCoverage") or {}
+    row("graph coverage", ", ".join("%s=%s" % kv for kv in sorted(gcov.items())))
+    row("GRAPH time", "%s ms" % ((r.get("timings") or {}).get("stages") or {}).get("GRAPH"))
+    w = max(len(x[0]) for x in rows)
+    for name, value, gate, res in rows:
+        print("%-*s  %s  %s  %s" % (w, name, value, gate, res))
+    return ok
+
+
 def changes(result):
     """path -> set of change states recorded in this result's scan (any record at the path)."""
     out = collections.defaultdict(set)
@@ -464,6 +744,7 @@ def main(argv):
     ap.add_argument("--gate")
     ap.add_argument("--baseline")
     ap.add_argument("--out")
+    ap.add_argument("--fold", default="1", help="phase3: accuracy rows on fold 0, 1 or all (F-03); safety rows always on all pairs")
     ap.add_argument("--incremental", help="phase2: result of a second --kind incremental run on the same --state-dir")
     a = ap.parse_args(argv)
     if a.compare:

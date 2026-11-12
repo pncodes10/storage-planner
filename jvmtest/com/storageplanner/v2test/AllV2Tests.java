@@ -30,6 +30,9 @@ public final class AllV2Tests {
             {"PdfProbeTest", (Suite) PdfProbeTest::run},
             {"Mp4ProbeTest", (Suite) Mp4ProbeTest::run},
             {"IncrementalExtractionTest", (Suite) IncrementalExtractionTest::run},
+            {"ExactGrouperTest", (Suite) ExactGrouperTest::run},
+            {"PerceptualTest", (Suite) PerceptualTest::run},
+            {"ArchiveMatcherTest", (Suite) ArchiveMatcherTest::run},
         };
         List<String> only = Arrays.asList(args);
         int failures = 0, ran = 0;

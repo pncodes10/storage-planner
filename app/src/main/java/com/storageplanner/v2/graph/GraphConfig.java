@@ -10,7 +10,7 @@ import java.util.List;
  */
 public final class GraphConfig {
     private GraphConfig() {}
-    public static final int MATCHER_VERSION = 1;
+    public static final int MATCHER_VERSION = 3;
 
     public static final int MAX_EXACT_EDGES_GROUP = 64;
     // candidate generation (4.2, F-01)
@@ -20,11 +20,12 @@ public final class GraphConfig {
     public static final double MIN_CONTRAST = 4.0, ASPECT_TOL = 0.02;
     public static final int MIN_LONG_EDGE = 64;
     // stage 4 (4.4)
-    public static final int SIG_LONG_EDGE = 256, SIG_CACHE = 256, BAND_A_MIN = 512;
+    public static final int SIG_DECODE_EDGE = 1024, SIG_LONG_EDGE = 256, SIG_CACHE = 256, BAND_A_MIN = 512;
     public static final int MAX_DECODES_PER_RUN = 20000;
     // V2 SAME_CONTENT
-    public static double T_SAME_HAM = 6, V2_SSIM_MEAN = 0.985, V2_SSIM_MIN = 0.90, V2_DIFF_MAX = 6.0, V2_CHROMA = 2.5,
-            V2_FINE_SSIM_MIN = 0.93, V2_FINE_DIFF_MAX = 9.5;
+    // calibrate.py fold-0 fit, report sha256 dfb08fc7906f (PHASE_3_NOTES "Calibration"); initial values were 6/.985/.90/6.0/2.5/.93/9.5
+    public static double T_SAME_HAM = 6, V2_SSIM_MEAN = 0.958629, V2_SSIM_MIN = 0.816365, V2_DIFF_MAX = 11.5, V2_CHROMA = 2.5,
+            V2_FINE_SSIM_MIN = 0.907909, V2_FINE_DIFF_MAX = 17.25;
     // V6 ambiguity bands
     public static double AMB_SSIM_MEAN = 0.975, AMB_SSIM_MIN = 0.85, AMB_DIFF_MAX = 8, AMB_CHROMA = 3.5, AMB_FINE_SSIM_MIN = 0.85,
             AMB_FINE_DIFF_MAX = 12;
