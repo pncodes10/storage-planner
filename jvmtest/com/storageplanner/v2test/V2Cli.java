@@ -32,7 +32,7 @@ public final class V2Cli {
     private V2Cli() {}
 
     static final String USAGE = "usage: V2Cli scan <root> --out <result.json> [--state-dir D] [--volume-id primary] [--kind full|incremental]"
-            + " [--graph] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--pretty]";
+            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--pretty]";
 
     public static void main(String[] args) {
         int rc = run(args, System.out, System.err);
@@ -60,7 +60,7 @@ public final class V2Cli {
         Long now = null; long snapEvery = -1; int halt = -1;
         String installedApps = null; long budgetMs = -1, budgetBytes = -1; boolean measureMemory = false;
         V2Json.Options opt = new V2Json.Options();
-        boolean graph = false; String pairsOut = null, manifest = null; int randomPairs = 600;
+        boolean graph = false, assess = false; String pairsOut = null, manifest = null; int randomPairs = 600;
         try {
             for (int i = 0; i < a.size(); i++) {
                 String s = a.get(i);
@@ -85,6 +85,7 @@ public final class V2Cli {
                 else if (s.equals("--budget-bytes")) budgetBytes = Long.parseLong(a.get(++i));
                 else if (s.equals("--measure-memory")) measureMemory = true;
                 else if (s.equals("--graph")) graph = true;
+                else if (s.equals("--assess")) { assess = true; graph = true; }
                 else if (s.equals("--pairs-out")) pairsOut = a.get(++i);
                 else if (s.equals("--manifest")) manifest = a.get(++i);
                 else if (s.equals("--random")) randomPairs = Integer.parseInt(a.get(++i));
@@ -154,6 +155,21 @@ public final class V2Cli {
         }
         long totalMs = (System.nanoTime() - t0) / 1000000L;
         if (graph || pairsOut != null) V2Json.graphCoverage = gs.coverage;
+        AssessJson.verdicts = null; AssessJson.recs = null;
+        if (assess) {
+            long ta = System.nanoTime();
+            try {
+                List<com.storageplanner.v2.model.Verdict> vs = com.storageplanner.v2.risk.Assessor.run(store, apps, clock.nowMillis(),
+                        com.storageplanner.v2.plan.PresentationPolicy.of(opt.mode), new com.storageplanner.v2.risk.RiskConfig());
+                Map<String, com.storageplanner.v2.model.Verdict> vm = new HashMap<String, com.storageplanner.v2.model.Verdict>();
+                for (com.storageplanner.v2.model.Verdict v : vs) vm.put(v.fileId, v);
+                Map<String, FileRecord> fm = new HashMap<String, FileRecord>();
+                for (FileRecord f : store.files().all()) fm.put(f.fileId, f);
+                AssessJson.verdicts = vm;
+                AssessJson.recs = com.storageplanner.v2.plan.ProvisionalRecommendations.of(vs, fm, res.session.scanId);
+            } catch (StoreException e) { err.println("assess: " + e.getMessage()); return 3; }
+            StageTimer.ms.put("ASSESS", (System.nanoTime() - ta) / 1000000L);
+        }
         if (pairsOut != null) {
             try { PairsDump.write(store, gs, manifest, randomPairs, pairsOut, err); }
             catch (IOException e) { err.println("pairs: " + e); return 3; }

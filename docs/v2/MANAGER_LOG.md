@@ -65,6 +65,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A22 | On the phone, photos must be decoded at reduced size by the device layer. | Full-size JVM decoding costs about 180 ms per photo (42 s for 268 photos); 30,000 photos would take about 90 minutes. |
 | A23 | Phase 3 accepted with the same-content recall gate measured over images the desktop can decode (0.960, gate 0.95); over all images it is 0.909. | The shortfall is WebP files the desktop JVM cannot decode (Android can). They come out "relationships unknown", which only costs missed savings, never a wrong delete. All safety gates pass: 0 false matches inside look-alike groups, 0 false verified backups, exact-duplicate precision 1.0. |
 | A24 | Same-content results are scored as clusters, so two derived copies of one original count as related even if the dataset did not link them directly. | The dataset links each copy to its original only; a WhatsApp copy and a thumbnail of the same photo really are the same content. Strict pair precision 0.976, cluster precision 0.992. |
+| A25 | Phase 4 accepted on safety, but sent back on usefulness: "your call" items must be decided by the kind of evidence, not by an absolute size floor. The utility score ranks them and decides plan inclusion; it no longer hides them. | First run: 0 dangerous deletes, but 452 of 453 files that should be "your call" got no recommendation, because a 50 MiB benefit scale made every small chat copy and APK score below zero. Spec section 1 asks for aggressive discovery with risk-aware recommendations; hiding candidates is not the safe side, it is just less useful. Fix assigned to the Phase 5 implementer; gate: "your call" hit rate at least 0.8 with dangerous deletes still 0 and no "your call" on must-never-delete files. |
+| A26 | In byte-identical groups, v2 may keep a different copy than the dataset labelled; the scoring accepts either. | The copies are identical, so which one stays is a preference (A19 order), not a correctness question. 27 groups differ. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -74,24 +76,22 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (12:30 UTC, 12 Nov)
+## State (13:20 UTC, 12 Nov)
 
-- Phases 1, 2, 3 done and committed; 24 suites green (re-run by the lead).
-- Phase 3 numbers on the held-out half of the dataset: exact duplicates P/R
-  1.0/1.0; same-content P 0.976 (0.992 as clusters), R 0.909 (0.960 on
-  decodable images); false matches inside look-alike groups 0; near-duplicate
-  P/R 0.983/0.874; "edited from" P 1.0 R 0.52; version-of R 0.29; verified
-  backups 17/17 with 0 false; 56 of 2,142 images "relationships unknown".
-  Drive photos: 44 burst groups, no same-content pairs, 36 HEIC unknown;
-  against name-timestamp bursts: pair precision 0.82, recall 0.36.
-- Weak spots to revisit: version-of and edited-from recall; burst recall on
-  real photos; missing pieces listed in PHASE_3_NOTES.md.
-- Phase 4 implementer: running.
+- Phases 1-4 done and committed; 28 suites green (re-run by the lead),
+  including a property test with 132,867 randomised checks of the safety rules.
+- Phase 4 on the dataset: dangerous deletes 0 of 178 must-never-delete files in
+  standard and aggressive mode; spec violations 0; delete precision SAFE
+  124/124, NO-LOSS 116/116; protected 104/104; scenarios 1,2,3,4,7,9 pass,
+  5,6,8,10,11 "cautious" (safe but less helpful than labelled), none fail.
+  Weakness: "your call" 1 of 453 (see A25). Drive photos: 209 keep, 59 review
+  (similar shots), 0 delete recommendations.
+- Every numeric constant in the risk engine is an uncalibrated heuristic.
+- Phase 5 implementer: running (planner + A25 fix).
 
 ## Next steps
 
-1. Phase 4 (risk engine) -> Phase 5 (planner) -> first full scored run
-   (dangerous-delete rate must be 0).
+1. Phase 5 report -> lead re-runs tests and the full scored run -> commit.
 2. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
 3. Phases 6-10 as far as the session allows.
 4. If an agent stops with a usage-limit error: wait for the reset time in the

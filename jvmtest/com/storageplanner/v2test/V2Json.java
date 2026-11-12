@@ -70,7 +70,7 @@ public final class V2Json {
             w.endArray();
             w.name("graphCoverage").any(graphCoverage);
         }
-        w.name("recommendations").beginArray().endArray();
+        w.name("recommendations"); AssessJson.recommendations(w);
         w.name("plan").nullValue();
         w.name("coverage");
         if (cov == null) w.nullValue(); else CoverageBuilder.write(w, cov);
@@ -111,7 +111,7 @@ public final class V2Json {
         w.name("archive"); FeatureCodec.writeArchive(w, fr == null ? null : fr.archive, 200);
         w.name("category").value(f.category).name("categoryConfidence").nullValue()
          .name("duplicateGroupId").value(f.duplicateGroupId).name("perceptualStatus").value(fr == null ? null : fr.extra.get("graph.perceptual"))
-         .name("assessment").nullValue();
+         .name("assessment"); AssessJson.assessment(w, f.fileId);
         w.endObject();
     }
 }

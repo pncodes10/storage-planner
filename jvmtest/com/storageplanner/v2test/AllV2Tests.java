@@ -33,6 +33,10 @@ public final class AllV2Tests {
             {"ExactGrouperTest", (Suite) ExactGrouperTest::run},
             {"PerceptualTest", (Suite) PerceptualTest::run},
             {"ArchiveMatcherTest", (Suite) ArchiveMatcherTest::run},
+            {"ScenarioFixtureTest", (Suite) ScenarioFixtureTest::run},
+            {"HardRulesTest", (Suite) HardRulesTest::run},
+            {"EstimatorsTest", (Suite) EstimatorsTest::run},
+            {"RiskPropertyTest", (Suite) RiskPropertyTest::run},
         };
         List<String> only = Arrays.asList(args);
         int failures = 0, ran = 0;

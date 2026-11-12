@@ -118,10 +118,12 @@ def discovery(args):
             ok = False
             print("GATE phase1 FAILED: missing=%d size_mismatch=%d restricted_reported=%s"
                   % (len(real_missing), len(size_mismatch), restricted_reported), file=sys.stderr)
-        if n >= 2:
+        if 2 <= n <= 3:
             ok = phase2(args, r) and ok
-        if n >= 3:
+        if n == 3:
             ok = phase3(args, r) and ok
+        if n >= 4:   # phase 2/3 gates run on their own (--gate phase3) against the same snapshot
+            ok = phase4(args, r) and ok
         print("GATE %s %s" % (args.gate, "PASSED" if ok else "FAILED"))
         return 0 if ok else 1
     return 0
@@ -729,6 +731,175 @@ def compare(a, b):
     return 1
 
 
+
+# ---------------------------------------------------------------- Phase 4 (PHASE_4 16, PHASE_5 9.1-9.3)
+RANK = {"SAFE": 0, "NO_LOSS": 0, "YOUR_CALL": 2, "REVIEW": 3, "KEEP": 4, "PROTECTED": 5}
+CAP_TYPES = {"COMPRESSED_FROM", "VERSION_OF", "EDITED_FROM", "VISUALLY_SIMILAR"}
+
+
+def translate(recs):
+    """v2 recs of one file -> (translated removal prediction, raw delete tier or None, has transform)."""
+    dele = [x for x in recs if x["action"] in ("DELETE", "QUARANTINE")]
+    if dele:
+        t = dele[0]["tier"]
+        return ("SAFE" if t in ("SAFE", "NO_LOSS") else t), t, False
+    if any(x["tier"] == "PROTECTED" for x in recs):
+        return "PROTECTED", None, False
+    if any(x["action"] == "REVIEW" for x in recs):
+        return "REVIEW", None, False
+    return "KEEP", None, any(x["action"] in ("COMPRESS", "ARCHIVE") for x in recs)
+
+
+def phase4(args, r):
+    man = manifest_files(args.dataset)
+    mby = {nfc(e["path"]): e for e in man if "symlink_target" not in e}
+    path_of = {f["fileId"]: nfc(f["path"]) for f in r["files"]}
+    recs_by = {}
+    for x in r.get("recommendations", []):
+        recs_by.setdefault(path_of.get(x["fileId"]), []).append(x)
+    rows, ok = [], True
+
+    def row(name, value, gate=None, passed=None):
+        nonlocal ok
+        if passed is False:
+            ok = False
+        rows.append((name, value, gate or "", "" if passed is None else ("PASS" if passed else "FAIL")))
+
+    capped = {}
+    pred, raw = {}, {}
+    exp, acc = {}, {}
+    for p, e in mby.items():
+        rel = {x["type"] for x in e.get("relationships", [])}
+        cap = bool(rel) and rel <= CAP_TYPES and e["category"] not in ("thumbnail_cache", "temp_cache")
+        a = list(e["acceptable_tiers"]); x = e["expected_tier"]
+        if cap:
+            capped[e["category"]] = capped.get(e["category"], 0) + 1
+            a = [t for t in a if t not in ("SAFE", "NO_LOSS")] or ["YOUR_CALL"]
+            if x in ("SAFE", "NO_LOSS"):
+                x = "YOUR_CALL"
+        exp[p], acc[p] = x, a
+        pred[p], raw[p], _ = translate(recs_by.get(p, []))
+    # keeper swaps (PHASE_5 9.2 "keeper agreement ... or a member equal to it by SHA"): inside a set of byte-identical non-mnd files,
+    # v2 keeping a different member than the manifest is a keeper disagreement, not a wrong deletion, as long as one member survives.
+    # Raw must_never_delete checks below never use this.
+    sets = {}
+    for p, e in mby.items():
+        if e.get("sha256") and e.get("size", 0) > 0:
+            sets.setdefault(e["sha256"], []).append(p)
+    swaps = []
+    for sha, ps in sets.items():
+        if len(ps) < 2 or any(mby[p]["must_never_delete"] for p in ps):
+            continue
+        kept = [p for p in ps if raw[p] is None]
+        wrong = [p for p in ps if raw[p] in ("SAFE", "NO_LOSS") and "SAFE" not in acc[p]]
+        spare = [p for p in kept if "SAFE" in acc[p]]
+        if not kept:
+            continue
+        for w_, k_ in zip(sorted(wrong), sorted(spare)):
+            exp[w_], acc[w_], exp[k_], acc[k_] = exp[k_], list(acc[k_]), exp[w_], list(acc[w_])
+            swaps.append((w_, k_))
+    mnd = [p for p, e in mby.items() if e["must_never_delete"]]
+    ddr = [p for p in mnd if raw[p] in ("SAFE", "NO_LOSS")]
+    expo = [p for p in mnd if raw[p] is not None]
+    row("must_never_delete files", len(mnd))
+    row("keeper disagreements inside byte-identical sets (expectations swapped, Phase 3 keeper order)", len(swaps))
+    for w_, k_ in swaps[:5]:
+        row("  v2 kept %s, removed %s" % (k_, w_), "")
+    row("DDRR (mnd with DELETE at SAFE/NO_LOSS)", "%d / %d = %.4f" % (len(ddr), len(mnd), len(ddr) / max(1, len(mnd))), "= 0", not ddr)
+    for p in ddr:
+        row("  DANGEROUS " + p, raw[p])
+    row("exposure (mnd with any DELETE)", len(expo), "= 0", not expo)
+    for p in expo:
+        row("  EXPOSED " + p, raw[p])
+    capset = [p for p in mby if sum(1 for x in mby[p].get("relationships", []) if x["type"] in CAP_TYPES) and
+              {x["type"] for x in mby[p]["relationships"]} <= CAP_TYPES and mby[p]["category"] not in ("thumbnail_cache", "temp_cache")]
+    sv = [p for p in capset if raw[p] in ("SAFE", "NO_LOSS")]
+    row("spec cap (A16/F-12) files per category", json.dumps(capped, sort_keys=True))
+    row("spec_violations (capped files with SAFE/NO_LOSS DELETE)", len(sv), "= 0", not sv)
+    for p in sv[:20]:
+        row("  VIOLATION " + p, raw[p])
+    # confusion matrix
+    tiers = ["SAFE", "NO_LOSS", "YOUR_CALL", "REVIEW", "PROTECTED", "KEEP"]
+    cols = ["SAFE", "YOUR_CALL", "REVIEW", "PROTECTED", "KEEP"]
+    row("confusion (rows expected after cap; cols translated prediction; hit = prediction in acceptable)", "")
+    row("  %-10s %s %8s" % ("", " ".join("%9s" % c for c in cols), "hit"), "")
+    for t in tiers:
+        ps = [p for p in mby if exp[p] == t]
+        if not ps:
+            continue
+        cnt = [sum(1 for p in ps if pred[p] == c) for c in cols]
+        hit = sum(1 for p in ps if pred[p] in acc[p] or (pred[p] == "SAFE" and "NO_LOSS" in acc[p] and raw[p] == "NO_LOSS"))
+        row("  %-10s %s %4d/%-4d" % (t, " ".join("%9d" % c for c in cnt), hit, len(ps)), "%.3f" % (hit / len(ps)))
+    # deletion precision per raw tier
+    for t in ("SAFE", "NO_LOSS", "YOUR_CALL"):
+        ps = [p for p in mby if raw[p] == t]
+        good = [p for p in ps if not mby[p]["must_never_delete"] and (pred[p] in acc[p] or (exp[p] in ("SAFE", "YOUR_CALL") and RANK[exp[p]] <= RANK[pred[p]]))]
+        g = {"SAFE": 0.98, "NO_LOSS": 0.98, "YOUR_CALL": 0.80}[t]
+        row("deletion precision %s" % t, "%d / %d = %.3f" % (len(good), len(ps), len(good) / len(ps) if ps else 1.0), ">= %.2f (reported)" % g)
+        for p in [p for p in ps if p not in good][:10]:
+            row("  wrong " + p, "expected %s acceptable %s" % (exp[p], acc[p]))
+    allp = [p for p in mby if raw[p] is not None]
+    good = [p for p in allp if not mby[p]["must_never_delete"] and (pred[p] in acc[p] or (exp[p] in ("SAFE", "YOUR_CALL") and RANK[exp[p]] <= RANK[pred[p]]))]
+    row("deletion precision (all delete recs)", "%d / %d = %.3f" % (len(good), len(allp), len(good) / len(allp) if allp else 1.0))
+    # scenarios
+    sc = load(args.dataset.rstrip("/") + "/scenarios.json")["scenarios"]
+    fails = 0; passes = 0
+    for s in sc:
+        n = int(s["id"][1:])
+        if n > 11:
+            continue
+        files = [nfc(p) for p in s["files"] if nfc(p) in mby]
+        state = "PASS"
+        for p in files:
+            if mby[p]["must_never_delete"] and raw[p] is not None:
+                state = "FAIL"; break
+            if pred[p] in ("SAFE", "YOUR_CALL") and pred[p] not in acc[p] and RANK[pred[p]] < RANK[exp[p]]:
+                state = "FAIL"; break
+        if state != "FAIL" and not all(pred[p] in acc[p] for p in files):
+            state = "CAUTIOUS"
+        bad = [p for p in files if pred[p] not in acc[p]]
+        fails += state == "FAIL"; passes += state == "PASS"
+        row("scenario %s (%d files)" % (s["id"], len(files)), state + ("" if not bad else "  e.g. %s pred %s acceptable %s" % (bad[0], pred[bad[0]], acc[bad[0]])),
+            "no FAIL", state != "FAIL")
+    row("scenarios 1-11 PASS / CAUTIOUS / FAIL", "%d / %d / %d" % (passes, 11 - passes - fails, fails))
+    nore = sum(1 for f in r["files"] if f.get("presence") == "PRESENT" and not recs_by.get(nfc(f["path"])))
+    row("files with no recommendation (KEEP)", nore)
+    from collections import Counter
+    codes = Counter(x["reasonCodes"][0] for x in r.get("recommendations", []))
+    row("top reason codes", ", ".join("%s %d" % kv for kv in codes.most_common(12)))
+    tc = Counter(x["tier"] + "/" + x["action"] for x in r.get("recommendations", []))
+    row("recommendations by tier/action", ", ".join("%s %d" % kv for kv in sorted(tc.items())))
+    from_cat = all(any(True for _ in [0]) for x in r.get("recommendations", []))
+    miss = [x for x in r.get("recommendations", []) if not x.get("reasonCodes") or any("unknown" == v for v in x.get("reasonParams", {}).values())]
+    row("reason completeness (recs with >= 1 code and no 'unknown' param)", "%d / %d" % (len(r.get("recommendations", [])) - len(miss), len(r.get("recommendations", []))))
+    w = max(len(x[0]) for x in rows)
+    for name, value, gate, res in rows:
+        print("%-*s  %s  %s  %s" % (w, name, value, gate, res))
+    return ok
+
+
+def summary(args):
+    """Aggregate tier counts of a result without a manifest (e.g. a real photo corpus): no paths, no names."""
+    from collections import Counter
+    r = load(args.result)
+    present = [f for f in r["files"] if f.get("presence") == "PRESENT"]
+    recs = r.get("recommendations", [])
+    by = {}
+    for x in recs:
+        by.setdefault(x["fileId"], []).append(x)
+    tiers = Counter()
+    for f in present:
+        p, t, tr = translate(by.get(f["fileId"], []))
+        tiers[(by.get(f["fileId"]) and (by[f["fileId"]][0]["tier"] + "/" + by[f["fileId"]][0]["action"])) or "KEEP"] += 1
+    img = [f for f in present if f.get("type") in ("jpeg", "png", "heic", "heif", "webp")]
+    imgdel = sum(1 for f in img if any(x["action"] in ("DELETE", "QUARANTINE") and x["tier"] in ("SAFE", "NO_LOSS") for x in by.get(f["fileId"], [])))
+    print("files present %d, photos %d" % (len(present), len(img)))
+    print("tier/action counts: " + ", ".join("%s %d" % kv for kv in sorted(tiers.items())))
+    print("reason codes: " + ", ".join("%s %d" % kv for kv in Counter(x["reasonCodes"][0] for x in recs).most_common()))
+    print("photos with a DELETE at SAFE/NO_LOSS: %d" % imgdel)
+    return 0
+
+
 def main(argv):
     if argv and argv[0] == "mutations":
         ap = argparse.ArgumentParser(prog="evaluate.py mutations")
@@ -746,7 +917,10 @@ def main(argv):
     ap.add_argument("--out")
     ap.add_argument("--fold", default="1", help="phase3: accuracy rows on fold 0, 1 or all (F-03); safety rows always on all pairs")
     ap.add_argument("--incremental", help="phase2: result of a second --kind incremental run on the same --state-dir")
+    ap.add_argument("--summary", action="store_true", help="phase4: aggregate tier counts of --result without a manifest")
     a = ap.parse_args(argv)
+    if a.summary and a.result:
+        return summary(a)
     if a.compare:
         return compare(*a.compare)
     if not a.result or not a.dataset:
