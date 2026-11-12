@@ -67,6 +67,10 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A24 | Same-content results are scored as clusters, so two derived copies of one original count as related even if the dataset did not link them directly. | The dataset links each copy to its original only; a WhatsApp copy and a thumbnail of the same photo really are the same content. Strict pair precision 0.976, cluster precision 0.992. |
 | A25 | Phase 4 accepted on safety, but sent back on usefulness: "your call" items must be decided by the kind of evidence, not by an absolute size floor. The utility score ranks them and decides plan inclusion; it no longer hides them. | First run: 0 dangerous deletes, but 452 of 453 files that should be "your call" got no recommendation, because a 50 MiB benefit scale made every small chat copy and APK score below zero. Spec section 1 asks for aggressive discovery with risk-aware recommendations; hiding candidates is not the safe side, it is just less useful. Fix assigned to the Phase 5 implementer; gate: "your call" hit rate at least 0.8 with dangerous deletes still 0 and no "your call" on must-never-delete files. |
 | A26 | In byte-identical groups, v2 may keep a different copy than the dataset labelled; the scoring accepts either. | The copies are identical, so which one stays is a preference (A19 order), not a correctness question. 27 groups differ. |
+| A27 | The one "your call" recommendation on a must-never-delete file is a dataset label defect, not an algorithm fault; the label will be corrected in the generator. | The file is a lower-resolution copy of the same picture as another file (sources `obama-720p.jpg` / `obama-1080p.jpg`), yet labelled unique. Offering the smaller copy as "your call" is the intended behaviour. Until fixed, the scored run shows exposure 1 and scenario 5 failing. |
+| A28 | Old screenshots, forwarded chat media and old downloads stay deferred to Phase 6; the 0.8 "your call" hit-rate gate moves there. Current hit rate 0.61. | Offering these on age and folder alone contradicts spec 2.2 ("do not assume old files are unnecessary") and would put must-never-delete screenshots in front of the user as deletion candidates. They need content signals (text, QR, document layout), which is Phase 6. |
+| A29 | A plan contains only SAFE and NO-LOSS items by default; "your call" items enter only when the user opts that tier in, ranked by score. | Spec 10.2: if a target cannot be reached safely, report the achievable amount instead of raising risk silently. |
+| A30 | Lead failure recorded: the GitHub build has failed on every push since v2 code landed, and it was not checked until 12:35 UTC. The APK compile step reports 10 errors in v2 code (desktop-only Java APIs). Fix assigned; a local compile check against Android framework classes is being added so this is caught before pushing. | The local tests compile against the desktop JDK only, so "all tests pass" never covered "compiles for Android". Phase A depends on this. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -76,23 +80,29 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (12:25 UTC, 12 Nov)
+## State (12:45 UTC, 12 Nov)
 
-- Phases 1-4 done and committed; 28 suites green (re-run by the lead),
-  including a property test with 132,867 randomised checks of the safety rules.
-- Phase 4 on the dataset: dangerous deletes 0 of 178 must-never-delete files in
-  standard and aggressive mode; spec violations 0; delete precision SAFE
-  124/124, NO-LOSS 116/116; protected 104/104; scenarios 1,2,3,4,7,9 pass,
-  5,6,8,10,11 "cautious" (safe but less helpful than labelled), none fail.
-  Weakness: "your call" 1 of 453 (see A25). Drive photos: 209 keep, 59 review
-  (similar shots), 0 delete recommendations.
-- Every numeric constant in the risk engine is an uncalibrated heuristic.
-- Phase 5 implementer: running (planner + A25 fix).
+- Phases 1-5 built and committed; 32 suites green locally (re-run by the lead).
+- **The APK build in CI is red** (A30): v2 does not yet compile for Android.
+  Fix agent running. Nothing v2 has run on a phone.
+- Scored run after Phase 5 (standard / aggressive): dangerous deletes 0/178;
+  spec violations 0; exposure 1 (label defect, A27); tier hit rates SAFE 0.98,
+  NO-LOSS 1.0, REVIEW 0.83, PROTECTED 0.99, KEEP 0.998, YOUR CALL 0.61.
+  Plans: max safe = 5.5 MB safe + 56.8 MB no-loss on the 716 MB dataset, 0
+  must-never-delete files, 0% wrong bytes, 68% of the truly recoverable bytes
+  found; unreachable 5 GB target reports the achievable amount; scenario 12
+  (file changed after scan) detected, all 7 changed files named. With the app
+  fixture: caches 328 MB safe, idle apps 490 MB no-loss.
+  Drive photos: 0 bytes planned, 59 review items.
+- Not built: ClassicParityTest (A15) and five other listed tests; pipeline
+  stage wiring for assess/plan (the CLI calls them directly).
 
 ## Next steps
 
-1. Phase 5 report -> lead re-runs tests and the full scored run -> commit.
-2. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
-3. Phases 6-10 as far as the session allows.
-4. If an agent stops with a usage-limit error: wait for the reset time in the
+1. CI compile fix + A29 -> lead verifies locally and checks the CI run goes
+   green -> commit.
+2. Dataset label fix (A27) and missing tests.
+3. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
+4. Phase 6 (content signals for screenshots/forwards/downloads, A28), then 7-10.
+5. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.
