@@ -54,6 +54,9 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A12 | Phase A (app switch) waits for a memory measurement after Phase 2: at most about 1 KB per file in the in-memory store, otherwise SQLite is brought forward. | The phone build holds the whole store in memory until Phase 10. |
 | A13 | Store = one snapshot file replaced atomically at intervals, not a write-ahead log. | Reviewer found a log bug that silently lost every commit after a half-written line; snapshots are simpler and enough for scan recovery. The Phase 9 operation journal gets its own log. |
 | A14 | v2 includes app caches and idle apps (data gathered in Phase 2, planned in Phase 5); exit test: v2's safe bytes are at least classic's. | Spec 10.3 ranks rebuildable data first; the first draft ignored it. |
+| A15 | A14 amended: v2 need not match classic's safe bytes where classic's call is unsafe (WhatsApp "sent" copies matched on look alone, Telegram media assumed cloud-backed, older APKs, encrypted chat backups). Parity is checked per item against a documented exemption list. | Architect showed strict parity would force v2 to copy calls the spec forbids (6.2: similarity alone never makes files interchangeable; 8.3: a backup must be verified). Safety outranks matching the old number. |
+| A16 | The spec's tier definitions are the authority, not the dataset's labels; the evaluator translates dataset tiers to spec tiers. A delete at SAFE/NO-LOSS on a must-never-delete file fails under any translation. | The dataset marked exact and WhatsApp copies SAFE; the spec reserves NO-LOSS for verified identical copies and caps look-alike copies at YOUR CALL. |
+| A17 | A duplicate group's keeper is a label with no recommendation, not a PROTECTED item. | Otherwise about 300 ordinary originals would show as "protected", which reads as over-caution. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -73,8 +76,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   (14 suites, 0 failures, incl. kill-and-resume) when run by the lead at
   06:25 UTC. Implementer resumed to finish, run the CLI on both corpora and
   write `PHASE_1_NOTES.md`.
-- Phases 3-5 design drafts written (`PHASE_3/4/5.md`), architect resumed to
-  finish PHASE_5 and report. Not yet reviewed.
+- Phases 3-5 design finished; reviewer agent running (`REVIEW_2.md`), with
+  rulings A15-A17 to check.
 
 ## Next steps
 
