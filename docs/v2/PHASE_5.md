@@ -38,6 +38,8 @@ compressible list, total ≥ 20 MiB, estimated saving ≥ 30 %, none with a remo
 last 365 days (mtime) **and** `U90.high < 0.05` for all of them. Tier NO_LOSS (lossless, verified at execution), reason
 `N_ARCHIVE_FOLDER` ★: "{n} rarely used {kind} files in {folder} can be packed into one archive, saving about {saving}; nothing is lost."
 Rarely produced; on the dataset expected ≤ 2 subjects (Android logs are SAFE removals instead).
+**REVIEW_2 F-16 (cut): deferred to Phase 6** together with lossy compression — it needs a new subject kind, a folder-level executor
+and its own tests for ≤ 2 dataset subjects. Phase 5 emits no `dir:` subjects and no `N_ARCHIVE_FOLDER`; priority class 7 stays empty.
 
 ---
 
@@ -56,7 +58,8 @@ Rules: (1) per file at most one removal-class rec (DELETE) **or** one REVIEW **o
 every DELETE rec needs a current full SHA-256 of its file; missing ones are computed by Phase 2's `HashStage` code with
 `reason = "PLAN"`, in plan-priority order (§4.2) then bytes descending, charging the scan budget. A rec whose hash is still missing when
 the budget ends is stored with `reasonParams.hash = "pending"` and is **not plannable** (counted under `PL_HASH_PENDING` ★: "{n} items
-are still being checked and will be offered later."). The hash goes into `evidenceRefs` as `"sha256:<hex>"`. (3) Approval carry
+are still being checked and will be offered later."). The hash goes into `evidenceRefs` as `"sha256:<hex>"`. (3) Approval carry — **REVIEW_2 F-16 (cut): deferred to Phase 9**; nothing approves a v2 rec before Phase 9 (H5), so Phase 5 writes
+every rec `NOT_REQUESTED` and the rule below is the Phase 9 specification
 (`ApprovalCarry`): a new rec inherits `approvalState` from the previous plan's rec for the same `(subject, action)` only if fp, tier,
 primary reason and every `dependencyIds` fingerprint are unchanged; otherwise `NOT_REQUESTED`. (4) Recs of the previous version that are
 not regenerated are removed from the table (history is in the plans; Phase 9 journal keeps executed ones).
@@ -122,7 +125,10 @@ among them the objective is "free bytes"; utility only orders YOUR_CALL options.
 ```
 units = UnitBuilder2.build(recs, apps, graph)                         // §3; options with unknown bytes or pending hash dropped
 cost(o) = EL_pess(o) + EC(o) + QP(o)                                    // = Bn(o) − utility(o); ≥ 0
-key(o)  = (priorityClass(o), tierRank(o), cost(o)/max(1,bytes(o)), −bytes(o), unitId)   // total order, deterministic
+key(o)  = (tierRank(o), priorityClass(o), cost(o)/max(1,bytes(o)), −bytes(o), unitId)   // total order, deterministic
+          // REVIEW_2 F-11: tier first. With priorityClass first, class-6 YOUR_CALL deletions sorted before the class-7 NO_LOSS
+          // archive option, so the k = YOUR_CALL pass could reach the target with YOUR_CALL items while a NO_LOSS option was left
+          // unused — raising risk the spec 10.2 forbids. Spec 10.3 order applies *within* a tier.
 cap(k)  = Σ over units of the largest-bytes option with tier ≤ k (after §3 conflict resolution by key order)
 
 plan(target, mode):
@@ -135,8 +141,9 @@ plan(target, mode):
             the same unit if any); stop when bytes(sel) ≥ target
       prune(sel, target): for selected non-SAFE options in reverse key order: drop (or downgrade to the unit's next option ≤ k) if
             bytes(sel) − Δ ≥ target
-      swap(sel, target): let R = bytes needed beyond base; let G = selected non-SAFE options; candidate single option s ∉ G with
-            tier ≤ k, bytes(s) ≥ R and cost(s) < Σ cost(G): replace G by s if §3 allows (best such s by cost, then key)
+      swap(sel, target): (REVIEW_2 F-11) only among tier-k options: let G = selected options with tier == k; R = target − bytes(sel \ G);
+            candidate single option s ∉ G with tier == k, bytes(s) ≥ R and cost(s) < Σ cost(G): replace G by s if §3 allows (best such s
+            by cost, then key). Options below k are never swapped out (they are lower risk; trading them for a tier-k item raises risk)
       return sel with highestTier = k, reachesTarget = true
   // unreachable
   sel = base + all NO_LOSS (as MAX_SAFE) + all YOUR_CALL options with utility > 0 in key order (§3 checks)
@@ -197,10 +204,14 @@ Classic puts these in R1 ("no loss") and v2 deliberately does not (each is a saf
 |---|---|---|---|
 | `SENT` WhatsApp sent copy (R1) | pHash ≤ 8 bits + aspect, no structural check | `Y_CHAT_COPY` YOUR_CALL | H2; PHASE_3 probe: same-template screens reach 0 bits |
 | `TELEGRAM` media (R1) | "re-downloadable from Telegram's cloud" | KEEP (no rec) | spec 2.2: cloud backup is never verified; dataset labels these KEEP/YOUR_CALL |
-| `INSTALLED_APK` older version (R1) | installed versionCode ≥ APK's, no signer check | `Y_OLDER_INSTALLER` YOUR_CALL (signer equal) / REVIEW | S06; same version ≠ same bytes; older = rollback option |
-| `WA_BACKUP` older chat backup (R1) | name pattern | `Y_OLD_CHAT_BACKUP` YOUR_CALL | backups are encrypted, cannot be verified (spec 9.4 "verified redundant backup") |
-| `DUPLICATES` across alias routes (R1) | same SHA-256 | none / REVIEW | G2 |
-| `lossless_image` screenshots (R1, estimate) | estimate | `N_LOSSLESS_SMALLER` only when B > 1 MiB and ≥ 10 % | estimates are not "safe bytes" |
+| `INSTALLED_APK` older version (R1) | installed versionCode ≥ APK's, no signer check | `Y_OLDER_INSTALLER` YOUR_CALL (signer equal) / REVIEW | spec 9.4 NO-LOSS "verified *redundant* installer": an older version is a rollback copy, not redundant, and without a signer check not even verified (S06) |
+| `WA_BACKUP` older chat backup (R1) | name pattern | `Y_OLD_CHAT_BACKUP` YOUR_CALL | spec 9.4 NO-LOSS "verified redundant backup" + spec 8.3 (a backup must be verified): crypt files cannot be verified |
+| `DUPLICATES` across alias routes (R1) | same SHA-256 | none / REVIEW | spec 9.4 NO-LOSS "identical duplicate with **another** accessible copy" (an alias is the same file; ARCHITECTURE G2) |
+| `lossless_image` screenshots (R1, estimate) | estimate | `N_LOSSLESS_SMALLER` only when B > 1 MiB and ≥ 10 % | spec 10.1/8.6 "actual usable storage": estimates are reported `exact=false`, not counted as safe bytes |
+
+REVIEW_2 F-14: this table is the **closed** exemption list (`ClassicParityTest.EXEMPTIONS`, one entry per row: classic technique,
+required v2 code or "no rec", spec rule). An exemption matches only if v2's output on that subject is exactly the listed code; any new
+exemption needs a row here naming the spec rule it protects (ruling A15).
 
 ### 6.3 `ClassicParityTest` (replaces the literal A14 test)
 
@@ -256,6 +267,17 @@ similar copies are YOUR_CALL at most (H2). The evaluator therefore scores v2 out
 
 Ranks for removal predictions: `SAFE 0 < YOUR_CALL 2 < REVIEW 3 < KEEP 4 < PROTECTED 5` (as ARCHITECTURE §10).
 
+**REVIEW_2 F-12 (ruling R2 — the translation goes both ways).** Translating v2 output alone would still *reward* a spec violation: a v2
+NO_LOSS DELETE on a WhatsApp-recompressed copy translates to `SAFE`, which is in that file's acceptable tiers. The evaluator therefore
+also translates the **expected** side to spec tiers before scoring:
+* `specCap(file)` = `YOUR_CALL` when the file's manifest relationships are only `COMPRESSED_FROM`, `VERSION_OF`, `EDITED_FROM`,
+  `VISUALLY_SIMILAR` (no `EXACT_DUPLICATE`, not `thumbnail_cache`/`temp_cache` category); otherwise none.
+* For capped files, `SAFE` and `NO_LOSS` are removed from `acceptable_tiers` (and `expected = SAFE` becomes `YOUR_CALL`) for every metric.
+* New metric `spec_violations` = capped files with a SAFE/NO_LOSS DELETE; gate **0**, both modes.
+* The must_never_delete checks (DDRR, exposure, scenario FAIL) read v2's raw tiers and the raw manifest flag and are applied **before**
+  and independently of any translation; no translation can turn them into a pass.
+The capped set is printed in the report (count per category) so the lead can audit it.
+
 ### 9.2 Metrics (all computable offline from `result.json` + manifest + sidecars)
 
 | Metric | Definition | Gate (standard and aggressive unless noted) |
@@ -300,7 +322,8 @@ Gate: no FAIL in 1–11 (both modes); ≥ 8 PASS (standard). Expected: PASS 2, 3
 | `PlanValidatorTest` (property, ARCHITECTURE H1 P5) | random graphs (exact groups, content groups, bundles, companions) × random tiers → no plan ever removes a keeper, all members of an exact group, a `requires` file, a REVIEW/PROTECTED file, or a file twice; `achievableBytes == Σ items` |
 | `HashOnDemandTest` | DELETE recs get `sha256:` evidence; budget exhaustion → `hashPending`, not planned; stale hash recomputed |
 | `RecommendationExpiryTest` | CHANGED/REPLACED/REMOVED/UNVERIFIABLE file → its PENDING/APPROVED recs EXPIRED in the same commit; dependency change expires dependents; app version change expires app recs |
-| `ApprovalCarryTest` | unchanged rec keeps APPROVED across planVersion; changed fp, tier, reason or dependency fp → NOT_REQUESTED |
+| `ApprovalCarryTest` | deferred to Phase 9 (F-16) |
+| `Planner2TierOrderTest` (F-11) | synthetic NO_LOSS option with a higher priority class than the YOUR_CALL options (as `N_ARCHIVE_FOLDER` will be in Phase 6), target reachable with NO_LOSS + one YC item → the NO_LOSS option is selected and only the minimum YC bytes; swap never removes a NO_LOSS item |
 | `PlanStalenessTest` | each STALE trigger of §7 |
 | `ModeInvarianceTest` (H7) | same input both modes: identical HardRules output; aggressive plan ⊇ standard plan's SAFE/NO_LOSS items |
 | `ClassifierStubPlanTest` (H3) | classifier stub "meme 0.99" for all → no new SAFE/NO_LOSS items, DDRR unchanged |
@@ -343,6 +366,14 @@ never reach `Planner.tiered`; classic `Planner.tiered` over adapted units select
 (or `Session.replan` must drop the copies' options when the user deletes a keeper), otherwise a user could delete keeper and copies
 together; the test simulates it.
 
+**REVIEW_2 F-13 (classic Planner knows no conflicts).** `core.Planner.tiered/bestWithin` choose one option per `Unit` independently; they
+have no `requires`/`conflictsWith`. Handing them the raw v2 units would double count `cache:<pkg>` against the `S_APP_CACHE_FILE` files
+under `Android/data/<pkg>/cache/**`, and `app:<pkg>` UNINSTALL against the files under that package (§3). The adapter therefore emits
+only a **conflict-free** option set: it runs `UnitBuilder2`'s conflict resolution (§3 "app vs file subjects" rule) first and gives the
+losing side no `Option` (display-only, reason "included in {app}'s cache/uninstall"). Removal options whose `requires` contain a file
+that has any removal option are not emitted (cannot happen while keepers have no unit, HC13; asserted). `V2AdapterTest` adds: for random
+targets, `Σ Planner.tiered(adapted).saved() ≤ Σ distinct file and app bytes` and equals v2 `achievableBytes` for `MAX_SAFE`.
+
 ---
 
 ## 12. ARCHITECTURE changes
@@ -356,6 +387,7 @@ together; the test simulates it.
 | C-5 | §2.12 | `ActionPlan` gains `long withYourCallBytes, achievableExactBytes; List<String> reasonCodes`; `PlanItem` gains `int priorityClass` |
 | C-6 | §8 Planner bullet | replace "within the lowest feasible tier, greedy by benefit/expected-loss then prune" with §4.3 (SAFE always taken; lexicographic tier → priority class → cost/byte; prune + single-item swap) |
 | C-7 | §13 step 4 | REVIEW/PROTECTED go to `Adapted.displayOnly` (they have 0 bytes and `Unit.add` drops 0-byte options); keeper/userDelete requirement of §11 |
+| C-8 (REVIEW_2) | §10, §13 step 3 | `spec_violations` metric and two-sided translation (F-12); adapter emits a conflict-free option set (F-13); planner key is tier-first, swap within tier k only (F-11) |
 
 ---
 
@@ -363,8 +395,9 @@ together; the test simulates it.
 
 | Metric | Gate | Expected |
 |---|---|---|
-| DDRR | 0, both modes | 0 |
+| DDRR | 0, both modes | 0 (needs PHASE_4 F-05/F-06: `temp123.tmp` and the identical invoice pair are must_never_delete) |
 | exposure (any DELETE on must_never_delete) | 0, both modes | 0 |
+| `spec_violations` (F-12) | 0, both modes | 0 |
 | deletion precision SAFE / NO_LOSS / YOUR_CALL | ≥ 0.98 / ≥ 0.98 / ≥ 0.80 | ≈ 1.0 / ≈ 1.0 / ≈ 0.95 |
 | deletion recall (acceptable-aware) | ≥ 0.90 | ≈ 0.95 (misses: collage/unlabelled edits do not count; misses are memes/forwards without a copy relation, which have `SAFE` expected only when they are exact/compressed copies) |
 | no-loss recall (strict) | ≥ 0.90 | ≈ 0.98 (exact 126, thumbnails 80, statuses, trashed) |

@@ -118,7 +118,7 @@ on change, commits every 500 files, is idempotent (pure function of the store + 
 |---|---|---|---|---|
 | 1 | `EMPTY` | `sizeBytes == 0` | 0 | — |
 | 2 | `TRASH` | name `.trashed-*` | 0.05 | no |
-| 3 | `TEMP` | area `temp` | 0.05 | no |
+| 3 | `TEMP` | area `temp` **and (REVIEW_2 F-05)** the content does not contradict the name: `typeSource != SIGNATURE`, or the signature type is in no content family (document, image, video, audio, archive, apk), or `integrity == TRUNCATED` (an unfinished download). Classic `area temp` is decided by the *extension* (`.tmp/.part/.crdownload`, `.pending-`): that is a PROV fact, not a STRUCT one, and the dataset's `Download/temp123.tmp` is a complete bank-statement PDF (must_never_delete). A file failing the clause is classified by its detected type (rows 8–22) and additionally gets `R_NAME_CONTENT_MISMATCH` | 0.05 | no |
 | 4 | `THUMBNAIL` | area `thumbnails` | 0 (regenerable) | — |
 | 5 | `CACHE` | area `ext_cache`, or path component `cache`/`.cache` under `Android/(data|media)/<pkg>/` | 0 (regenerable) | — |
 | 6 | `APP_LOG` | under `Android/(data|media)/<pkg>/`, a path component `logs`/`log`, ext ∈ {log, txt, trace} | 0.05 | no |
@@ -183,7 +183,8 @@ of every importance factor = 0.9 (H4), `mid` = class default.
 | UNKNOWN | .5 (high .9) | .5 (high .9) | .5 (high .9) | .5 (high .9) | 1.0 | 1.0 |
 | TEMP / TRASH / THUMBNAIL / CACHE / APP_LOG / STATUS / EMPTY | .05 | 0 | 0 | 0 | .1 | .1 |
 
-`low` = 0.5 × mid unless stated. Signals that raise factors (max with the table): `Keywords.financial` hit → financial (.9,.9,1.0);
+`low` = 0.5 × mid unless stated; **`high` = min(1, mid + 0.2) unless stated** (REVIEW_2 F-08: the table gave no default high, so
+`L.high` — the bound every gate reads — was undefined for most cells). Signals that raise factors (max with the table): `Keywords.financial` hit → financial (.9,.9,1.0);
 `Keywords.legal`/`medical`/`identity` → legal (.9,.9,1.0); `Keywords.sentimental` (wedding, baby, family, birthday, funeral, `Family/`
 folders) → sentimental (.7,.8,1.0); `CAPTURE` GPS → personal +.1; Phase 6: faces → personal (.8,.9,1.0); Phase 7 categories → per §10.
 
@@ -222,7 +223,7 @@ asserts that adding a VERIFIED exact twin changes `rv` and leaves `lossRange` un
 | 2 | `REGENERABLE` | `REGENERABLE_INSTALLER` | APK `installState == SAME_VERSION` ∧ `sameSigner == TRUE` ∧ apps availability ≠ UNAVAILABLE (the installed package's own APK is the same content) | 1.0 | 1.0 |
 | 3 | `VERIFIED_BACKUP` | `EXACT_COPY_KEPT` | a VERIFIED `EXACT_DUPLICATE` (G1, G2) to the group's keeper, the keeper is eligible and ≠ this file. **The keeper itself does not count its own group's redundant members** (they are about to be offered for removal) | 1.0 | 1.0 |
 | 4 | `VERIFIED_BACKUP` | `BACKUP_VERIFIED` | a `BackupRecord` with `state == VERIFIED` (SHA256_MATCH) whose archive is PRESENT, eligible and not itself a removal candidate | 1.0 | 1.0 |
-| 5 | `POSSIBLE_BACKUP` | `SUPERSET_COPY` | redundant member of a `CONTENT_EQUIVALENT` group whose keeper is eligible (same picture, kept at ≥ this quality; pixels VERIFIED) | 0.7 | 0.5 if edge confidence ≥ 0.8 else 0 |
+| 5 | `POSSIBLE_BACKUP` | `SUPERSET_COPY` | redundant member of a `CONTENT_EQUIVALENT` group whose keeper is eligible (same picture, kept at ≥ this quality; pixels VERIFIED) **with its own current VERIFIED edge to the keeper's content node** (REVIEW_2 F-02: no reliance on a chain C→B→K, whose small per-edge differences can add up) | 0.7 | 0.5 if edge confidence ≥ 0.8 else 0 |
 | 6 | `POSSIBLE_BACKUP` | `UNVERIFIED_COPY` | `EXACT_DUPLICATE` UNVERIFIED (G2 unknown), or `AMBIGUOUS` pair to a larger image | 0.3 | 0 |
 | 7 | `POSSIBLE_BACKUP` | `POSSIBLE_ARCHIVE_COPY` | `BackupRecord` POSSIBLE (CRC32 or name+size) | 0.3 | 0 |
 | 8 | `NO_VERIFIED_BACKUP` | `NONE` | the graph is complete for this file: hash known or size unique (Phase 2 COLLISIONS policy), and for images `perceptualStatus != UNKNOWN`, and no archive listing pending | 0 | 0 |
@@ -241,7 +242,12 @@ and only through the specific candidate rules of §9 that cite them).
 
 ## 6. C — confidence (`ConfidenceEstimator`)
 
-`C = min(c_extract, c_graph, c_class, c_indep, c_avail)`, then `C = min(C, 0.4)` when `contradiction`. Minimum, not product: the
+`C = min(c_extract, c_graph, c_class, c_indep, c_avail)`, then `C = min(C, 0.4)` when `contradiction`.
+**REVIEW_2 F-07:** for a *structural* candidate (`Candidate.structural`: S_ rules, `N_EXACT_DUPLICATE`, `N_INSTALLER_INSTALLED`) the
+components that do not bear on its evidence are 1.0: `c_extract` (byte equality / location does not depend on content extraction — an
+exact copy of a video with PARTIAL extraction is still byte-identical) and `c_avail` (U/L unknowns do not touch a structural claim).
+Otherwise HC15 (`C ≥ 0.9` for NO_LOSS) silently blocks exact duplicates of every file whose `extractionConfidence < 0.9`, and the
+statement in §13 "exact/installer rules always reach 1.0 by construction" would be false. c_graph still applies (UNVERIFIED → 0.7 → blocked). Minimum, not product: the
 weakest component bounds trust, and a product would treat the components as independent probabilities, which they are not.
 
 | Component | Value |
@@ -353,7 +359,7 @@ public final class Candidate {
 
 | Code | Tier | Action | Condition | Families | Fallback when blocked |
 |---|---|---|---|---|---|
-| `S_TEMP_FILE` | SAFE | DELETE | usage TEMP and mtime age ≥ 24 h | STRUCT | dropped |
+| `S_TEMP_FILE` | SAFE | DELETE | usage TEMP (incl. the F-05 content clause of §3.1) and mtime age ≥ 24 h | STRUCT | dropped |
 | `S_TRASHED` | SAFE | DELETE | usage TRASH | STRUCT | dropped |
 | `S_THUMBNAIL` | SAFE | DELETE | usage THUMBNAIL | STRUCT | dropped |
 | `S_APP_CACHE_FILE` | SAFE | DELETE | usage CACHE | STRUCT | dropped |
@@ -361,7 +367,7 @@ public final class Candidate {
 | `S_EXPIRED_STATUS` ★ | SAFE | DELETE | usage STATUS, mtime age ≥ 24 h, name ≠ `.nomedia` | STRUCT | dropped |
 | `S_EMPTY_FILE` ★ | SAFE | DELETE | `sizeBytes == 0`, regular file, name not starting with `.`, not under `Android/(data|obb)`, ext ∉ {nomedia, lock} | STRUCT | dropped |
 | `S_UNINSTALLED_LEFTOVER` | SAFE | DELETE | area `residue` under `Android/data/` only, non-media type, apps FULL | STRUCT+APP | `R_UNKNOWN_DEPENDENCY`/REVIEW |
-| `N_EXACT_DUPLICATE` | NO_LOSS | DELETE | redundant member of an exact group, edge to keeper VERIFIED, keeper eligible, `rvPess == 1` | GRAPH(verified) | `R_UNCERTAIN_COPY`/REVIEW |
+| `N_EXACT_DUPLICATE` | NO_LOSS | DELETE | redundant member of an exact group, edge to keeper VERIFIED, keeper eligible, `rvPess == 1`; **REVIEW_2 F-06**: for usage `DOCUMENT`/`DOCUMENT_RECORD` also `NameStem(copy) == NameStem(keeper)` (copy suffixes `(1)`, ` - copy`, `~2` stripped) — byte-identical documents with different names (two invoice numbers, two dates) keep the name as the only record of which document each is; the dataset has such a pair, both must_never_delete | GRAPH(verified) | `R_SAME_CONTENT_DIFFERENT_NAME` (documents, F-06) else `R_UNCERTAIN_COPY`/REVIEW |
 | `N_INSTALLER_INSTALLED` | NO_LOSS | DELETE | R row 2; bundle = its split companions (all must satisfy row 2) | APP | `Y_INSTALLER_UNVERIFIED`/YOUR_CALL |
 | `N_LOSSLESS_SMALLER` | NO_LOSS | COMPRESS | type ∈ {wav, bmp, tiff-uncompressed, png (screenshot area)}, B > 1 MiB and B ≥ 10 % of size | STRUCT | dropped |
 | `Y_CHAT_COPY` | YOUR_CALL | DELETE | R row 5 with the member in a chat area or WhatsApp name | GRAPH+PROV | `R_UNCERTAIN_COPY`/REVIEW (aggressive) or dropped |
@@ -381,7 +387,8 @@ public final class Candidate {
 | `Y_OLD_DOWNLOAD`, `Y_OLD_SCREENSHOT`, `Y_FORWARDED_MEDIA` | YOUR_CALL | DELETE | need a `CONTENT` signal plus a second family — **not produced until Phase 6** (no CONTENT family yet) | — | — |
 | `R_UNCERTAIN_COPY` | REVIEW | REVIEW | derived member of an `AMBIGUOUS` pair, or non-keeper of an UNVERIFIED exact group, or any member of a `keeperFallback` group | GRAPH | — |
 | `R_ENCRYPTED`, `R_UNREADABLE`, `R_ARCHIVE_UNSAFE` | REVIEW | REVIEW | HC3/HC9 | STRUCT | — |
-| `R_NAME_CONTENT_MISMATCH` | REVIEW | REVIEW | `extMismatch == SUSPICIOUS` | STRUCT | — |
+| `R_NAME_CONTENT_MISMATCH` | REVIEW | REVIEW | `extMismatch == SUSPICIOUS`, or a temp/partial name holding a complete content file (§3.1 row 3, F-05) | STRUCT | — |
+| `R_SAME_CONTENT_DIFFERENT_NAME` ★ (REVIEW_2 F-06) | REVIEW | REVIEW | would be `N_EXACT_DUPLICATE`, usage `DOCUMENT`/`DOCUMENT_RECORD`, and `NameStem(copy) ≠ NameStem(keeper)` after also stripping the DocVersion suffixes of PHASE_3 §7 | GRAPH | — |
 | `R_UNKNOWN_DEPENDENCY` | REVIEW | REVIEW | `Android/obb/<pkg>` residue with no APK of `pkg` present; fallbacks above | STRUCT+APP | — |
 | `P_UNIQUE_RECORD` | PROTECTED | KEEP | usage DOCUMENT_RECORD (or CHAT_BACKUP current `msgstore.db.crypt*`), `lossRange.high ≥ 0.8`, R ∉ {VERIFIED_BACKUP, REGENERABLE}, not a redundant member; param `category` = financial/legal/medical/identity/chat backup | PROV | — |
 | `P_ARCHIVE_UNIQUE_CONTENT` | PROTECTED | KEEP | listed archive (OK) with ≥ 1 entry of document type or record keyword that no PRESENT file matches (no BackupRecord of state ≥ POSSIBLE points at it); param `n` = count | GRAPH+PROV | — |
@@ -411,6 +418,11 @@ decided separately in row T.
 | 10 | an `R_` candidate (non-forced) exists and is shown by the policy | REVIEW | that code |
 | 11 | otherwise | KEEP (no removal recommendation) | — |
 | T | independently: `N_LOSSLESS_SMALLER` passes `check` and rows 1–7 did not fire (no SAFE/NO_LOSS removal, not REVIEW/PROTECTED) | NO_LOSS (COMPRESS) | `N_LOSSLESS_SMALLER` |
+
+REVIEW_2 F-10: a transform replaces the original file. Row T additionally requires `lossRange.high < 0.8` (no transform is proposed on
+a likely record: payment screenshots, scanned receipts); and every transform rec carries `reasonParams.keepOriginal = "until-purge"`,
+binding on Phase 9: the original goes to quarantine (not deleted) after the output is verified, and is purged only with the normal
+retention. Lossy transforms remain forbidden under HC8 and, from Phase 6, on any file with `lossRange.high ≥ 0.8`.
 
 Every verdict carries ≥ 1 reason code, every `{param}` of its template filled (`ReasonCatalogTest`), the evidence refs of the chosen
 candidate (edgeIds, backupIds, `hash:<fileId>`), and the `hardBlocks` collected on the way (blocked candidates are explained, e.g. "Similar
@@ -468,6 +480,7 @@ margin (ARCHITECTURE Phase 7) and its `reliability()` is measured, not declared.
 | `R_INSTALLER_NEWER` | REVIEW | "Installer for a newer {app} ({version}) than the one installed ({installed})." |
 | `R_OLD_DOWNLOAD` | REVIEW | "Large {kind} downloaded {age} ago; Android does not tell us whether you opened it since." |
 | `P_KEEPER` | — (annotation) | unchanged sentence; no longer a recommendation tier |
+| `R_SAME_CONTENT_DIFFERENT_NAME` (F-06) | REVIEW | "Same content as {other}, but the names differ; the name may be the only record of which document this is." |
 
 `Y_INSTALLER_NOT_INSTALLED` stays in the catalogue unused (HC11 makes it unreachable; retiring it would break the "codes never removed" rule).
 
@@ -478,7 +491,7 @@ margin (ARCHITECTURE Phase 7) and its `reliability()` is measured, not declared.
 | # | Scenario (dataset id) | Required outcome (dataset acceptable tiers) | Guaranteed by | Phase-4/5 expectation |
 |---|---|---|---|---|
 | 1 | Blurry important family photo (S01) | never SAFE/NO_LOSS/YOUR_CALL; PROTECTED/KEEP/REVIEW | HC12 (quality never decides for personal capture), HC5 (no verified copy) | KEEP (PROTECTED needs faces, Phase 6); pocket shots → `Y_LOW_QUALITY` |
-| 2 | Old financial document (S02) | PROTECTED/KEEP | HC7/H10 (age never decides), DOCUMENT classes have no age decay, no removal rule exists for unique documents | `P_UNIQUE_RECORD` when the path/name carries a record keyword, else KEEP |
+| 2 | Old financial document (S02) | PROTECTED/KEEP | HC7/H10 (age never decides), DOCUMENT classes have no age decay, no removal rule exists for unique documents | `P_UNIQUE_RECORD` when the path/name carries a record keyword, else KEEP; `Download/temp123.tmp` (a PDF statement with a temp name) → `R_NAME_CONTENT_MISMATCH` REVIEW, never `S_TEMP_FILE` (F-05); the two byte-identical invoices → `R_SAME_CONTENT_DIFFERENT_NAME` REVIEW (F-06). Both are fixtures in `ScenarioFixtureTest` |
 | 3 | Exact duplicate, original kept (S03) | copy deletable without loss; original kept | `N_EXACT_DUPLICATE` (G1, G2, H1), keeper order (PHASE_3 §8.1), HC13 | copy NO_LOSS (dataset "SAFE" ≡ v2 SAFE∪NO_LOSS, PHASE_5 §9.1), keeper KEEP |
 | 4 | Near duplicate with meaningful edits (S04) | edits not interchangeable; bursts REVIEW | PHASE_3 provenance rule + edit families have no redundant members; HC6 | edits KEEP; burst siblings REVIEW (`R_SIMILAR_SHOT`) |
 | 5 | WhatsApp copy of a unique photo (S05) | only copy never deleted; with original present the copy is SAFE/YOUR_CALL | `Y_CHAT_COPY` requires R row 5 (a kept higher-quality copy); HC6 caps at YOUR_CALL; no other rule touches chat media before Phase 6 | unique copies KEEP; copies with original YOUR_CALL |
@@ -537,6 +550,7 @@ margin (ARCHITECTURE Phase 7) and its `reliability()` is measured, not declared.
 | B-6 | §12 row 6 | "cert unknown → YOUR_CALL" stays (`Y_INSTALLER_UNVERIFIED`); add "not installed → REVIEW (`R_INSTALLER_NOT_INSTALLED`), never YOUR_CALL" |
 | B-7 | §1 package map | `v2.plan.TierAssigner`, `PresentationPolicy`, `ReasonCatalog` are built in Phase 4 |
 | B-8 | §11 Phase 4 row | exit criteria of §16 |
+| B-9 (REVIEW_2) | §7 H4/H10 notes, §6 | SAFE "structural" means location **and** type (ARCHITECTURE §2.11 already says so): a temp *name* over a complete content file is not structural (F-05); add `R_SAME_CONTENT_DIFFERENT_NAME` (F-06); structural candidates' confidence ignores `c_extract`/`c_avail` (F-07) |
 
 ---
 

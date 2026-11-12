@@ -58,6 +58,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A16 | The spec's tier definitions are the authority, not the dataset's labels; the evaluator translates dataset tiers to spec tiers. A delete at SAFE/NO-LOSS on a must-never-delete file fails under any translation. | The dataset marked exact and WhatsApp copies SAFE; the spec reserves NO-LOSS for verified identical copies and caps look-alike copies at YOUR CALL. |
 | A17 | A duplicate group's keeper is a label with no recommendation, not a PROTECTED item. | Otherwise about 300 ordinary originals would show as "protected", which reads as over-caution. |
 | A18 | `Android/data` and `Android/obb` stay restricted by default; the scoring gate expects them reported as inaccessible, not scanned. | Android 11+ blocks them on real phones. The dataset's one file under `Android/obb` made the Phase 1 gate fail by a single file; the algorithm was right and the gate was wrong. |
+| A19 | A verified byte-identical copy stays NO-LOSS even when the names differ; the keeper is the copy with the more descriptive name and more organised folder, and the reason shows both names. Reviewer's proposal to send such pairs to REVIEW was overruled. | Spec 9.4 says so, and the proposal was a workaround for a dataset bug (two "different" invoices generated identical). Demoting every renamed identical file would hide the safest recoveries. The generator bug gets fixed instead. |
+| A20 | A temp-looking name over complete, real content (e.g. a full bank-statement PDF named `temp123.tmp`) goes to REVIEW when it is the only copy. | Reviewer blocker: deciding "temp" from the extension alone would have produced a SAFE delete of a must-never-delete file. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -76,7 +78,10 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   24 small deviations listed in `PHASE_1_NOTES.md`. CI now runs the v2 tests.
 - Phase 2 implementer: running (slices: types, hashes, image basics, zip/apk,
   pdf, mp4/audio, app data, incremental).
-- Phases 3-5 design: reviewer running (`REVIEW_2.md`).
+- Phases 3-5 design reviewed (`REVIEW_2.md`): 2 blockers, 8 major, 8 minor, all
+  fixed in the documents; rulings A19-A20. Ready to implement after Phase 2.
+- To do: fix the dataset generator (two invoices meant to differ are
+  byte-identical) once Phase 2 is no longer scanning the dataset.
 
 ## Next steps
 

@@ -186,6 +186,15 @@ probe returning a bucket larger than 4 096 members is truncated to the 4 096 ent
 `bucketOverflow` — happens only for degenerate hashes, which §4.1 mostly removes). Time window and stems are O(n log n). Memory:
 the index holds `long[] hash` + `int[]` ids ≈ 12 bytes per image plus buckets ≈ 4 × 4 bytes per image ≈ 3 MB for 100 k images.
 
+**REVIEW_2 F-01 (completeness vs cost, binding).** The pigeonhole guarantee (4 bands, radius 1 → every pair ≤ 7 bits) is correct, but it
+holds only while no cap truncates. Real pHashes are not uniform (same-template screenshots reach Hamming 0, §13), so buckets of hundreds
+occur and the per-probe work is `Σ bucket sizes`, not 17. Rules: (1) bucket truncation cap is `MIH_BUCKET_CAP = 512` (not 4 096), giving
+a hard bound of `n × 4 × 17 × 512` popcounts (≈ 3.5·10⁹ at 100 k images in the degenerate worst case, ≈ 10⁷ typical) — the stage
+charges this to `Budget` and is resumable like D; (2) any image for which a bucket was truncated **or** whose per-source cap (64 / 32 /
+32) was hit gets `GraphView.perceptualStatus = UNKNOWN` (not TRUE): "no near-duplicate found" is only claimed when the search was
+exhaustive. Truncated images are counted as `candidateTruncated` in coverage. `CandidateGeneratorTest` adds: 1 000 identical hashes →
+bounded work, every member `perceptualStatus = UNKNOWN`.
+
 ### 4.3 Stage 3 gate (`PerceptualGate.gate(a, b)`) → pass or a reject reason (counted, not stored)
 
 | Check | Rule | Reject reason |
@@ -329,6 +338,13 @@ recoverability (G1). False VERIFIED requires an SHA-256 collision.
 
 ## 7. Installers, companions, document versions
 
+**REVIEW_2 F-15 (scope cut, no safety effect).** Implement in Phase 3 only: `CompanionLinker` C2 (split APK, needed for Phase 5 bundles)
+and C3 (obb, needed for HC4/`P_CRITICAL_DEPENDENCY`), and the WhatsApp chat-backup rule of `DocVersionLinker` (needed for
+`Y_OLD_CHAT_BACKUP`). **Deferred to Phase 6:** `InstallerLinker` groups/edges (Phase 4 decides installers from `ApkInfo.installState`/
+`sameSigner`, not from edges; the `INSTALLER` group is informational), C1 sidecars and C4 multi-part archives (no Phase 4/5 rule
+removes a sidecar or a part; a primary's removal leaving an orphan sidecar loses nothing), and the document part of `DocVersionLinker`
+(UNVERIFIED context only, never a removal basis). Missing context edges can only make v2 more conservative.
+
 **`InstallerLinker`** (spec 5.6): APKs with `ApkInfo.packageName` known. Group `n:i:` per package: members sorted by `versionCode`.
 Within a package: byte-identical members already have `EXACT_DUPLICATE`; for different versions `newer VERSION_OF older`
 (`APK_PKG`, UNVERIFIED, conf 0.8); same `(packageName, versionCode, signer set)` but different SHA-256 → `VERSION_OF` with evidence
@@ -376,7 +392,7 @@ information).
 | Group kind | Built from | Keeper (spec 6.3 "highest-quality original") |
 |---|---|---|
 | `CONTENT_EQUIVALENT` (`n:c:`) | connected components of VERIFIED `COMPRESSED_FROM ∪ THUMBNAIL_OF ∪ VERSION_OF(image)` edges between content nodes | the sink of the edges (the node no edge points away from); several sinks → most pixels → highest bytes/pixel → camera-native format → earliest `createdAt` → canonical area → smallest fileId. Must be eligible; else next by the same order |
-| `BURST` (`n:b:`) | connected components of `NEAR_SCENE` pair verdicts (union–find), then **star**: `VISUALLY_SIMILAR` edges member → keeper | name marker `_COVER`/`_BURST001` → highest `sharpness` if it beats the runner-up by ≥ 10 % → earliest capture time → smallest fileId |
+| `BURST` (`n:b:`) | connected components of `NEAR_SCENE` pair verdicts (union–find) are only *seeds*; **REVIEW_2 F-02**: a component is split by complete linkage to its keeper — after choosing the keeper, members are only the nodes with their **own** current `NEAR_SCENE` `PairCheck` against the keeper and `|Δt to keeper| ≤ 120 s`; the remaining nodes form a new seed and repeat (deterministic: seeds by smallest fileId). This stops chains A~B~C~… (a beach walk shot every 60 s) from becoming one "burst" with one keeper. Then **star**: `VISUALLY_SIMILAR` edges member → keeper | name marker `_COVER`/`_BURST001` → highest `sharpness` if it beats the runner-up by ≥ 10 % → earliest capture time → smallest fileId |
 | `EDIT_FAMILY` (`n:e:`) | original + every node with `EDITED_FROM` → it | the original. Edits are **not** redundant members: an edit family yields no deletion candidate (spec 6.3 step 21 "meaningful modification") |
 | `INSTALLER` (`n:i:`) | §7 | highest versionCode (informational; installer decisions are Phase 4 per-file) |
 
@@ -468,12 +484,23 @@ python3 -I tools/v2eval/calibrate.py --pairs pairs.jsonl [--drive-pairs drive.js
    group; candidate recall (labelled pairs with `generated=false`); the margins; a histogram per metric per class (text).
 6. Leave-one-transform-out check: thresholds re-fitted with each transform (`whatsapp…`, `re-forward…`, `resize…`, thumbnails,
    conversions) held out must still classify the held-out positives as `SAME_CONTENT` ≥ 90 %; otherwise the report flags over-fitting.
+6b. **REVIEW_2 F-03 (no calibrate-and-report on the same pairs).** Before step 2 the labelled pairs are split deterministically by
+   *source original*: `fold = SHA-256(rootOriginalPath)[0] & 1` (rootOriginalPath = the manifest target the pair derives from, or the
+   hard-negative group id), so all derivatives of one picture and all members of one HN group fall in the same fold. Thresholds are fitted
+   on fold 0 only; `report.md` gives every metric on fold 1 (held out) and on fold 0 separately, and the §15 *accuracy* gates
+   (content-equivalence P/R, near-dup P/R, EDITED_FROM precision) are evaluated by `evaluate.py --gate phase3 --fold 1` on the held-out
+   pairs. *Safety* gates (`hn_false_pairs = 0`, Drive corpus 0 cross-second `SAME_CONTENT`, `false_verified = 0`) are evaluated on **all**
+   pairs and on the Drive corpus, which is never used for fitting (`--drive-pairs` is report-only: it may veto a threshold set, never
+   choose one). If fold-1 recall is more than 0.05 below fold-0 recall the report flags over-fitting and the lead decides.
 7. The chosen values are copied **by hand** into `GraphConfig` with a comment citing the report hash; `MATCHER_VERSION` is bumped. Runtime
    never reads `thresholds.json` (determinism; auditable diffs).
 
 ### 11.3 Evaluator additions (`evaluate.py`, Phase 3 gate)
 
-* exact cluster accuracy (existing definition, ARCHITECTURE §10) from `duplicateGroups[exact=true]`;
+* exact cluster accuracy from `duplicateGroups[exact=true]`; **REVIEW_2 F-04**: truth = equal manifest `sha256` (size ≥ 1), not the
+  closure of `EXACT_DUPLICATE` labels — the dataset has one byte-identical pair with no label
+  (`Download/Invoices/Invoice_20210607_056.pdf` = `Invoice_20220109_055.pdf`), which would make the P = 1.000 gate unreachable for a
+  correct implementation. Label-only pairs and sha-only pairs are both listed in the report;
 * **content-equivalence accuracy**: truth = undirected manifest `COMPRESSED_FROM ∪ THUMBNAIL_OF ∪ VERSION_OF` image↔image pairs (+ closure
   through exact groups); prediction = undirected VERIFIED edges of those three types; P/R/F1; plus `hn_false_pairs` = predicted pairs
   inside one `hard_negative_group` (gate: 0);
@@ -549,6 +576,7 @@ objective will move these.
 | A-6 | §8 sub-typing bullet | replace by §5.2/§5.3 (provenance required for EDITED_FROM; "same burst timestamp ≤ 10 min" becomes 120 s with SECOND-precision capture time) |
 | A-7 | §2.6 | note: `VISUALLY_SIMILAR` stored as a star to the group keeper; `EXACT_DUPLICATE` groups > 64 members stored as a star |
 | A-8 | §11 Phase 3 row | exit criteria as §15 below |
+| A-9 (REVIEW_2) | §10 duplicate cluster row | exact truth = equal manifest `sha256` (F-04); `--fold 0|1` option for the Phase 3 accuracy gates (F-03) |
 
 ---
 
@@ -556,7 +584,8 @@ objective will move these.
 
 | Metric | Gate | Expected (reasoning) |
 |---|---|---|
-| exact cluster precision / recall | P = 1.000, R ≥ 0.99 | R = 1.000: every exact pair has a size collision so Phase 2 hashes both; no aliases in the dataset |
+| exact cluster precision / recall (truth = manifest sha256, F-04) | P = 1.000, R ≥ 0.99 | R = 1.000: every exact pair has a size collision so Phase 2 hashes both; no aliases in the dataset |
+| (F-03) accuracy rows below | measured on held-out fold 1 (`--fold 1`); safety rows on all pairs | |
 | content-equivalence precision (COMPRESSED/THUMBNAIL/VERSION image pairs) | ≥ 0.99 and `hn_false_pairs = 0` | 1.000 in the probe |
 | content-equivalence recall | ≥ 0.95 | ≈ 0.99 (all 171 probed positives clear the initial thresholds; scanned-PDF VERSION_OF pairs are excluded from the truth as non-image) |
 | near-duplicate P / R (A-4 definition) | P ≥ 0.95, R ≥ 0.80 | R ≈ 0.90: bursts + video frames 67/67, compressed 78/78, edits 43/59 (no collages; crops only via stem+capture time) |

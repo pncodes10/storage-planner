@@ -43,7 +43,7 @@ All paths under `app/src/main/java/com/storageplanner/` unless noted.
 | `v2.graph` | 3 | Relationship builders, duplicate groups, near-duplicate matcher, archive/backup matcher, keeper selection | model, util, device, store, features |
 | `v2.content` | 3 (interfaces), 6, 7 | `ContentClassifier`, `EmbeddingProvider`, `TextReader` bridges; deterministic classifiers wrapping `core.TextRules`, `core.Codes`, `core.Faces`; Phase 7 model manager | + core utilities |
 | `v2.risk` | 4 | `HardRules`, `UtilityEstimator`, `LossEstimator`, `RecoverabilityEstimator`, `ConfidenceEstimator`, `Assessor` | graph, content |
-| `v2.plan` | 5 | `ReasonCatalog`, `CandidateGenerator`, `TierAssigner`, `PresentationPolicy` (standard/aggressive), `Planner2`, `PlanValidator` | risk |
+| `v2.plan` | 5 (`TierAssigner`, `PresentationPolicy`, `ReasonCatalog` additions: built in Phase 4, B-7) | `ReasonCatalog`, `CandidateGenerator`, `TierAssigner`, `PresentationPolicy` (standard/aggressive), `Planner2`, `PlanValidator` | risk |
 | `v2.learn` | 8 | `FeedbackRecorder`, `PreferenceModel` (regularised logistic), `PreferenceExplainer` | plan |
 | `v2.exec` | 9 | `Revalidator`, `Executor`, `Journal`, `QuarantineManager`, `CompressionVerifier`, `RecoveryOnStart` | plan, `v2.device.FileOps` |
 | `app.v2` (`com.storageplanner.app.v2`) | A, 10 | Android implementations of `v2.device` interfaces, `V2Runner`, `V2Adapter` (android-free file), Android SQLite store (Phase 10) | android + v2 + core |
@@ -294,8 +294,14 @@ public final class DuplicateGroup implements Record {
     public java.util.List<String> keeperReasons;   // reason codes (§6)
     public long memberBytes, recoverableBytes = Unknown.LONG;   // recoverable computed in Phase 5 after keeper + dependency checks
     public long createdScanId; public Verification verification;
+    // Phase 3 additions (PHASE_3 §2.4, A-2):
+    public NearGroupKind kind;           // EXACT, CONTENT_EQUIVALENT, BURST, EDIT_FAMILY, INSTALLER
+    public boolean keeperFallback;       // no eligible keeper by the primary rule; no group-based recommendation (REVIEW)
 }
 ```
+Near-group ids (Phase 3): `n:<kind letter>:<smallest member fileId>` with letters `c` (content-equivalent), `b` (burst),
+`e` (edit family), `i` (installer). `VISUALLY_SIMILAR` edges are stored as a star member → group keeper, and exact groups with
+more than 64 members store star `EXACT_DUPLICATE` edges (evidence `STAR`) instead of the clique (PHASE_3 A-7).
 
 ### 2.8 BackupRecord (table `backup_records`)
 
@@ -330,6 +336,15 @@ public final class Assessment {
     public java.util.EnumMap<Action, Long> benefit;
     public java.util.List<String> hardBlocks;   // hard-rule reason codes that forbid destructive actions (§7)
     public Protection protection = Protection.NONE;
+    // Phase 4 additions (PHASE_4 §1.2, B-1):
+    public Interval lossRange;                       // L (low, mid, high); loss = lossRange.mid
+    public double rvMid = Double.NaN, rvPess = Double.NaN;   // numeric recoverability, used only in expected loss
+    public String recoveryKind;                      // REGENERABLE_CACHE, REGENERABLE_INSTALLER, EXACT_COPY_KEPT, BACKUP_VERIFIED, SUPERSET_COPY, UNVERIFIED_COPY, POSSIBLE_ARCHIVE_COPY, NONE
+    public java.util.EnumMap<Action, Double> elMid, elPess, utility;
+    public java.util.Map<String, Double> confidenceParts;   // c_extract, c_graph, c_class, c_indep, c_avail
+    public boolean contradiction; public String contradictionA, contradictionB;
+    public java.util.List<String> familiesFor, familiesAgainst;
+    public UsageClass usage;
 }
 public final class Interval { public final double low, mid, high; }   // all NaN = unknown; low<=mid<=high
 ```
@@ -399,8 +414,11 @@ public final class ActionPlan implements Record {
     public boolean reachesTarget;
     public Tier highestTier;            // highest-risk tier used, null if empty
     public PlanState state;             // DRAFT, PRESENTED, PARTIALLY_APPROVED, APPROVED, EXECUTING, DONE, STALE, CANCELLED
+    public long withYourCallBytes, achievableExactBytes;   // Phase 5 (C-5)
+    public java.util.List<String> reasonCodes;             // PL_* codes (Phase 5)
 }
-public final class PlanItem { public String recommendationId, fileId; public Action action; public Tier tier; public long bytes; public int order; public java.util.List<String> requires; }
+public final class PlanItem { public String recommendationId, fileId; public Action action; public Tier tier; public long bytes; public int order; public java.util.List<String> requires;
+    public int priorityClass; }        // Phase 5 (C-5): spec 10.3 class 1..7
 ```
 
 ### 2.13 Operation journal entry (table `action_operations`, spec 11)
@@ -531,6 +549,7 @@ plugin exists — it does not by default: `NO_DECODER`), applies EXIF orientatio
 ```java
 public interface InstalledApps {
     Availability availability();          // FULL, PARTIAL (package visibility filtered), UNAVAILABLE
+    int platformSdk();                    // Phase 5 (C-3): Build.VERSION.SDK_INT; JVM: V2Cli --sdk, default 34; -1 unknown
     java.util.List<InstalledApp> list();  // empty if UNAVAILABLE
     InstalledApp get(String packageName); // null = not visible (NOT "not installed" unless availability == FULL)
     /** Optional fallback parse of an APK by the platform (Android PackageManager.getPackageArchiveInfo); null if unsupported. */
@@ -632,6 +651,7 @@ public interface V2Store extends java.io.Closeable {
     RelationshipTable relationships();        // file_relationships
     Table<DuplicateGroup> duplicateGroups();  // duplicate_groups
     Table<BackupRecord> backups();            // backup_records
+    Table<PairCheck> pairChecks();            // pair_checks (Phase 3, PHASE_3 §2.1; snapshot order: after backup_records; key only, no index)
     RecommendationTable recommendations();    // recommendations
     Table<ActionPlan> actionPlans();          // action_plans
     JournalTable operations();                // action_operations (append-only: put of an existing key throws)
@@ -727,7 +747,7 @@ index columns: `files(volume_id, path UNIQUE, size_bytes, sha256)`, `file_relati
 | 5 | `GRAPH` | — | 3 | all present files | relationships, duplicate groups, backups |
 | 6 | `T4_TEXT` | Tier 4 | 6 | documents, screenshots, receipts candidates | OCR text, document fields/categories |
 | 7 | `T5_MODEL` | Tier 5 | 7 (optional) | per-model selection | categories, embeddings |
-| 8 | `T6_DETAIL` | Tier 6 | 3, 4, 6 | uncertain candidates only (ambiguous near-dups, unverified backups, long videos) | SSIM checks, full-entry CRC verification, adaptive video sampling |
+| 8 | `T6_DETAIL` | Tier 6 | 3, 4, 6 | uncertain candidates only (ambiguous near-dups, unverified backups, long videos) | SSIM checks, full-entry CRC verification, adaptive video sampling. **Phase 3 (A-3):** stage-4 structural checks and backup inflate verification run inside `GRAPH` (budgeted, resumable via `pair_checks`/`backup_records`); `T6_DETAIL` is reserved for Phase 6 video sampling |
 | 9 | `ASSESS` | — | 4 | all present files | `Assessment` (in memory) + `FileRecord` copies |
 | 10 | `RECOMMEND` | — | 5 | assessments | `recommendations` |
 | 11 | `PLAN` | — | 5 | recommendations, target, mode | `action_plans` |
@@ -826,7 +846,7 @@ Phase 1 with a sentence each; the table below lists only those a user sees in a 
 | `R_CANNOT_ACT` | REVIEW | "Current permissions do not allow acting on it ({mode})." |
 | `P_USER_PROTECTED` | PROTECTED | "You marked this as protected." |
 | `P_UNIQUE_RECORD` | PROTECTED | "Only copy of what looks like a {category}; losing it would be hard to undo." |
-| `P_KEEPER` | PROTECTED | "Kept as the best copy of {n} identical or similar files." |
+| `P_KEEPER` | — (annotation, ruling A17; was PROTECTED) | "Kept as the best copy of {n} identical or similar files." |
 | `P_CRITICAL_DEPENDENCY` | PROTECTED | "Needed by {other}." |
 | `P_ARCHIVE_UNIQUE_CONTENT` | PROTECTED | "Archive holding {n} documents that exist nowhere else on this phone." |
 | `P_PERSONAL_MEDIA_UNIQUE` | PROTECTED | "Only copy of a personal photo or video{people}." |
@@ -848,6 +868,22 @@ Phase 1 with a sentence each; the table below lists only those a user sees in a 
 | `D_VOLUME_ABSENT` | — | "{volume} is not inserted or not mounted." |
 | `D_STORE_RESET` | — | "Saved results could not be read; this scan started from scratch." |
 | `PL_TARGET_UNREACHABLE` | — | "Your target of {target} cannot be reached safely; {achievable} can." |
+| `PL_NEEDS_YOUR_CALL` | — | "To reach {target}, {n} items ({bytes}) need your decision; {safe} can be freed without any." (Phase 5) |
+| `PL_HASH_PENDING` | — | "{n} items are still being checked and will be offered later." (Phase 5) |
+| `PL_VALIDATOR_DROPPED` | — | coverage-only (a bug indicator; tests require 0) (Phase 5) |
+| `S_APP_LOG` | SAFE | "Log file written by {app}; apps do not need old logs." (Phase 4) |
+| `S_EXPIRED_STATUS` | SAFE | "Viewed WhatsApp status older than a day; WhatsApp no longer shows it." (Phase 4) |
+| `S_EMPTY_FILE` | SAFE | "Empty file (0 bytes); it holds no content." (Phase 4) |
+| `Y_SMALLER_COPY` | YOUR_CALL | "Smaller copy of {original}, which is kept at full quality." (Phase 4) |
+| `Y_CONVERTED_COPY` | YOUR_CALL | "{format} copy of {original}, which is kept; the pictures look the same." (Phase 4) |
+| `Y_INSTALLER_UNVERIFIED` | YOUR_CALL | "Installer for {app} {version}, which is installed, but we could not confirm it comes from the same developer." (Phase 4) |
+| `Y_OLD_CHAT_BACKUP` | YOUR_CALL | "Older chat backup from {date}; WhatsApp restores from the newest one ({newer}). Backups are encrypted, so we could not check it." (Phase 4) |
+| `R_SIMILAR_SHOT` | REVIEW | "One of {n} nearly identical shots taken within seconds; {keeper} looks best. Pick the ones you want to keep." (Phase 4) |
+| `R_INSTALLER_NOT_INSTALLED` | REVIEW | "Installer for {app}, which is not installed. We cannot tell whether it can be downloaded again." (Phase 4) |
+| `R_INSTALLER_SIGNER_MISMATCH` | REVIEW | "Installer for {app}, but signed by a different developer than the installed app." (Phase 4) |
+| `R_INSTALLER_NEWER` | REVIEW | "Installer for a newer {app} ({version}) than the one installed ({installed})." (Phase 4) |
+| `R_OLD_DOWNLOAD` | REVIEW | "Large {kind} downloaded {age} ago; Android does not tell us whether you opened it since." (Phase 4, aggressive only) |
+| `R_SAME_CONTENT_DIFFERENT_NAME` | REVIEW | "Same content as {other}, but the names differ; the name may be the only record of which document this is." (Phase 4, REVIEW_2 F-06) |
 | `PL_PAUSED_DEVICE` | — | "Paused to protect the battery or temperature; it resumes later." |
 | `X_VERIFIED` | — | "Done and checked: {bytes} freed." |
 | `X_ROLLED_BACK` | — | "Undone: {why}." |
@@ -876,6 +912,12 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
 | H7 | Aggressive mode only changes `PresentationPolicy` thresholds (what YOUR_CALL/REVIEW items are shown); `HardRules` output is identical in both modes | — | P5: run both modes, compare blocks |
 | H8 | Never break DEPENDS_ON / COMPANION_OF: a dependency of a kept file is kept | `H_DEPENDENCY` | P3/P5 |
 | H9 | Execution revalidates (V1–V7) | `H_STALE`, ... | P9 |
+| H11 | Installers whose package is not installed (or install state unknown), and non-Android installers: no removal at any tier, both modes → REVIEW (`R_INSTALLER_NOT_INSTALLED`) | `R_INSTALLER_NOT_INSTALLED` | P4 (PHASE_4 HC11) |
+| H12 | Personal capture (camera photo/video, voice): pixel quality never justifies removal, except "nothing visible" (`Y_LOW_QUALITY`) | `H_CLASSIFICATION_ONLY` | P4 (HC12) |
+| H13 | A group keeper is never removed; no COMPRESS/ARCHIVE of a keeper while a member has a removal candidate | `H_LAST_VERIFIED_COPY` | P4/P5 (HC13) |
+| H14 | `Android/obb/**` and `Android/data/<installed pkg>/files/**`: no removal (except `S_UNINSTALLED_LEFTOVER` for `Android/data`) | `H_DEPENDENCY` | P4 (HC14) |
+| H15 | Confidence floors: NO_LOSS needs C ≥ 0.9; YOUR_CALL needs C ≥ `policy.cYourCall` (structural candidates: C ignores extraction/availability parts, PHASE_4 F-07) | — | P4 (HC15) |
+| H4 (addendum) | Lossy COMPRESS is forbidden whenever content features are unknown; SAFE "structural" means location **and** type — a temp/partial *name* over a complete content file is not structural (PHASE_4 F-05) | `H_UNKNOWN_FEATURES` | P4 |
 
 ---
 
@@ -914,6 +956,16 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
   recommendation the planner makes sure it has a current full SHA-256 (hash on demand, `reason = "PLAN"`), stored in
   the recommendation's evidence for V3. App subjects (§2.11) enter at priority 1 (cache) and as YOUR_CALL/NO_LOSS app
   actions; their bytes come from `InstalledApp` and are never double counted with files.
+
+**Superseded detail (REVIEW_2, binding where it differs from the bullets above):**
+* Near duplicates: candidates by multi-index pHash (4 bands, radius 1 → all pairs ≤ 7 bits) + capture-time window (120 s) + name
+  stems, then a three-part structural test (coarse 64-px SSIM grid, fine 256-px grid, 16×16 chroma); truncated searches report
+  `perceptualStatus = UNKNOWN` (PHASE_3 §4, A-5, F-01). `EDITED_FROM` needs provenance (name stem, equal capture time, editor folder or
+  editor EXIF); bursts need a SECOND-precision capture time within 120 s **of the group keeper** (complete linkage, F-02) (PHASE_3 §5, A-6).
+* Risk: tiers are decided by recoverability *states* and the first-match table of PHASE_4 §9.3; `rvMid/rvPess` enter expected loss only;
+  `UncertaintyPenalty = EL_pess − EL_mid` (PHASE_4 §5, §7.3, B-5).
+* Planner: SAFE always taken; options ordered tier → spec 10.3 priority class → cost/byte; prune; single-item swap among tier-k options
+  only (PHASE_5 §4.3, C-6, F-11).
 
 ---
 
@@ -1007,6 +1059,21 @@ recommendations; else `KEEP`. "Delete recommendation" = action `DELETE` or `QUAR
 `--gate phaseN` applies the gates of phases ≤ N that have data and exits 1 on any failure; metrics are
 written to `--out` for the next run's `--baseline`.
 
+**Phase 3–5 amendments (REVIEW_2; they replace the rows above where they differ, and the Phase 3/4/5 rows of §11):**
+* Exact cluster truth = equal manifest `sha256` (size ≥ 1), not label closure (PHASE_3 F-04). Near-duplicate truth adds
+  `THUMBNAIL_OF` and `VERSION_OF` (image), bursts scored as clusters; new `content-equivalence` P ≥ 0.99 / R ≥ 0.95 and
+  `hn_false_pairs = 0`; Phase 3 accuracy gates on the held-out fold (`--fold 1`), safety gates on everything (PHASE_3 §11.3, §15, A-4, F-03).
+* Tier scoring uses the two-sided label translation of PHASE_5 §9.1 (ruling A16): v2 SAFE/NO_LOSS DELETE → dataset `SAFE`; dataset
+  expectations for similar-only copies capped at YOUR_CALL; `spec_violations = 0`; acceptable-tier-aware precision/recall; strict
+  no-loss recall; byte metrics (`dangerous = 0`, `wrong ≤ 2 %`, `byte_recall ≥ 0.90`) replace the 5 % relative error; scenario PASS =
+  every member's translated prediction ∈ acceptable_tiers (PHASE_5 §9, C-1, F-12). DDRR, exposure and scenario FAIL read raw v2 tiers and
+  the raw must_never_delete flag, before any translation.
+* Phase 5's classic comparison is `ClassicParityTest` (per item, closed exemption list naming the spec rule each protects; ruling A15)
+  instead of "SAFE+NO_LOSS bytes ≥ classic R0+R1 bytes" (PHASE_5 §6, C-2).
+* Phase exit criteria: PHASE_3 §15, PHASE_4 §16, PHASE_5 §13 (A-8, B-8).
+* Phase A (§13): REVIEW/PROTECTED go to `Adapted.displayOnly`; keepers get no unit; the adapter hands `core.Planner` a conflict-free
+  option set (PHASE_5 §11, C-7, F-13).
+
 ---
 
 ## 11. Phase table
@@ -1033,10 +1100,10 @@ written to `--out` for the next run's `--baseline`.
 |---|---|---|---|
 | 1 | Blurry but important family photo | 2 (sharpness, faces later), 4, 5 | dataset scenario: predicted tier ≥ YOUR_CALL rank, never SAFE/NO_LOSS; P4 unit test: low sharpness never lowers L; P6 faces raise L |
 | 2 | Old but important financial document | 2 (PDF/doc basics), 4, 5, 6 | dataset: PROTECTED or KEEP; P4 test: age alone never raises deletion propensity for documents |
-| 3 | Exact duplicate with original preserved | 2 (hashes), 3, 5 | dataset: copy NO_LOSS DELETE with keeper = original; original PROTECTED (`P_KEEPER`) |
+| 3 | Exact duplicate with original preserved | 2 (hashes), 3, 5 | dataset: copy NO_LOSS DELETE with keeper = original; original KEEP, annotated `P_KEEPER` (A17; PROTECTED only if a `P_` rule fires on its own content) |
 | 4 | Near duplicate with meaningful edits | 3, 5 | dataset: `EDITED_FROM` edge; neither file SAFE/NO_LOSS (H2) |
 | 5 | WhatsApp copy of a unique photo | 3, 4, 5 | dataset: the only copy is never deleted; if an original exists the copy is at most YOUR_CALL (`Y_CHAT_COPY`) |
-| 6 | APK of an installed app | 2 (APK parse, InstalledApps), 5 | dataset with `installed_apps.json`: same version + same cert → NO_LOSS; cert unknown → YOUR_CALL |
+| 6 | APK of an installed app | 2 (APK parse, InstalledApps), 5 | dataset with `installed_apps.json`: same version + same cert → NO_LOSS; cert unknown → YOUR_CALL (`Y_INSTALLER_UNVERIFIED`); not installed → REVIEW (`R_INSTALLER_NOT_INSTALLED`), never YOUR_CALL |
 | 7 | Old installer that cannot be redownloaded | 2, 5 | dataset: not installed / older version → never SAFE/NO_LOSS |
 | 8 | Long video with brief meaningful activity | 2 (container), 6 (adaptive sampling) | dataset: never SAFE/NO_LOSS before P6 (features unknown); P6 sampling finds the activity window (unit test with synthetic frames) |
 | 9 | Encrypted PDF | 2 (`/Encrypt`), 4, 5 | P2 unit test on fixture; dataset: REVIEW or PROTECTED, `R_ENCRYPTED` |
