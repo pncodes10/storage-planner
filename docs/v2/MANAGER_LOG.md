@@ -72,6 +72,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A29 | A plan contains only SAFE and NO-LOSS items by default; "your call" items enter only when the user opts that tier in, ranked by score. | Spec 10.2: if a target cannot be reached safely, report the achievable amount instead of raising risk silently. |
 | A30 | Lead failure recorded: the GitHub build has failed on every push since v2 code landed, and it was not checked until 12:35 UTC. The APK compile step reports 10 errors in v2 code (desktop-only Java APIs). Fix assigned; a local compile check against Android framework classes is being added so this is caught before pushing. | The local tests compile against the desktop JDK only, so "all tests pass" never covered "compiles for Android". Phase A depends on this. |
 | A31 | v2 on the phone is limited by a guard: about 15,000 files on a 256 MB heap and about 42,000 on 512 MB. Above that it stops after discovery with a message pointing to Classic. Moving the store to SQLite (spec section 13, planned for Phase 10) is now the next engineering priority, ahead of Phase 6. | Measured peak is 6.4 KB of heap per file; the record shrink does not reduce it. The owner's phone has tens of thousands of files, so v2 will most likely hit the guard there. A clean stop with an explanation is acceptable for a first test; a crash is not. |
+| A32 | The memory fix is a pure-Java disk-backed store behind the existing store interface, not Android SQLite, for now. An architect profiles the heap first and may overturn this. | Spec section 13 says SQLite, but an Android-SQLite store cannot be compiled-and-run or tested anywhere in this environment, while a pure-Java store is fully testable on the desktop and runs unchanged on the phone. Untested persistence code under a tool that advises on deleting files is the larger risk. SQLite can implement the same interface later, once a device is available. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -89,6 +90,9 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   majors and 5 minors fixed. Verdict: read-only holds, Classic unchanged, fit
   for a phone test, but v2 cannot yet handle a library the size of the
   owner's (A31).
+- **Build to test on the phone: CI run 60** (commit 5a0dbaa, succeeded 16:50
+  UTC): https://github.com/pncodes10/storage-planner/actions/runs/43262858635
+- Store architect running (`PHASE_S_STORE.md`, A32).
 - Never run on a device. Unverified there: memory use on Android vs desktop,
   the guard firing, HEIC and EXIF decoding, file access, timing, restore speed.
 - Open: SQLite store (A31), dataset label fix (A27), ClassicParityTest and
