@@ -30,7 +30,7 @@ import com.storageplanner.v2.stage.PipelineConfig;
 import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
 import com.storageplanner.v2.stage.StageOutcome;
-import com.storageplanner.v2.store.MemoryStore;
+import com.storageplanner.v2.store.Stores;
 import com.storageplanner.v2.store.StoreException;
 import com.storageplanner.v2.store.V2Store;
 import com.storageplanner.v2.util.Hex;
@@ -64,11 +64,25 @@ final class V2Runner {
      */
     static final long SNAPSHOT_EVERY_MS = -1;
 
+    /** The app's store (PHASE_S_STORE 5.1): MEMORY until slice S6 switches to DISK; both stay selectable. */
+    static final Stores.Kind STORE_KIND = Stores.Kind.MEMORY;
+
     static AnalysisRunner.Outcome run(final Context app, double targetGb, boolean measure, final Scanner.Progress pr) {
         AnalysisRunner.Outcome o = new AnalysisRunner.Outcome();
         ResultFiles.setRunning(app, true);
         try {
-            runInner(app, targetGb, pr, o);       // its frame (store, stages, records) is gone once it returns or throws
+            try {
+                runInner(app, targetGb, pr, o, false);   // its frame (store, stages, records) is gone once it returns or throws
+            } catch (Exception e) {
+                // PHASE_S_STORE 3.11: damaged saved data ⇒ one automatic retry on a fresh store (event D_STORE_RESET)
+                if (Stores.corruption(e) == null) throw e;
+                o.ok = false; o.cancelled = false; o.message = null;
+                try { runInner(app, targetGb, pr, o, true); }
+                catch (Exception e2) {
+                    if (Stores.corruption(e2) == null) throw e2;
+                    o.ok = false; o.cancelled = false; o.message = STORE_RESET_MESSAGE;
+                }
+            }
         } catch (OutOfMemoryError e) {
             o.ok = false; o.cancelled = false;
             o.message = V2Capacity.OUT_OF_MEMORY;
@@ -82,7 +96,9 @@ final class V2Runner {
         return o;
     }
 
-    private static void runInner(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o) throws Exception {
+    static final String STORE_RESET_MESSAGE = "v2's saved data was damaged and has been reset; please run again.";
+
+    private static void runInner(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o, boolean fresh) throws Exception {
         // the v2 state on disk is about to change: until this run completes, a restore must not show it
         if (AnalysisRunner.ALGO_V2.equals(AnalysisRunner.resultAlgorithm(app))) AnalysisRunner.setResultAlgorithm(app, null);
         pr.update("Reading installed apps", 0, 0);
@@ -95,8 +111,9 @@ final class V2Runner {
         PipelineConfig cfg = new PipelineConfig();
         cfg.maxTier = 3;
         V2Store store;
-        try { store = MemoryStore.open(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); }
-        catch (StoreException e) { store = MemoryStore.create(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
+        if (fresh) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
+        else try { store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); }
+        catch (StoreException e) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
         List<Stage> stages = Pipeline.defaultStages(cfg, dev);
         stages.add(new com.storageplanner.v2.graph.GraphStage());
         // memory guard (REVIEW_A M-1): right after discovery, before any extraction, the record count must fit the heap
@@ -165,7 +182,7 @@ final class V2Runner {
             AndroidPlatform pf = new AndroidPlatform(app);
             AndroidV2Device dev;
             try { dev = device(app, pf); } finally { pf.close(); }
-            V2Store store = MemoryStore.open(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock());
+            V2Store store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock());
             ScanSession last = null;
             for (ScanSession s : store.scanSessions().all()) if (last == null || s.scanId > last.scanId) last = s;
             if (last == null || last.state != ScanState.COMPLETED) return false;

@@ -49,7 +49,24 @@ public final class V2Cli {
         return rt.totalMemory() - rt.freeMemory();
     }
 
+    /**
+     * PHASE_S_STORE 3.11: a StoreCorruption (damaged record of a fail-closed table, F-04 mismatch, store I/O failure) anywhere
+     * in the run ⇒ one automatic retry on a fresh store (session event D_STORE_RESET); a second one ⇒ exit 3 with the reset
+     * message. No result JSON is written by a run that hit corruption.
+     */
     public static int run(String[] args, PrintStream out, PrintStream err) {
+        try { return runOnce(args, out, err, false); }
+        catch (com.storageplanner.v2.store.StoreCorruption e) {
+            err.println("store damaged, retrying once with a fresh store: " + e.getMessage());
+        }
+        try { return runOnce(args, out, err, true); }
+        catch (com.storageplanner.v2.store.StoreCorruption e) {
+            err.println("v2's saved data was damaged and has been reset; please run again (" + e.getMessage() + ")");
+            return 3;
+        }
+    }
+
+    private static int runOnce(String[] args, PrintStream out, PrintStream err, boolean fresh) {
         // results of an earlier in-process run (DiskKillTest runs the CLI many times in one JVM)
         V2Json.graphCoverage = null; AssessJson.verdicts = null; AssessJson.recs = null; PlanJson.plan = null; PlanJson.staleness = null;
         String enc = System.getProperty("sun.jnu.encoding");
@@ -135,7 +152,10 @@ public final class V2Cli {
                 blobs = new DirBlobStore(Paths.get(stateDir));
                 if (blobsHook != null) blobs = blobsHook.apply(blobs);
                 if (halt > 0) blobs = new KillingBlobStore(blobs).killAfterReplaceCommits(halt).haltProcess(true);
-                try { store = com.storageplanner.v2.store.Stores.open(storeKind, blobs, snapEvery, clock); }
+                if (fresh) {
+                    store = com.storageplanner.v2.store.Stores.create(storeKind, blobs, snapEvery, clock);
+                    cfg.storeReset = true;
+                } else try { store = com.storageplanner.v2.store.Stores.open(storeKind, blobs, snapEvery, clock); }
                 catch (StoreException e) {
                     err.println("store unreadable, starting fresh: " + e.getMessage());
                     store = com.storageplanner.v2.store.Stores.create(storeKind, blobs, snapEvery, clock);
@@ -168,6 +188,8 @@ public final class V2Cli {
         try {
             res = new Pipeline(dev, store, cfg, stages).run(null);
         } catch (StoreException e) {
+            com.storageplanner.v2.store.StoreCorruption c = com.storageplanner.v2.store.Stores.corruption(e);
+            if (c != null) throw c;
             err.println("store error: " + e.getMessage()); return 3;
         }
         long totalMs = (System.nanoTime() - t0) / 1000000L;
@@ -192,7 +214,11 @@ public final class V2Cli {
                     if (perr != null) { err.println(perr); return 3; }
                     StageTimer.ms.put("PLAN", (System.nanoTime() - tp) / 1000000L);
                 }
-            } catch (StoreException e) { err.println("assess: " + e.getMessage()); return 3; }
+            } catch (StoreException e) {
+                com.storageplanner.v2.store.StoreCorruption c = com.storageplanner.v2.store.Stores.corruption(e);
+                if (c != null) throw c;
+                err.println("assess: " + e.getMessage()); return 3;
+            }
             StageTimer.ms.put("ASSESS", (System.nanoTime() - ta) / 1000000L);
         }
         if (pairsOut != null) {

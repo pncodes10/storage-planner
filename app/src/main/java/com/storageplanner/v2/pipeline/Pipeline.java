@@ -112,6 +112,7 @@ public final class Pipeline {
                 session.state = o == StageOutcome.CANCELLED ? ScanState.CANCELLED : ScanState.PAUSED;
                 if (o == StageOutcome.BUDGET_EXHAUSTED && session.pauseReason == null) session.pauseReason = "PL_BUDGET";
                 if (o == StageOutcome.CANCELLED) session.endedAt = clock.nowMillis();
+                noteDamaged(session, clock);
                 store.scanSessions().put(session);
                 store.flush();
                 result.outcome = o;
@@ -129,12 +130,28 @@ public final class Pipeline {
         session.state = ScanState.COMPLETED;
         session.endedAt = clock.nowMillis();
         session.stage = null;
+        noteDamaged(session, clock);
         store.scanSessions().put(session);
         store.flush();
         result.outcome = StageOutcome.DONE;
         result.coverage = CoverageBuilder.build(store, session.scanId, 1000);
         result.coverage.extraction = com.storageplanner.v2.features.ExtractionCoverage.build(store, session);
         return result;
+    }
+
+    /**
+     * PHASE_S_STORE 3.11 / F-07: derived records (features, hashes, embeddings, pair checks) found damaged during this run
+     * read as absent; the session records how many, so the coverage report shows the result rests on re-extracted or unknown
+     * data. One event per session (detail = the store's running count); MemoryStore never reports damage.
+     */
+    private void noteDamaged(ScanSession session, Clock clock) {
+        long d = store.stats().damaged;
+        if (d <= 0) return;
+        for (int i = session.events.size() - 1; i >= 0; i--) {
+            com.storageplanner.v2.model.ScanEvent e = session.events.get(i);
+            if ("D_STORE_DAMAGED".equals(e.code)) { session.events.remove(i); break; }
+        }
+        session.event(clock.nowMillis(), "D_STORE_DAMAGED", null, null, Long.toString(d));
     }
 
     /** Uncommitted work is dropped; the committed session is marked FAILED and made durable. */
