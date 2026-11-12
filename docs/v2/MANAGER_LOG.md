@@ -60,6 +60,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A18 | `Android/data` and `Android/obb` stay restricted by default; the scoring gate expects them reported as inaccessible, not scanned. | Android 11+ blocks them on real phones. The dataset's one file under `Android/obb` made the Phase 1 gate fail by a single file; the algorithm was right and the gate was wrong. |
 | A19 | A verified byte-identical copy stays NO-LOSS even when the names differ; the keeper is the copy with the more descriptive name and more organised folder, and the reason shows both names. Reviewer's proposal to send such pairs to REVIEW was overruled. | Spec 9.4 says so, and the proposal was a workaround for a dataset bug (two "different" invoices generated identical). Demoting every renamed identical file would hide the safest recoveries. The generator bug gets fixed instead. |
 | A20 | A temp-looking name over complete, real content (e.g. a full bank-statement PDF named `temp123.tmp`) goes to REVIEW when it is the only copy. | Reviewer blocker: deciding "temp" from the extension alone would have produced a SAFE delete of a must-never-delete file. |
+| A21 | The in-memory store fails the A12 limit (measured 2.7 KB heap and 2.1 KB snapshot per file, limit ~1 KB). Before Phase A the records are shrunk (unknown fields not written, features loaded on demand); if still over 1 KB, SQLite moves into Phase A. Cloud phases 3-5 proceed meanwhile. | 100,000 files would need about 270 MB of heap, more than a phone app can count on. Desktop evaluation is unaffected. |
+| A22 | On the phone, photos must be decoded at reduced size by the device layer. | Full-size JVM decoding costs about 180 ms per photo (42 s for 268 photos); 30,000 photos would take about 90 minutes. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -69,25 +71,26 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (07:00 UTC, 12 Nov)
+## State (08:05 UTC, 12 Nov)
 
-- **Phase 1 done and committed.** 98 classes / 3,680 lines in `v2/`, 30 test
-  classes; `bash tools/v2eval/run_tests.sh` -> 14 suites, 0 failures, kill and
-  resume test passes (re-run by the lead). CLI on the 268 Drive photos: 268/268
-  found in under 0.2 s; on the dataset: 2,406/2,406 with `Android/obb` allowed.
-  24 small deviations listed in `PHASE_1_NOTES.md`. CI now runs the v2 tests.
-- Phase 2 implementer: running (slices: types, hashes, image basics, zip/apk,
-  pdf, mp4/audio, app data, incremental).
-- Phases 3-5 design reviewed (`REVIEW_2.md`): 2 blockers, 8 major, 8 minor, all
-  fixed in the documents; rulings A19-A20. Ready to implement after Phase 2.
-- To do: fix the dataset generator (two invoices meant to differ are
-  byte-identical) once Phase 2 is no longer scanning the dataset.
+- **Phase 1 done** (see PHASE_1_NOTES.md).
+- **Phase 2 done and committed.** 56 more classes / 3,394 lines; 21 suites,
+  0 failures (re-run by the lead); classic code untouched. Dataset gates:
+  type detection 2377/2377, sha256 2405/2405, exact duplicates precision 1.0
+  recall 129/129, encrypted PDFs 5/5, zip traversal/high-ratio/nested flagged,
+  APK package+version 10/10, misleading extensions 2/2. Drive photos: 232 JPEG
+  decoded with pHash+sharpness; 36 HEIC kept as "unknown". Not done: audio
+  probe, MKV/AVI/TAR (Phase 6 per A11), three listed tests, `apps` in CLI JSON.
+- Phases 3-5 design reviewed and final.
+- Running: Phase 3 implementer; dataset-generator fix (identical invoices) with
+  a full rebuild - marker `/home/user/sp-dataset/.rebuilt_ok` when done.
 
 ## Next steps
 
-1. Phase 2 report -> lead re-runs tests and the phase2 gate -> commit.
-2. REVIEW_2 -> lead answers open questions -> implement phases 3, 4, 5.
-3. First scored run on both datasets -> Phase A (app switch) -> phases 6-10 as
-   far as the session allows.
-4. If an agent stops with a usage-limit error: wait for the reset time in the
+1. Generator fix reports -> commit. Phase 3 report -> lead re-runs tests and
+   the phase3 gate (hard-negative check must be zero) -> commit.
+2. Phase 4 (risk engine) -> Phase 5 (planner) -> first full scored run.
+3. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
+4. Phases 6-10 as far as the session allows.
+5. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.
