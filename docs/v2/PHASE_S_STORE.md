@@ -1,6 +1,7 @@
 # Phase S: disk-backed v2 store (design)
 
-Status: design for review. No production code has been written for it yet. Owner decision A31 asked for this ("SQLite store,
+Status: reviewed (docs/v2/REVIEW_S.md); BLOCKER and MAJOR fixes applied in place, tagged `REVIEW_S F-…`, and they override
+any older sentence they contradict. No production code has been written for it yet. Owner decision A31 asked for this ("SQLite store,
 next engineering priority"). This document proposes a pure-Java disk-backed store behind the same `V2Store` interface, and
 section 8 explains why it deviates from spec section 13 for now.
 
@@ -128,6 +129,7 @@ Strings and collection overhead are about 70 % of the store. The record fields t
   checks are ordered by size, not by node, so the 256-entry signature cache gets few hits (20,001 decodes for 14,165 pairs).
   This is outside this phase. The lead should decide between ordering pending checks by node, raising the cap, or letting
   GRAPH finish with UNKNOWN for pending pairs. The scale tests here use a 20 % image share so that they stay under the cap.
+  **REVIEW_S F-13: decided in slice S7 (section 6).**
 * Disk size of one record (current `Codecs` JSON): FileRecord 1,057–1,085 B (793–812 B without the `null` fields, REVIEW_A
   m-10); FeatureRecord 634–1,041 B (493–883 B).
 * Random read plus decode of a FileRecord from a 100 MB file in the page cache with `RandomAccessFile` takes **8–12 µs** on
@@ -173,6 +175,23 @@ adapter's file list from a compact projection streamed once from the store, then
 `V2Adapter.adapt` allocates the `FileItem`s. Without it the limit is about 128–138k. The classic result model at 0.5 KB per
 file is then the largest single cost; slimming it is the next lever (about 250k) but belongs to Classic/the adapter, not to
 this phase. On 512 MB the limit is about 300k in every variant.
+
+**REVIEW_S F-08 (safety factor and what the tests must prove).** The 1.25 is **not** an ART header correction: ART object
+headers (8 B) and ART's compressed strings make objects the same size or smaller than on HotSpot. The real Android unknowns
+are GC headroom (concurrent-copying evacuation, heap growth limit), large-object-space fragmentation for the multi-MB index
+arrays, and transients not measured here. Treat the uncertainty as ±25 % until a device measures it. So 1.25 stays, as an
+explicit **safety factor** in `V2Capacity`, and it must not be "spent" by the tests: a test that proves N files at 256 MB runs
+at `-Xmx` = (0.8 × 256 − 20) / 1.25 ≈ **148 MB**, not 200 MB. Recomputed from this document's own numbers (store index 270 worst
+case, recommendations + plan 290, adapter 500; budget 0.8 × 256 MiB − 20 MiB − 16 MiB = 176.9 MB): **≈ 133,000 files without
+the S6 option**, ≈ 175,000 with it (as specified by F-09 below). 150,000 is honest only with the S6 option.
+
+**REVIEW_S F-09 (the S6 option, specified).** "A compact projection" was not costed and conflicts with `StoreFileMap`
+(the store would be closed). The option is: after `Plans.make`, the store produces a `long[]` of the locators of PRESENT
+`files` records in ascending fileId (8 B/file), then releases every in-memory index (`DiskStore.releaseIndexes()`; the store
+stays readable only through that array); `V2Adapter.adapt` takes `Iterable<FileRecord>` that decodes each locator in turn
+(CRC and key checked as in 3.6) and builds `FileItem`s directly, with no intermediate list. Peak = 8 + 290 + 500 B/file
+(× 1.25 = 998 B ⇒ ≈ 177k at 256 MB). Everything else `adapt` needs (`recs`, `keepers`, the plan) is already in memory. The
+JSON-equality test (5.2) covers this path.
 
 ---
 
@@ -223,6 +242,20 @@ One JSON object, followed by `"crc32"` over the canonical text before it (the sa
 `durable` is the length of the segment at the last checkpoint. **Bytes beyond `durable` do not exist**, even if they are on
 disk after a crash. `index.covers` gives, for each segment, how far the index file already reflects it.
 
+**REVIEW_S F-01 (index file bound to the manifest).** The index file is replaced in place under one name, so after a kill
+between its `replace` and the manifest's `replace`, the old manifest would name a newer index (same gen) whose `covers` lie
+beyond the old `durable` — the store would reopen past its checkpoint, and a later rebuild-by-scan would disagree with it.
+Rules: (1) the index file carries `idxSeq` (incremented per index write) and the manifest's `"index"` entry records
+`{"name","idxSeq","crc32"}` of the index file it names; (2) on open the index is used only if magic, CRC, `gen`, `idxSeq` and
+`crc32` all equal the manifest's entry **and** `covers[i] ≤ durable[i]` for every segment; otherwise it is ignored and the
+indexes are rebuilt by scanning; (3) the index file is written only after the segments it covers have been synced (3.9 step 2),
+and always immediately before a manifest that names it.
+
+**REVIEW_S F-02 (segment high-water mark).** The manifest also records `"hw":{"a":n,"b":m}`, the highest segment number ever
+created in each set. A segment beyond `hw` is created only after a checkpoint whose manifest has raised `hw` (one extra
+manifest write per rotation or open). This is what lets compaction and open enumerate every file of a set without a
+directory listing (BlobStore has none).
+
 ### 3.4 Index file
 
 Binary, written with `replace`: magic `SPDSIDX1`, version, gen, txn covered, `covers[]`, then for each table:
@@ -242,14 +275,20 @@ At 150k files it is about 15–20 MB, so it is written a few times per run, not 
 
 For each table, a `KeyIndex`:
 
-* **Base**: immutable sorted arrays. `byte[] keyArena`, `int[] keyOff`, `int[] slot`. Binary search on UTF-8 bytes
-  (byte order equals `String.compareTo` order for the key alphabet in use: hex, ASCII prefixes, `\0` separators; the oracle
-  test checks this on non-ASCII directory keys, and a mismatch falls back to comparing decoded Strings).
+* **Base**: immutable sorted arrays. `byte[] keyArena`, `int[] keyOff`, `int[] slot`. Keys are stored as UTF-8 but
+  **compared as UTF-16 code-unit sequences**, i.e. exactly `String.compareTo` (REVIEW_S F-03): UTF-8 byte order is code-point
+  order, which differs from `String.compareTo` whenever a supplementary character (emoji in a file name, a surrogate pair in
+  UTF-16) meets a character in U+E000–U+FFFF. A wrong order would make binary search miss existing paths (`byPath` → "file
+  absent", a second record for one file) and change iteration order. The comparator decodes on the fly with an ASCII fast
+  path; there is no runtime "mismatch fallback". The oracle test (S2) includes paths mixing emoji, U+FF01–U+FFEF and
+  U+E000 private-use characters.
 * **Per slot**, stable for the record's lifetime: `long[] loc` (segment:16 | offset:48) and `long[] hash` (64-bit FNV-1a of
-  the encoded JSON, used for no-change detection). The files table also keeps `long[] pathHash`.
+  the encoded JSON, used for no-change detection). (REVIEW_S F-15: the former `long[] pathHash` had no consumer and is cut.)
 * **Delta**: `TreeMap<String, Integer>` for keys inserted since the last merge. A removed base key gets `loc = DELETED`.
   Merge (rebuild the base arrays) happens when the delta exceeds max(4,096, n/8), inside a store call. Iterators are not
-  affected (section 3.8).
+  affected (section 3.8). REVIEW_S F-14: a merge briefly holds old and new base arrays (for `files` at 150k about +17 MB,
+  during DISCOVER), and each delta TreeMap can hold n/8 keys at about 130 B (≈ 2.4 MB per large table). Both belong in
+  `STORE_FIXED`; S6 measures them and raises `STORE_FIXED` if they exceed it.
 * Cost per record: key bytes + 4 (offset) + 4 (slot) + 16 (loc, hash) ≈ **56 B for a 32-hex key**. Option for slice S6:
   keys that are exactly 32 lower-case hex characters are stored as two `long`s instead of 32 bytes plus an offset
   (≈ 36 B per record).
@@ -273,7 +312,7 @@ come back in the same order as MemoryStore (ascending record key; `forOp` by seq
 
 | Part | Cost per file |
 |---|---:|
-| files: 56 + path 50 + pathHash 8 | ≈ 114 |
+| files: 56 + path 50 (pathHash cut, F-15) | ≈ 106 |
 | features | 56 |
 | hashes: worst case, every file hashed (the synthetic tree) / dataset, ≈ 10 % hashed | 56 / 6 |
 | relationships | ≈ 0.2 × 80 |
@@ -288,6 +327,14 @@ come back in the same order as MemoryStore (ascending record key; `forOp` by seq
 2. Otherwise look up `loc`, read the frame with `RandomRead.read(pos, …)` (4 KiB first, the rest if longer), check magic and
    CRC, decode with the table codec (+ migrate), put into the LRU and return a copy.
 3. If `loc` points into bytes still in the append buffer, flush the buffer first.
+
+**REVIEW_S F-04 (every read is verified).** Before decoding, a read checks: magic, flags, CRC, frame `type == PUT`,
+frame `table` == the table asked, frame `key` bytes == the key asked, and frame end ≤ the readable limit of that segment
+(`durable`, or the current written length for the active segment). After decoding, the record's own key (`fileId`,
+`edgeId`, …) must equal the key asked. A **CRC/length** failure is damage (3.11 rules). A **table, type or key mismatch on a
+frame whose CRC is valid** is a locator bug, not media damage: it throws `StoreCorruption` for every table, derived ones
+included, and is never turned into `null`. The same checks apply to the secondary-index paths (hash64 lookups, 3.5) and to
+compaction's copy.
 
 LRU: one `LinkedHashMap` (access order) per store, capacity 4,096 decoded records **and** about 8 MiB by encoded length,
 whichever is hit first. Pinned tables bypass the LRU and always stay decoded. Segment read handles are kept in an LRU of at
@@ -325,6 +372,13 @@ reaches it, keys removed meanwhile skipped. The snapshot is cheap:
 Peak per open iterator is about 0.6 MB at 150k files, not 100k Strings as in MemoryStore. `byVolume`/`underPrefix` work the
 same way over the path index.
 
+REVIEW_S F-16: iterators hold **no file handles** (reads go through the store's handle LRU), so there are no `Closeable`
+cursors and nothing to close on exception paths. Writing while iterating — including nested iteration — is defined: the
+iterator's key snapshot is taken **when `all()`/`childrenOf`/`underPrefix`/`keys()` is called** (as MemoryStore's list
+copy is), values are read when reached, removed keys are skipped, inserted keys are not seen. `DirectoryReconciler` relies on
+this (it `put`s files and recurses into `directoryGone` inside `childrenOf` loops); the oracle test interleaves writes with
+open iterators.
+
 Signature changes (all in `v2.store`; callers listed):
 
 | Method | Today | New | Callers to adapt |
@@ -359,6 +413,21 @@ Unchanged:
      their COMMIT frame is seen;
   4. start a **new** segment for further appends. The old tail beyond `durable` is never appended to, which handles torn
      writes without truncate-to-length. It is garbage until compaction.
+
+  **REVIEW_S F-02 (no stale bytes in a reused segment name).** A segment name beyond the manifest's list (step 4, or a
+  rotation) may already exist with bytes from a run that crashed after its last checkpoint — including complete frames
+  and COMMIT frames whose txn numbers the new run will reuse. Appending after them would put the new HEADER at a non-zero
+  offset, and a later rebuild-by-scan would replay those phantom commits. Rules: (a) before its first append, every
+  segment is `truncate`d and the truncation synced, so its HEADER is at offset 0; (b) the HEADER carries
+  `{"gen","set","seq","epoch"}` where `epoch` = the manifest's `commitSeq` when the segment was started; replay and
+  rebuild accept a segment only if its HEADER at offset 0 matches the manifest's gen, set and seq; (c) segment numbers
+  beyond the manifest's `hw` are created only after `hw` is raised (3.3).
+
+  **REVIEW_S F-05 (damage inside the durable range fails closed).** If, during replay or rebuild-by-scan, any frame below
+  `durable` fails its CRC or length check, or a listed segment is shorter than its `durable` (e.g. a new file whose
+  directory entry was lost in a power cut), the open throws `StoreException` → fresh store (`D_STORE_RESET`, subject to
+  F-06). Replay never "stops at the first bad frame and continues": that would silently drop every later commit — the
+  failure mode A13 recorded for the old log — and could revert a file's presence to an older state.
 * **Contract**, the same as ARCHITECTURE 4.1 / 5.2: after a crash the store reopens at the last checkpoint, which is always a
   commit boundary, never between two commits. Stages are idempotent and resumable from store state, so a kill at any point
   resumes to the same result as a clean run. `KillingBlobStore`'s `--halt-after-commits N` counts `replace` commits; manifest
@@ -371,7 +440,12 @@ Unchanged:
 
 * Garbage is tracked exactly: superseded frames, DEL frames and rolled-back frames.
 * Trigger, checked at checkpoints: `garbage ≥ max(64 MiB, live)`, i.e. disk ≤ about 2 × live. Compaction is never started
-  inside an open txn.
+  inside an open txn. REVIEW_S F-11: it runs at **any** checkpoint where the trigger holds (a checkpoint is always outside a
+  txn, and iterators hold keys only, 3.13), not only at stage boundaries. Otherwise a stage that rewrites every FileRecord
+  starts just under the trigger, adds about one more live's worth of garbage, and the compaction copy makes the peak about
+  4 × live instead of 3 × live. The bullet "Run inside `flush()` at a stage boundary" below is superseded by this.
+* Compaction also truncates every segment of the target set numbered 1…`hw` (F-02) in step 1, and the index file of the
+  target set; step 5 truncates 1…`hw` of the old set.
 * **Compaction** (generation G → G+1, from set `a` to set `b`):
   1. `truncate` every `ds-b-*` file left from a crashed earlier compaction;
   2. write a HEADER, then every live record **table by table in key order** (so later key-order scans read sequentially),
@@ -404,13 +478,29 @@ Also:
 * `V2Runner` maps `StoreCorruption` / a failed open to: one automatic retry with a fresh store in the same run, then the
   message "v2's saved data was damaged and has been reset; please run again". Nothing on the user's files changes.
 
+**REVIEW_S F-06 (a reset must never discard user decisions).** A reset discards every table, including `feedback`,
+`preferences` and `action_operations` (the Phase 9 journal: what was moved or trashed). Today no production code writes those
+three tables (checked: only tests touch them), so a reset loses nothing that is not re-derivable. To keep it that way, S3
+adds `ResetSafetyTest`: it fails if any class under `v2/`, `v2adapter/` or `app/` other than `v2.store` calls `put` on
+`feedback()`, `preferences()` or `operations()`. The phase that first writes one of them must first define how it survives a
+reset (salvage of CRC-valid committed frames into the new store, or a separate file), and remove that test only then. Until
+then an automatic reset is acceptable.
+
+**REVIEW_S F-07 (derived damage found after its producer ran).** "Missing ⇒ re-extract" holds at selection time. A
+features/hashes record damaged after T1–T3 ran in this run is not re-extracted until the next run; this run's safety then
+rests on "missing ⇒ unknown" downstream. Checked: GRAPH skips a node without features (no perceptual status), and
+`RecoverabilityEstimator` gives `UNKNOWN`, not `NO_VERIFIED_BACKUP`, to an image without a TRUE/FALSE status; ASSESS treats
+missing features as unknown. A missing hash can only remove duplicate evidence, never add it. S3 tests this (see S3), and the
+session records the damaged count so the coverage report says the result is partial.
+
 ### 3.12 Disk space
 
 The store gets a `SpaceProbe` (`long freeBytes()`, −1 = unknown). It is wired from `device.resources().sample().storageFreeBytes`;
 on Android that is `StatFs` of the shared root, which is the same `/data` partition as `getFilesDir()`.
 
-* **Preflight** (in `CapacityGuard`, right after DISCOVER, with the heap guard): needed = files × 6 KiB (live about 2.5 KiB
-  plus garbage ≤ live, plus a compaction copy) + reserve. If free is below that, stop before T1 with "Not enough free storage
+* **Preflight** (in `CapacityGuard`, right after DISCOVER, with the heap guard): needed = files × **8 KiB** + 64 MiB +
+  reserve (REVIEW_S F-11: worst case is live + garbage up to max(64 MiB, live) + a compaction copy of live = 3 × 2.5 KiB,
+  plus the two index files; the former 6 KiB was below 3 × live). At 150k files: ≈ 1.2 GB + 256 MiB reserve. If free is below that, stop before T1 with "Not enough free storage
   for v2's working data (about N MB needed)". The run ends without a result and the session is CANCELLED, as with the heap
   guard.
 * **During the run**: after every 8 MiB appended, and before rotation and compaction, check free space. If
@@ -492,6 +582,21 @@ the dataset, synth 10k and every scenario fixture. They are independent of DiskS
 6. **`V2Analysis`** (`v2adapter`, new, Android-free): the body of `V2Runner.analyse` (ASSESS → recommendations →
    hash-on-demand → app subjects → PLAN → adapt), so the JVM scale harness runs the app's exact code path. `V2Runner` keeps
    only the Android wiring.
+**REVIEW_S F-10 (equality pins for items 4–5).** These are part of the spec, each with a test:
+
+* `ofOne` receives the **post-ASSESS** FileRecord (the written copy `w` when `Assessor.run` wrote one, else `f`). Today `fm`
+  is built after `Assessor.run` returns, so recommendations see the updated U/L/R/C.
+* The store-backed `GraphView` sees ASSESS's U/L/R/C writes mid-loop; today's snapshot does not. That is safe only while no
+  rule reads `utility`/`lossSeverity`/`recoverability`/`confidence` of a FileRecord other than the subject (true today;
+  `GraphView.endCurrent` reads only presence and fingerprint). A test asserts that `GraphView.file(x)` callers in `v2.risk`
+  and `v2.plan` read none of those four fields, or the view masks them to the values at ASSESS start.
+* `GraphView` orders: `edgesOf` in ascending relationship key; `groupsOf` in ascending group key; `sizeCount` over PRESENT
+  records with `sizeBytes ≥ 0`; canonical = smallest fileId per (volume, physicalKey). Same as `GraphView.of` today.
+* `StoreFileMap` overrides `get`, `containsKey`, `size`, `keySet().iterator()`, `entrySet().iterator()`; every other method
+  throws. (`AbstractMap`'s defaults for `containsKey`/`get` scan the whole entry set, decoding every record.)
+* Golden equality per item is against JSON produced by the **unchanged** code (recorded before item 1 lands), not only
+  "before and after" each sub-commit.
+
 7. CLI-only and not needed for the target: `V2Json` collects all FileRecords to sort by path. It is left as is; heap-capped
    tests do not use the CLI JSON.
 
@@ -531,7 +636,9 @@ nondeterministic block). It runs on:
 * `maxFiles = min((0.8·max − used − STORE_FIXED − GRAPH_RESERVE) / GRAPH_BYTES, (0.8·max − used − STORE_FIXED) / END_BYTES)`.
 * `V2AdapterTest` "memory guard" checks change to the new formula, with expected values for 256 and 512 MB.
 * The disk preflight (section 3.12) is added to the same guard.
-* The m-11 caveat (discovery itself could run out of memory) goes away: discovery no longer holds records.
+* The m-11 caveat (discovery itself could run out of memory) shrinks but does not go away: DISCOVER still grows the index
+  (≈ 110–170 B/file), so a 1M-file tree could still exhaust the heap before the guard. REVIEW_S F-17: `CapacityGuard` also
+  checks the running file count every 10,000 records inside DISCOVER and stops with the same message.
 
 ---
 
@@ -582,6 +689,25 @@ runs (golden check on the dataset).
   * during index write.
 
   Each run resumes, and the result must equal the clean run (`evaluate.py --compare` semantics on the JSON).
+* REVIEW_S F-12, added kill/crash tests:
+  * **`PowerLossBlobStore`** (jvmtest fake): tracks each file's last synced length; at a kill it reverts every file to
+    that length, optionally appends random garbage (0–4 KiB), drops files created since their last sync, and loses an
+    uncommitted `replace`. 200 random power-loss runs, same equality requirement. This is the only test that exercises
+    "what was fsynced and when".
+  * kill between the index `replace` and the manifest `replace` → the stale-bound index is rejected (F-01) and the store
+    reopens exactly at the previous checkpoint;
+  * a segment file beyond the manifest's list pre-filled with valid, committed frames from a crashed run → never replayed,
+    including after a forced rebuild-by-scan (F-02);
+  * a CRC failure placed below `durable` and a listed segment shorter than `durable` → fresh store, never partial replay
+    (F-05);
+  * a locator pointed at another key's valid frame → `StoreCorruption` for a files and a features table (F-04);
+  * **multi-run evolving tree**: three runs over one persistent store (`cfg.resume` false, as the app does) with files
+    added, removed, moved and modified between runs, compared with MemoryStore on every run — the app's real path.
+* REVIEW_S F-07, added corruption tests: damage a features frame and a hashes frame **after T3 and before GRAPH**, and a
+  features frame **after GRAPH and before ASSESS**, in the same run. Required: the run completes; its removal
+  recommendations are a subset of the clean run's; no file gets `NO_VERIFIED_BACKUP` or perceptual FALSE that the clean run
+  did not; the next run equals clean.
+* `ResetSafetyTest` (F-06).
 * `run_tests.sh`' kill test runs once per store.
 * Corruption (`DiskCorruptionTest`):
   * flip a byte in a features/hashes/pairChecks frame → the next scan re-extracts, the result equals clean, and
@@ -620,7 +746,9 @@ runs (golden check on the dataset).
 * Scale tests (`run_scale.sh`, not in `run_tests.sh` because they take minutes; `run_tests.sh` gets a 10k smoke at
   `-Xmx64m`):
   * **(a)** 100,000 files (20 % images), DISCOVER → PLAN, DiskStore, **`-Xmx128m`**: must complete.
-  * **(b)** 150,000 files, full `V2Analysis` including `V2Adapter`, **`-Xmx200m`** (≈ 0.8 × 256 MB): must complete.
+  * **(b)** 150,000 files, full `V2Analysis` including `V2Adapter`, **`-Xmx148m`** ((0.8 × 256 − 20) / 1.25, REVIEW_S
+    F-08; 200 MB would spend the safety factor): must complete. `V2Capacity` at 256 MB may not claim more files than the
+    largest N that passes at this cap.
   * **(c)** (a) with MemoryStore at `-Xmx128m` must fail with OOM. This proves the test bites.
   * **(d)** equality of (a) DiskStore against MemoryStore at a large heap: CLI JSON without timings is byte-identical.
 * Exit criteria:
@@ -634,6 +762,42 @@ runs (golden check on the dataset).
 | disk live | ≤ 2.6 KB/file |
 | V2Capacity at 256 MB with 20 MB used | ≥ 150,000 |
 | Android | CI APK builds; the PHASE_A device checklist is updated (the message thresholds change) |
+
+**S7. GRAPH decode budget resumes across runs (REVIEW_S F-13; independent of S1–S6, can land first)**
+
+Facts (code read): the cap lives in `Perceptual.run` (`GraphConfig.MAX_DECODES_PER_RUN = 20,000`, checked before each pending
+pair). On hitting it GRAPH still writes everything, nodes with a pending pair get perceptual `UNKNOWN` (F-01 of PHASE_3), and
+`RecoverabilityEstimator` turns that into `UNKNOWN`, never `NO_VERIFIED_BACKUP`. But the stage returns `BUDGET_EXHAUSTED`, the
+pipeline PAUSES, and `V2Runner` shows no result at all ("Analysis stopped early"). Completed `PairCheck`s are already
+persisted, so the *checks* already carry across runs; only the result is withheld, and every run re-decodes from scratch
+because pending pairs are ordered by size and the 256-entry signature cache misses.
+
+Persisting decoded signatures is **rejected**: a `StructSig` is ≈ 195 KB (49.9 MB / 256 measured); 30,000 photos would be
+≈ 6 GB. The persisted `PairCheck` is the right unit to carry over.
+
+Change:
+
+1. **Order pending pairs for cache reuse.** Union-find over the pending pairs; process components in order of their smallest
+   pair key, and within a component by (ascending smaller node id, then pair key). Bursts are small components, so the cache
+   holds them and decodes approach the number of distinct pending nodes (one per node) instead of ≈ 1.4 per pair. Deterministic.
+2. **The cap becomes a per-run budget, not a stop.** When the decode cap (not the time budget, not pause/cancel) is reached,
+   `Perceptual` stops checking, GRAPH completes and returns `DONE`; coverage records `graph.pendingPairs` and
+   `graph.pendingImages`. Pending nodes are perceptual `UNKNOWN` exactly as today. `V2Runner` shows the result with a line
+   "N photos have not been compared yet; run again to finish." The next run re-uses the persisted checks and continues.
+3. Nothing in ASSESS/PLAN changes: an unchecked pair yields no relationship, so it can never support a removal, and a pending
+   image is never "unique".
+
+Tests (`PerceptualBudgetTest`, fixture tree with bursts, cap forced to a small number):
+
+* a run that hits the cap ends `DONE` with a result; every node with a pending pair has status `UNKNOWN` and
+  `Recoverability.UNKNOWN`; no recommendation's evidence cites a pending pair; removal recommendations ⊆ uncapped run's;
+* repeated runs over the same store converge: after k runs the pending count is 0 and the JSON equals one uncapped run
+  (timings and the `decodes` counter removed);
+* decodes ≤ distinct pending nodes + components on the synthetic burst tree (ordering works);
+* uncapped results are byte-identical to today's except the `decodes` coverage counter (the ordering changes only how often
+  the cache misses); the golden files are updated for that counter only;
+* kill/resume equality (S3) runs on trees below the cap: a resumed run gets a fresh per-run counter, so above the cap a
+  killed-and-resumed run legitimately checks more pairs than a clean one (REVIEW_S F-18).
 
 ---
 
@@ -655,7 +819,7 @@ runs (golden check on the dataset).
 5. **The 150k target depends on the adapter phase** (section 2). Without the store-closed-before-adapter option the honest
    number is about 130k at 256 MB.
 6. **Decode budget at scale** (section 1.6). It is independent of the store, but it will stop large phones before the store
-   matters.
+   matters. Addressed by slice S7 (REVIEW_S F-13).
 
 ---
 
