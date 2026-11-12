@@ -28,12 +28,14 @@ import com.storageplanner.v2.risk.Assessor;
 import com.storageplanner.v2.risk.RiskConfig;
 import com.storageplanner.v2.stage.PipelineConfig;
 import com.storageplanner.v2.stage.Stage;
+import com.storageplanner.v2.stage.StageContext;
 import com.storageplanner.v2.stage.StageOutcome;
 import com.storageplanner.v2.store.MemoryStore;
 import com.storageplanner.v2.store.StoreException;
 import com.storageplanner.v2.store.V2Store;
 import com.storageplanner.v2.util.Hex;
 import com.storageplanner.v2adapter.V2Adapter;
+import com.storageplanner.v2adapter.V2Capacity;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -55,55 +57,102 @@ final class V2Runner {
 
     /** Bytes hashed on demand per analysis to confirm exact copies before they are offered (the rest stay "hash pending"). */
     static final long HASH_BUDGET = 2000000000L;
-    static final long SNAPSHOT_EVERY_MS = 30000;
+    /**
+     * -1 = the store's adaptive interval (at least 60 s, at most about 5 % of the time spent writing). A run is never resumed
+     * (cfg.resume is false), so snapshots during it only cost time and flash writes: at 2.7 KB per file a fixed 30 s interval
+     * rewrote about 100 MB every 30 s on a 40,000-file phone. The final flush is unaffected.
+     */
+    static final long SNAPSHOT_EVERY_MS = -1;
 
     static AnalysisRunner.Outcome run(final Context app, double targetGb, boolean measure, final Scanner.Progress pr) {
         AnalysisRunner.Outcome o = new AnalysisRunner.Outcome();
         ResultFiles.setRunning(app, true);
         try {
-            // the v2 state on disk is about to change: until this run completes, a restore must not show it
-            if (AnalysisRunner.ALGO_V2.equals(AnalysisRunner.resultAlgorithm(app))) AnalysisRunner.setResultAlgorithm(app, null);
-            pr.update("Reading installed apps", 0, 0);
-            AndroidPlatform pf = new AndroidPlatform(app);
-            AndroidV2Device dev;
-            try { dev = device(app, pf); } finally { pf.close(); }
-            PipelineConfig cfg = new PipelineConfig();
-            cfg.maxTier = 3;
-            V2Store store;
-            try { store = MemoryStore.open(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); }
-            catch (StoreException e) { store = MemoryStore.create(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
-            List<Stage> stages = Pipeline.defaultStages(cfg, dev);
-            stages.add(new com.storageplanner.v2.graph.GraphStage());
-            ScanControl control = new ScanControl() {
-                public boolean cancelRequested() { return AnalysisState.cancelled; }
-                public boolean pauseRequested() { return false; }
-                public void progress(String stage, long done, long total) {
-                    pr.update(stageLabel(stage), (int) Math.min(Integer.MAX_VALUE, Math.max(0, done)), (int) Math.min(Integer.MAX_VALUE, Math.max(0, total)));
-                }
-            };
-            PipelineResult res = new Pipeline(dev, store, cfg, stages).run(control);
-            if (AnalysisState.cancelled || res.outcome != StageOutcome.DONE) {
-                o.cancelled = AnalysisState.cancelled || res.outcome == StageOutcome.CANCELLED;
-                o.message = o.cancelled ? "Cancelled." : "Analysis stopped early (" + res.outcome + ").";
-                return o;
-            }
-            long target = (long) (targetGb * 1e9);
-            final Built b = analyse(app, dev, store, res.session.scanId, pr);
-            if (b == null) { o.cancelled = true; o.message = "Cancelled."; return o; }
-            prefs(app).edit().putLong("v2_target", target).putInt("v2_mode", Session.mode).commit();
-            AnalysisRunner.setResultAlgorithm(app, AnalysisRunner.ALGO_V2);
-            final long[] saved = {0};
-            publish(app, b, target, Session.mode, saved);
-            o.ok = true;
-            o.saved = saved[0];
-            o.message = "Done (v2): " + b.adapted.result.files.size() + " files and " + b.adapted.result.apps.size() + " apps analysed.";
-            return o;
+            runInner(app, targetGb, pr, o);       // its frame (store, stages, records) is gone once it returns or throws
+        } catch (OutOfMemoryError e) {
+            o.ok = false; o.cancelled = false;
+            o.message = V2Capacity.OUT_OF_MEMORY;
         } catch (Throwable t) {
+            o.ok = false;
             o.message = "Analysis failed (v2): " + t;
-            return o;
         } finally {
             ResultFiles.setRunning(app, false);
             AnalysisState.finished(o.message, o.ok);
+        }
+        return o;
+    }
+
+    private static void runInner(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o) throws Exception {
+        // the v2 state on disk is about to change: until this run completes, a restore must not show it
+        if (AnalysisRunner.ALGO_V2.equals(AnalysisRunner.resultAlgorithm(app))) AnalysisRunner.setResultAlgorithm(app, null);
+        pr.update("Reading installed apps", 0, 0);
+        Runtime rt = Runtime.getRuntime();
+        rt.gc();
+        final long usedBefore = rt.totalMemory() - rt.freeMemory();   // heap in use before any v2 record is loaded (e.g. a result on screen)
+        AndroidPlatform pf = new AndroidPlatform(app);
+        AndroidV2Device dev;
+        try { dev = device(app, pf); } finally { pf.close(); }
+        PipelineConfig cfg = new PipelineConfig();
+        cfg.maxTier = 3;
+        V2Store store;
+        try { store = MemoryStore.open(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); }
+        catch (StoreException e) { store = MemoryStore.create(dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock()); cfg.storeReset = true; }
+        List<Stage> stages = Pipeline.defaultStages(cfg, dev);
+        stages.add(new com.storageplanner.v2.graph.GraphStage());
+        // memory guard (REVIEW_A M-1): right after discovery, before any extraction, the record count must fit the heap
+        final long[] guard = {-1, -1};          // {files found, limit} when the guard stopped the run
+        for (int i = 0; i < stages.size(); i++) {
+            if ("T1_METADATA".equals(stages.get(i).id())) { stages.set(i, new CapacityGuard(stages.get(i), usedBefore, guard)); break; }
+        }
+        ScanControl control = new ScanControl() {
+            public boolean cancelRequested() { return AnalysisState.cancelled; }
+            public boolean pauseRequested() { return false; }
+            public void progress(String stage, long done, long total) {
+                pr.update(stageLabel(stage), (int) Math.min(Integer.MAX_VALUE, Math.max(0, done)), (int) Math.min(Integer.MAX_VALUE, Math.max(0, total)));
+            }
+        };
+        PipelineResult res = new Pipeline(dev, store, cfg, stages).run(control);
+        stages.clear();                         // GRAPH keeps its signature cache (~50 MB) and node copies: let them go now
+        if (guard[0] >= 0) {
+            o.message = V2Capacity.tooManyMessage(guard[0], guard[1]);
+            return;
+        }
+        if (AnalysisState.cancelled || res.outcome != StageOutcome.DONE) {
+            o.cancelled = AnalysisState.cancelled || res.outcome == StageOutcome.CANCELLED;
+            o.message = o.cancelled ? "Cancelled." : "Analysis stopped early (" + res.outcome + ").";
+            return;
+        }
+        long scanId = res.session.scanId;
+        res = null;
+        long target = (long) (targetGb * 1e9);
+        Built b = analyse(app, dev, store, scanId, pr);
+        store = null; dev = null;               // only the adapted result is kept from here on
+        if (b == null) { o.cancelled = true; o.message = "Cancelled."; return; }
+        prefs(app).edit().putLong("v2_target", target).putInt("v2_mode", Session.mode).commit();
+        AnalysisRunner.setResultAlgorithm(app, AnalysisRunner.ALGO_V2);
+        final long[] saved = {0};
+        if (!publish(app, b, target, Session.mode, saved)) {
+            o.message = "Analysis finished (v2), but the result could not be shown. Open the app again to load it.";
+            return;
+        }
+        o.ok = true;
+        o.saved = saved[0];
+        o.message = "Done (v2): " + b.adapted.result.files.size() + " files and " + b.adapted.result.apps.size() + " apps analysed.";
+    }
+
+    /**
+     * Wraps T1 (the first extraction stage, same id so the stored session is unchanged): before it reads any file it compares the
+     * number of file records in the store with V2Capacity and cancels the run when they would not fit the heap.
+     */
+    static final class CapacityGuard implements Stage {
+        private final Stage inner; private final long usedBefore; private final long[] out;
+        CapacityGuard(Stage inner, long usedBefore, long[] out) { this.inner = inner; this.usedBefore = usedBefore; this.out = out; }
+        public String id() { return inner.id(); }
+        public StageOutcome run(StageContext ctx) throws StoreException {
+            long files = ctx.store.files().size();          // every record in memory, including ones kept from earlier scans
+            long limit = V2Capacity.maxFiles(Runtime.getRuntime().maxMemory(), usedBefore);
+            if (files > limit) { out[0] = files; out[1] = limit; return StageOutcome.CANCELLED; }
+            return inner.run(ctx);
         }
     }
 
@@ -153,6 +202,7 @@ final class V2Runner {
         Map<String, FileRecord> fm = new HashMap<String, FileRecord>();
         for (FileRecord f : store.files().all()) fm.put(f.fileId, f);
         List<Recommendation> recs = ProvisionalRecommendations.of(vs, fm, scanId);
+        vs = null;                              // the verdicts (about 2.5 KB per file) are not needed after this: free them before hashing
         if (pr != null) pr.update("Confirming identical copies", 0, 0);
         HashOnDemand.run(recs, fm, new HashOnDemand.Hasher() {
             public String sha256(FileRecord f) { return AnalysisState.cancelled ? null : sha256Of(dev.storage().localPath(f.volumeId, f.path)); }

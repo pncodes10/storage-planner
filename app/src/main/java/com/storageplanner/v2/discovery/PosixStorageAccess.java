@@ -70,7 +70,7 @@ public final class PosixStorageAccess implements StorageAccess {
             v.mounted = Files.isDirectory(p);
             if (r.kind != VolumeKind.DIRECTORY && v.mounted) {
                 try { FileStore fs = Files.getFileStore(p); v.totalBytes = fs.getTotalSpace(); v.freeBytes = fs.getUsableSpace(); }
-                catch (IOException e) { v.totalBytes = -1; v.freeBytes = -1; }
+                catch (IOException | RuntimeException e) { v.totalBytes = -1; v.freeBytes = -1; }   // e.g. no mount entry on Android FUSE
             }
             l.add(v);
         }

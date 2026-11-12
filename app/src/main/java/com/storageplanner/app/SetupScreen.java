@@ -94,7 +94,7 @@ public final class SetupScreen extends Screen {
         algo.setContentDescription("Algorithm");
         final android.widget.RadioButton classicBtn = new android.widget.RadioButton(a), v2Btn = new android.widget.RadioButton(a);
         classicBtn.setText("Classic (default)");
-        v2Btn.setText("v2 (new): five levels from Safe to Protected, explains every suggestion");
+        v2Btn.setText("v2 (new, experimental): sorts suggestions into five levels from Safe to Protected and explains each one. It only recommends, like Classic.");
         for (android.widget.RadioButton rb : new android.widget.RadioButton[]{classicBtn, v2Btn}) {
             rb.setId(View.generateViewId());
             rb.setTextColor(Ui.text);

@@ -102,6 +102,11 @@ public final class OverviewScreen extends Screen {
     /** "Your pictures": every category with its count and size, and a search over the text read in pictures. */
     private void pictures() {
         Ui.add(content, Ui.heading(a, "Your pictures", 20), 28);
+        if (Session.notPlannable != null) {           // a v2 result: v2 has no picture categories yet (Phase A)
+            Ui.add(content, Ui.text(a, "v2 (new) does not sort pictures into categories yet, so there is nothing to browse here. "
+                    + "To browse your pictures by category, choose Classic (default) on the start screen and tap Analyse.", 14, Ui.text2, false), 4);
+            return;
+        }
         if (Session.picturesSorted == 0) {
             Ui.add(content, Ui.text(a, "Pictures were not sorted in this analysis. Turn on “Sort pictures into categories” on the start screen and tap Analyse.",
                     14, Ui.text2, false), 4);

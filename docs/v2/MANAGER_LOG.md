@@ -71,6 +71,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A28 | Old screenshots, forwarded chat media and old downloads stay deferred to Phase 6; the 0.8 "your call" hit-rate gate moves there. Current hit rate 0.61. | Offering these on age and folder alone contradicts spec 2.2 ("do not assume old files are unnecessary") and would put must-never-delete screenshots in front of the user as deletion candidates. They need content signals (text, QR, document layout), which is Phase 6. |
 | A29 | A plan contains only SAFE and NO-LOSS items by default; "your call" items enter only when the user opts that tier in, ranked by score. | Spec 10.2: if a target cannot be reached safely, report the achievable amount instead of raising risk silently. |
 | A30 | Lead failure recorded: the GitHub build has failed on every push since v2 code landed, and it was not checked until 12:35 UTC. The APK compile step reports 10 errors in v2 code (desktop-only Java APIs). Fix assigned; a local compile check against Android framework classes is being added so this is caught before pushing. | The local tests compile against the desktop JDK only, so "all tests pass" never covered "compiles for Android". Phase A depends on this. |
+| A31 | v2 on the phone is limited by a guard: about 15,000 files on a 256 MB heap and about 42,000 on 512 MB. Above that it stops after discovery with a message pointing to Classic. Moving the store to SQLite (spec section 13, planned for Phase 10) is now the next engineering priority, ahead of Phase 6. | Measured peak is 6.4 KB of heap per file; the record shrink does not reduce it. The owner's phone has tens of thousands of files, so v2 will most likely hit the guard there. A clean stop with an explanation is acceptable for a first test; a crash is not. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -80,23 +81,25 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (16:45 UTC, 12 Nov)
+## State (17:05 UTC, 12 Nov)
 
-- Phases 1-5 and Phase A (Classic / v2 switch) built and committed; 33 suites
-  green locally; classic `core/` and the manifest untouched.
-- **CI green with the switch included**: "Build APK" run 59 (commit 2b43513)
-  succeeded at 16:35 UTC - compile, dex, packaging, audit and tests. The APK
-  is an artifact of that run. Not installed or run on any device.
-- Phase A reviewer running (`REVIEW_A.md`): safety, classic regression,
-  crash risks, and the memory blocker - about 2.9 KB per file in memory, so a
-  phone with 40-50 thousand files could crash in v2 mode. Required: record
-  shrink plus a guard that stops v2 cleanly with a message instead.
-- Open: dataset label fix (A27), ClassicParityTest and five other tests.
+- Phases 1-5 and Phase A built, reviewed and committed; 33 suites green; the
+  Android compile check passes; classic `core/` and the manifest untouched.
+- Phase A review (`REVIEW_A.md`): 1 blocker, 2 major, 12 minor; blocker, both
+  majors and 5 minors fixed. Verdict: read-only holds, Classic unchanged, fit
+  for a phone test, but v2 cannot yet handle a library the size of the
+  owner's (A31).
+- Never run on a device. Unverified there: memory use on Android vs desktop,
+  the guard firing, HEIC and EXIF decoding, file access, timing, restore speed.
+- Open: SQLite store (A31), dataset label fix (A27), ClassicParityTest and
+  five other tests, 7 minor review findings.
 
 ## Next steps
 
-1. Review A report -> lead runs both scripts -> commit -> check CI.
-2. Dataset label fix (A27) and missing tests.
-3. Phase 6 (content signals, A28), then 7-10.
-4. If an agent stops with a usage-limit error: wait for the reset time in the
+1. Check the CI run for the review fixes; APK artifact = the build to test.
+2. SQLite-backed store behind the existing store interface (design -> review
+   -> implement), so v2 can scan a full phone.
+3. Dataset label fix (A27) and missing tests.
+4. Phase 6 (content signals, A28), then 7-10.
+5. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.

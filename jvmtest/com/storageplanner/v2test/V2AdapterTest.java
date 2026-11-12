@@ -6,6 +6,7 @@ import com.storageplanner.core.Review;
 import com.storageplanner.core.Unit;
 import com.storageplanner.v2adapter.V2Adapter;
 import com.storageplanner.v2adapter.V2Plans;
+import com.storageplanner.v2adapter.V2Capacity;
 import com.storageplanner.v2.device.InstalledApp;
 import com.storageplanner.v2.model.*;
 import com.storageplanner.v2.plan.*;
@@ -150,10 +151,35 @@ public final class V2AdapterTest {
         T.check("conflicting app option not emitted", !appHasOption);
         T.check("file side kept", fileHasOption);
         T.eq("one conflict option dropped", 1, za.conflictOptionsDropped);
+        capacity();
         return T.finish("V2AdapterTest");
     }
 
     static Recommendation recWith(String code) {
         Recommendation r = new Recommendation(); r.reasonCodes.add(code); r.reasonParams.put("ext", "tmp"); r.reasonParams.put("age", "3 days"); return r;
+    }
+
+    /** REVIEW_A M-1: the memory guard's arithmetic (V2Runner stops v2 before extraction above this file count). */
+    static void capacity() {
+        T.section("memory guard (V2Capacity)");
+        long MiB = 1024L * 1024;
+        // 256 MB heap, 20 MB already used: (0.8 * 256 - 20 - 64) MiB / 8 KiB = 15,462 files
+        T.eq("256 MB heap", 15462L, V2Capacity.maxFiles(256 * MiB, 20 * MiB));
+        // 512 MB heap, 20 MB used: (409.6 - 84) MiB / 8 KiB = 41,676 files
+        T.eq("512 MB heap", 41676L, V2Capacity.maxFiles(512 * MiB, 20 * MiB));
+        T.eq("more used heap, fewer files", true, V2Capacity.maxFiles(256 * MiB, 120 * MiB) < V2Capacity.maxFiles(256 * MiB, 20 * MiB));
+        T.eq("heap smaller than the reserve: no files", 0L, V2Capacity.maxFiles(64 * MiB, 0));
+        T.eq("used above the budget: no files, never negative", 0L, V2Capacity.maxFiles(256 * MiB, 300 * MiB));
+        T.eq("unknown heap: no files", 0L, V2Capacity.maxFiles(0, 0));
+        T.eq("negative used heap counts as 0", V2Capacity.maxFiles(256 * MiB, 0), V2Capacity.maxFiles(256 * MiB, -5));
+        T.eq("no overflow for an unlimited heap", true, V2Capacity.maxFiles(Long.MAX_VALUE, 0) > 1000000000L);
+        long lim = V2Capacity.maxFiles(256 * MiB, 20 * MiB);
+        T.eq("limit itself fits", true, V2Capacity.fits(lim, 256 * MiB, 20 * MiB));
+        T.eq("one more does not fit", false, V2Capacity.fits(lim + 1, 256 * MiB, 20 * MiB));
+        String m = V2Capacity.tooManyMessage(48210, lim);
+        T.eq("message names the count", true, m.contains("48,210"));
+        T.eq("message says v2 cannot handle it and points to Classic", true, m.startsWith("v2 cannot handle this many files yet") && m.contains("Classic"));
+        T.eq("message says nothing was changed", true, m.contains("Nothing was changed"));
+        T.eq("OOM message points to Classic", true, V2Capacity.OUT_OF_MEMORY.contains("Classic"));
     }
 }
