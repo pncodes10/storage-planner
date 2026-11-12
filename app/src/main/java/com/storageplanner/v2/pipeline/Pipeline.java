@@ -116,6 +116,7 @@ public final class Pipeline {
                 store.flush();
                 result.outcome = o;
                 result.coverage = CoverageBuilder.build(store, session.scanId, 1000);
+                result.coverage.extraction = com.storageplanner.v2.features.ExtractionCoverage.build(store, session);
                 return result;
             }
             if (o == StageOutcome.FAILED) {
@@ -132,6 +133,7 @@ public final class Pipeline {
         store.flush();
         result.outcome = StageOutcome.DONE;
         result.coverage = CoverageBuilder.build(store, session.scanId, 1000);
+        result.coverage.extraction = com.storageplanner.v2.features.ExtractionCoverage.build(store, session);
         return result;
     }
 

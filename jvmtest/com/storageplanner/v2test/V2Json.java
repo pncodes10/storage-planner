@@ -3,6 +3,7 @@ package com.storageplanner.v2test;
 import com.storageplanner.v2.V2;
 import com.storageplanner.v2.discovery.CoverageBuilder;
 import com.storageplanner.v2.model.*;
+import com.storageplanner.v2.store.FeatureCodec;
 import com.storageplanner.v2.store.V2Store;
 import com.storageplanner.v2.util.Hex;
 import com.storageplanner.v2.util.JsonWriter;
@@ -13,7 +14,7 @@ import java.util.*;
 public final class V2Json {
     private V2Json() {}
 
-    public static final int PHASE = 1;
+    public static final int PHASE = 2;
 
     public static final class Options { public String kind = "full"; public Integer maxTier; public String hash = "collisions"; public String mode = "standard"; public Long targetBytes; }
 
@@ -53,7 +54,7 @@ public final class V2Json {
             }
         });
         w.name("files").beginArray();
-        for (FileRecord f : files) writeFile(w, f, s.scanId);
+        for (FileRecord f : files) writeFile(w, f, s.scanId, store);
         w.endArray();
         w.name("relationships").beginArray().endArray();
         w.name("duplicateGroups").beginArray().endArray();
@@ -69,7 +70,9 @@ public final class V2Json {
 
     static void bits(JsonWriter w, int mask) { w.beginArray(); for (int k = 1; k <= 6; k++) if ((mask & (1 << k)) != 0) w.value(k); w.endArray(); }
 
-    static void writeFile(JsonWriter w, FileRecord f, long scanId) {
+    static void writeFile(JsonWriter w, FileRecord f, long scanId, V2Store store) {
+        FeatureRecord fr = store.features().get(f.fileId);
+        HashRecord hr = store.hashes().get(f.fileId);
         w.beginObject();
         w.name("fileId").value(f.fileId).name("path").value(f.path).name("name").value(f.name).name("ext").value(f.extension)
          .name("size").valueCount(f.sizeBytes).name("mtime").valueTime(f.modifiedAt).name("createdAt").valueTime(f.createdAt)
@@ -79,14 +82,22 @@ public final class V2Json {
          .name("area").value(f.area).name("ownerPackage").value(f.ownerPackage).name("hidden").value(f.hidden)
          .name("type").value(f.type).name("typeSource").value(f.typeSource).name("mime").value(f.mimeType)
          .name("extMismatch").value(f.extMismatch).name("integrity").value(f.integrity)
-         .name("quickHash").nullValue().name("sha256").value(f.sha256).name("phash");
+         .name("quickHash").value(hr != null && hr.fp != null && hr.fp.sameAs(f.fingerprint()) ? hr.quickHash : null).name("sha256").value(f.sha256).name("phash");
         if (f.hasPhash) w.value(Hex.of16(f.phash)); else w.nullValue();
         w.name("extraction").beginObject().name("status").value(f.extractionStatus).name("tiersDone"); bits(w, f.tiersDone);
         w.name("tiersPending"); bits(w, f.tiersPending);
         w.name("tiersFailed"); bits(w, f.tiersFailed);
-        w.name("confidence").value(f.extractionConfidence).name("error").value(f.lastError).endObject();
-        w.name("image").nullValue().name("video").nullValue().name("audio").nullValue().name("apk").nullValue().name("pdf").nullValue()
-         .name("archive").nullValue().name("category").value(f.category).name("categoryConfidence").nullValue()
+        w.name("confidence").value(f.extractionConfidence).name("error").value(f.lastError)
+         .name("problems").strings(fr == null ? null : fr.problems).endObject();
+        w.name("image"); FeatureCodec.writeImage(w, fr == null ? null : fr.image);
+        w.name("exif"); FeatureCodec.writeExif(w, fr == null ? null : fr.exif);
+        w.name("nameDate"); FeatureCodec.writeNameDate(w, fr == null ? null : fr.nameDate);
+        w.name("video"); FeatureCodec.writeVideo(w, fr == null ? null : fr.video);
+        w.name("audio"); FeatureCodec.writeAudio(w, fr == null ? null : fr.audio);
+        w.name("apk"); FeatureCodec.writeApk(w, fr == null ? null : fr.apk);
+        w.name("pdf"); FeatureCodec.writePdf(w, fr == null ? null : fr.pdf);
+        w.name("archive"); FeatureCodec.writeArchive(w, fr == null ? null : fr.archive, 200);
+        w.name("category").value(f.category).name("categoryConfidence").nullValue()
          .name("duplicateGroupId").value(f.duplicateGroupId).name("assessment").nullValue();
         w.endObject();
     }
