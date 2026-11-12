@@ -27,6 +27,7 @@ check-in reads this file first. Spec: `Storage_Planner_Technical_Specification_v
 | D6 | Hourly scheduled check-in wakes this session. | Owner asked that work continue unattended. |
 | D7 | Relaunched the survey and dataset agents at 22:25 UTC. | Both had been silently stopped at 20:25/20:33 by the owner's interrupts (made to reconnect Drive), and could not be resumed. Two hours lost. Lesson: after any interrupt, check that background agents are still alive. |
 | D8 | At most two Opus agents at a time; work committed as soon as it exists. | Both running agents hit the account's 5-hour usage limit at ~22:50 UTC and were stopped until 01:20 UTC (2.5 h lost). Resumed 01:27 UTC from their saved state. |
+| D9 | One Opus agent at a time from here on. | At ~08:20 UTC the account hit its *weekly* usage limit (reset 09:00 UTC); the session was idle until 11:24 UTC. Total lost to stoppages so far: about 11 of 15 hours. |
 
 ## Architecture decisions (after the codebase survey, 22:30 UTC)
 
@@ -71,24 +72,20 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (08:05 UTC, 12 Nov)
+## State (11:30 UTC, 12 Nov)
 
-- **Phase 1 done** (see PHASE_1_NOTES.md).
-- **Phase 2 done and committed.** 56 more classes / 3,394 lines; 21 suites,
-  0 failures (re-run by the lead); classic code untouched. Dataset gates:
-  type detection 2377/2377, sha256 2405/2405, exact duplicates precision 1.0
-  recall 129/129, encrypted PDFs 5/5, zip traversal/high-ratio/nested flagged,
-  APK package+version 10/10, misleading extensions 2/2. Drive photos: 232 JPEG
-  decoded with pHash+sharpness; 36 HEIC kept as "unknown". Not done: audio
-  probe, MKV/AVI/TAR (Phase 6 per A11), three listed tests, `apps` in CLI JSON.
+- Phases 1 and 2 done, committed, 21 suites green.
 - Phases 3-5 design reviewed and final.
-- Running: Phase 3 implementer; dataset-generator fix (identical invoices) with
-  a full rebuild - marker `/home/user/sp-dataset/.rebuilt_ok` when done.
+- Dataset generator fixed (identical invoices now differ); dataset rebuilt and
+  verified by the lead (2,409 entries, 0 problems; verify.py now also fails on
+  unlinked identical files); marker `.rebuilt_ok` set by the lead.
+- Phase 3 implementer resumed at 11:27 UTC (graph package started; work in
+  progress committed).
 
 ## Next steps
 
-1. Generator fix reports -> commit. Phase 3 report -> lead re-runs tests and
-   the phase3 gate (hard-negative check must be zero) -> commit.
+1. Phase 3 report -> lead re-runs tests and the phase3 gate (hard-negative
+   check must be zero) -> commit.
 2. Phase 4 (risk engine) -> Phase 5 (planner) -> first full scored run.
 3. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
 4. Phases 6-10 as far as the session allows.
