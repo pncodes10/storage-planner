@@ -395,7 +395,7 @@ targets, `Σ Planner.tiered(adapted).saved() ≤ Σ distinct file and app bytes`
 
 | Metric | Gate | Expected |
 |---|---|---|
-| DDRR | 0, both modes | 0 (needs PHASE_4 F-05/F-06: `temp123.tmp` and the identical invoice pair are must_never_delete) |
+| DDRR | 0, both modes | 0 (needs PHASE_4 F-05 for `temp123.tmp`; the identical must_never_delete invoice pair is a dataset-generator bug the lead will fix — until then it shows as 1 DDRR hit and is reported as a known label defect, not a v2 failure) |
 | exposure (any DELETE on must_never_delete) | 0, both modes | 0 |
 | `spec_violations` (F-12) | 0, both modes | 0 |
 | deletion precision SAFE / NO_LOSS / YOUR_CALL | ≥ 0.98 / ≥ 0.98 / ≥ 0.80 | ≈ 1.0 / ≈ 1.0 / ≈ 0.95 |

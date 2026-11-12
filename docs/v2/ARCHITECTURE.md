@@ -883,7 +883,7 @@ Phase 1 with a sentence each; the table below lists only those a user sees in a 
 | `R_INSTALLER_SIGNER_MISMATCH` | REVIEW | "Installer for {app}, but signed by a different developer than the installed app." (Phase 4) |
 | `R_INSTALLER_NEWER` | REVIEW | "Installer for a newer {app} ({version}) than the one installed ({installed})." (Phase 4) |
 | `R_OLD_DOWNLOAD` | REVIEW | "Large {kind} downloaded {age} ago; Android does not tell us whether you opened it since." (Phase 4, aggressive only) |
-| `R_SAME_CONTENT_DIFFERENT_NAME` | REVIEW | "Same content as {other}, but the names differ; the name may be the only record of which document this is." (Phase 4, REVIEW_2 F-06) |
+| `N_SAME_CONTENT_DIFFERENT_NAME` | NO_LOSS (secondary reason only; never changes the tier) | "Same content as {keeperName}, which is kept; only the name differs ({name})." (Phase 4, REVIEW_2 F-06 as ruled by the lead) |
 | `PL_PAUSED_DEVICE` | — | "Paused to protect the battery or temperature; it resumes later." |
 | `X_VERIFIED` | — | "Done and checked: {bytes} freed." |
 | `X_ROLLED_BACK` | — | "Undone: {why}." |
@@ -958,6 +958,9 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
   actions; their bytes come from `InstalledApp` and are never double counted with files.
 
 **Superseded detail (REVIEW_2, binding where it differs from the bullets above):**
+* Exact keeper order (lead ruling on REVIEW_2 F-06): protection → location rank (user-organised folders > other > Download >
+  chat > temp/cache/trash) → descriptive name over generic (`temp123`, `document(1)`, `IMG-…-WA…`) → oldest mtime → path → fileId
+  (PHASE_3 §8.1). Different names never change the NO_LOSS tier; they add `N_SAME_CONTENT_DIFFERENT_NAME`.
 * Near duplicates: candidates by multi-index pHash (4 bands, radius 1 → all pairs ≤ 7 bits) + capture-time window (120 s) + name
   stems, then a three-part structural test (coarse 64-px SSIM grid, fine 256-px grid, 16×16 chroma); truncated searches report
   `perceptualStatus = UNKNOWN` (PHASE_3 §4, A-5, F-01). `EDITED_FROM` needs provenance (name stem, equal capture time, editor folder or

@@ -549,7 +549,7 @@ margin (ARCHITECTURE Phase 7) and its `reliability()` is measured, not declared.
 | B-6 | §12 row 6 | "cert unknown → YOUR_CALL" stays (`Y_INSTALLER_UNVERIFIED`); add "not installed → REVIEW (`R_INSTALLER_NOT_INSTALLED`), never YOUR_CALL" |
 | B-7 | §1 package map | `v2.plan.TierAssigner`, `PresentationPolicy`, `ReasonCatalog` are built in Phase 4 |
 | B-8 | §11 Phase 4 row | exit criteria of §16 |
-| B-9 (REVIEW_2) | §7 H4/H10 notes, §6 | SAFE "structural" means location **and** type (ARCHITECTURE §2.11 already says so): a temp *name* over a complete content file is not structural (F-05); add `R_SAME_CONTENT_DIFFERENT_NAME` (F-06); structural candidates' confidence ignores `c_extract`/`c_avail` (F-07) |
+| B-9 (REVIEW_2) | §7 H4/H10 notes, §6 | SAFE "structural" means location **and** type (ARCHITECTURE §2.11 already says so): a temp *name* over a complete content file is not structural (F-05); add the explanatory code `N_SAME_CONTENT_DIFFERENT_NAME` (F-06 as ruled by the lead); exact keeper order of PHASE_3 §8.1 replaces ARCHITECTURE §8's; structural candidates' confidence ignores `c_extract`/`c_avail` (F-07) |
 
 ---
 
