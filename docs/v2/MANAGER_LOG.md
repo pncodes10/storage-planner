@@ -80,22 +80,22 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (16:30 UTC, 12 Nov)
+## State (16:45 UTC, 12 Nov)
 
-- Phases 1-5 built and committed; 32 suites green locally.
-- **CI is green again**: "Build APK" run 58 (commit b396066) succeeded at 12:46
-  UTC - the APK builds, passes the audit and the v2 tests with v2 code
-  included. v2 is compiled into the APK but nothing calls it yet.
-- Third 5-hour usage limit hit at ~12:50 UTC (reset 16:20 UTC). The Phase A
-  agent had written nothing; resumed at 16:27 UTC.
-- Open: dataset label fix (A27), ClassicParityTest and five other tests,
-  record shrink (A21).
+- Phases 1-5 and Phase A (Classic / v2 switch) built and committed; 33 suites
+  green locally; classic `core/` and the manifest untouched.
+- **CI green with the switch included**: "Build APK" run 59 (commit 2b43513)
+  succeeded at 16:35 UTC - compile, dex, packaging, audit and tests. The APK
+  is an artifact of that run. Not installed or run on any device.
+- Phase A reviewer running (`REVIEW_A.md`): safety, classic regression,
+  crash risks, and the memory blocker - about 2.9 KB per file in memory, so a
+  phone with 40-50 thousand files could crash in v2 mode. Required: record
+  shrink plus a guard that stops v2 cleanly with a message instead.
+- Open: dataset label fix (A27), ClassicParityTest and five other tests.
 
 ## Next steps
 
-1. Phase A report -> lead runs both scripts -> commit -> check the CI run and
-   the APK artifact -> independent review of the Android glue (it cannot be
-   run here).
+1. Review A report -> lead runs both scripts -> commit -> check CI.
 2. Dataset label fix (A27) and missing tests.
 3. Phase 6 (content signals, A28), then 7-10.
 4. If an agent stops with a usage-limit error: wait for the reset time in the
