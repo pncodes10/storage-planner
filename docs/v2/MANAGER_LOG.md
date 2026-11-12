@@ -80,29 +80,23 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (12:45 UTC, 12 Nov)
+## State (16:30 UTC, 12 Nov)
 
-- Phases 1-5 built and committed; 32 suites green locally (re-run by the lead).
-- **The APK build in CI is red** (A30): v2 does not yet compile for Android.
-  Fix agent running. Nothing v2 has run on a phone.
-- Scored run after Phase 5 (standard / aggressive): dangerous deletes 0/178;
-  spec violations 0; exposure 1 (label defect, A27); tier hit rates SAFE 0.98,
-  NO-LOSS 1.0, REVIEW 0.83, PROTECTED 0.99, KEEP 0.998, YOUR CALL 0.61.
-  Plans: max safe = 5.5 MB safe + 56.8 MB no-loss on the 716 MB dataset, 0
-  must-never-delete files, 0% wrong bytes, 68% of the truly recoverable bytes
-  found; unreachable 5 GB target reports the achievable amount; scenario 12
-  (file changed after scan) detected, all 7 changed files named. With the app
-  fixture: caches 328 MB safe, idle apps 490 MB no-loss.
-  Drive photos: 0 bytes planned, 59 review items.
-- Not built: ClassicParityTest (A15) and five other listed tests; pipeline
-  stage wiring for assess/plan (the CLI calls them directly).
+- Phases 1-5 built and committed; 32 suites green locally.
+- **CI is green again**: "Build APK" run 58 (commit b396066) succeeded at 12:46
+  UTC - the APK builds, passes the audit and the v2 tests with v2 code
+  included. v2 is compiled into the APK but nothing calls it yet.
+- Third 5-hour usage limit hit at ~12:50 UTC (reset 16:20 UTC). The Phase A
+  agent had written nothing; resumed at 16:27 UTC.
+- Open: dataset label fix (A27), ClassicParityTest and five other tests,
+  record shrink (A21).
 
 ## Next steps
 
-1. CI compile fix + A29 -> lead verifies locally and checks the CI run goes
-   green -> commit.
+1. Phase A report -> lead runs both scripts -> commit -> check the CI run and
+   the APK artifact -> independent review of the Android glue (it cannot be
+   run here).
 2. Dataset label fix (A27) and missing tests.
-3. Record shrink (A21) -> Phase A (app switch; CI builds the APK).
-4. Phase 6 (content signals for screenshots/forwards/downloads, A28), then 7-10.
-5. If an agent stops with a usage-limit error: wait for the reset time in the
+3. Phase 6 (content signals, A28), then 7-10.
+4. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.
