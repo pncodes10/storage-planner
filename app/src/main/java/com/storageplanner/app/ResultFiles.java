@@ -79,6 +79,10 @@ final class ResultFiles {
     /** Main thread: snapshot Session and write it in the background (e.g. after the plan mode changed). */
     static void saveSessionAsync(Context c) {
         if (!Session.hasResults()) return;
+        if (Session.notPlannable != null) {        // a v2 result: its store is already saved; only the plan mode is remembered
+            prefs(c).edit().putInt("v2_mode", Session.mode).apply();
+            return;
+        }
         final ResultStore.Saved s = snapshot();
         final Context app = c.getApplicationContext();
         new Thread(new Runnable() {

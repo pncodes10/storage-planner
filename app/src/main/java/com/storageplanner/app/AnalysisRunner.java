@@ -1,6 +1,7 @@
 package com.storageplanner.app;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 
 import com.storageplanner.core.Estimates;
 import com.storageplanner.core.ResultStore;
@@ -25,6 +26,7 @@ final class AnalysisRunner {
     }
 
     static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) {
+        if (ALGO_V2.equals(algorithm(app))) return V2Runner.run(app, targetGb, measure, pr);
         Outcome o = new Outcome();
         ResultFiles.setRunning(app, true);
         try {
@@ -50,6 +52,7 @@ final class AnalysisRunner {
             s.appStats = pf.appStatsAvailable; s.sdk = pf.sdkInt(); s.mode = Session.mode;
             pr.update("Saving results", 0, 0);
             ResultFiles.save(app, s);                 // a failed save only costs a rescan after process death
+            setResultAlgorithm(app, ALGO_CLASSIC);    // restore after process death uses classic for this result
 
             final CountDownLatch set = new CountDownLatch(1);
             final long[] saved = {0};
@@ -78,6 +81,24 @@ final class AnalysisRunner {
 
     static boolean sortPictures(Context c) { return c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getBoolean("sort_pictures", true); }
     static void setSortPictures(Context c, boolean on) { c.getSharedPreferences("analysis", Context.MODE_PRIVATE).edit().putBoolean("sort_pictures", on).apply(); }
+
+    // ---- algorithm switch (Phase A): which algorithm runs next, and which one produced the saved result
+    static final String ALGO_CLASSIC = "classic", ALGO_V2 = "v2";
+    static String algorithm(Context c) {
+        return ALGO_V2.equals(c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getString("algorithm", ALGO_CLASSIC)) ? ALGO_V2 : ALGO_CLASSIC;
+    }
+    static void setAlgorithm(Context c, String a) { c.getSharedPreferences("analysis", Context.MODE_PRIVATE).edit().putString("algorithm", ALGO_V2.equals(a) ? ALGO_V2 : ALGO_CLASSIC).apply(); }
+    /** Algorithm of the saved result; a missing marker (results saved before Phase A) means classic. null = none usable. */
+    static String resultAlgorithm(Context c) {
+        SharedPreferences p = c.getSharedPreferences("analysis", Context.MODE_PRIVATE);
+        if (!p.contains("result_algorithm")) return ALGO_CLASSIC;
+        String v = p.getString("result_algorithm", "");
+        return ALGO_V2.equals(v) ? ALGO_V2 : ALGO_CLASSIC.equals(v) ? ALGO_CLASSIC : null;
+    }
+    /** null = the saved v2 state is incomplete (a v2 run is under way): restore nothing. */
+    static void setResultAlgorithm(Context c, String a) {
+        c.getSharedPreferences("analysis", Context.MODE_PRIVATE).edit().putString("result_algorithm", a == null ? "" : a).commit();
+    }
 
     /** Progress callback that feeds AnalysisState (the activity) plus an optional extra sink (the notification). */
     static Scanner.Progress progress(final Scanner.Progress extra) {

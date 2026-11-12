@@ -55,7 +55,21 @@ public final class Session {
     public static boolean hasResults() { return result != null && ub != null && plan != null; }
     public static long used() { return result.total - result.free; }
 
+    /** Phase A: non-null while a v2 result is shown (unit ids never planned); null = classic, planned exactly as before. */
+    public static Set<String> notPlannable;
+
+    /** A v2 result adapted to classic units (V2Adapter); planned by V2Plans (SAFE + NO_LOSS only, display-only units excluded). */
+    public static void setV2(Scanner.Result r, UnitBuilder b, Estimates e, long target, boolean stats, int sdkInt, Set<String> displayOnly) {
+        notPlannable = displayOnly == null ? new HashSet<String>() : displayOnly;
+        setResults(r, b, e, target, stats, sdkInt);
+    }
+
     public static void set(Scanner.Result r, UnitBuilder b, Estimates e, long target, boolean stats, int sdkInt) {
+        notPlannable = null;
+        setResults(r, b, e, target, stats, sdkInt);
+    }
+
+    private static void setResults(Scanner.Result r, UnitBuilder b, Estimates e, long target, boolean stats, int sdkInt) {
         result = r; ub = b; est = e; targetUsed = target; appStats = stats; sdk = sdkInt;
         unitById.clear(); fileByRel.clear(); copiesOf.clear();
         for (Unit u : b.units) unitById.put(u.id, u);
@@ -90,6 +104,11 @@ public final class Session {
     public static void replan() {
         if (ub == null) return;
         long need = Math.max(0, used() - targetUsed);
+        if (notPlannable != null) {
+            safe = com.storageplanner.v2adapter.V2Plans.plan(ub.units, notPlannable, kept, accepted, need, MODE_SAFE);
+            plan = mode == MODE_SAFE ? safe : com.storageplanner.v2adapter.V2Plans.plan(ub.units, notPlannable, kept, accepted, need, MODE_TARGET);
+            return;
+        }
         safe = Review.planWithDecisions(ub.units, kept, accepted, need, MODE_SAFE);
         plan = mode == MODE_SAFE ? safe : Review.planWithDecisions(ub.units, kept, accepted, need, MODE_TARGET);
     }

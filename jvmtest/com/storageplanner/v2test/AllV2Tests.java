@@ -41,6 +41,7 @@ public final class AllV2Tests {
             {"Planner2Test", (Suite) Planner2Test::run},
             {"PlanPropertyTest", (Suite) PlanPropertyTest::run},
             {"YourCallEligibilityTest", (Suite) YourCallEligibilityTest::run},
+            {"V2AdapterTest", (Suite) V2AdapterTest::run},
         };
         List<String> only = Arrays.asList(args);
         int failures = 0, ran = 0;

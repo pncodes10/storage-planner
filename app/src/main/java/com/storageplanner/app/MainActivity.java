@@ -123,6 +123,18 @@ public final class MainActivity extends Activity {
         final android.content.Context app = getApplicationContext();
         new Thread(new Runnable() {
             public void run() {
+                String algo = AnalysisRunner.resultAlgorithm(app);
+                if (!AnalysisRunner.ALGO_CLASSIC.equals(algo)) {          // v2 result -> v2 restore; incomplete (null) -> nothing
+                    if (AnalysisRunner.ALGO_V2.equals(algo) && !Session.hasResults()) V2Runner.restore(app);
+                    AnalysisState.UI.post(new Runnable() {
+                        public void run() {
+                            ResultFiles.loading = false;
+                            MainActivity m = current;
+                            if (m != null) m.onResultsLoaded();
+                        }
+                    });
+                    return;
+                }
                 ResultStore.Saved s = ResultFiles.load(app);
                 UnitBuilder ub = null;
                 if (s != null) {

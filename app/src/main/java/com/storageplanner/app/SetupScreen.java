@@ -83,6 +83,32 @@ public final class SetupScreen extends Screen {
             public void onCheckedChanged(android.widget.CompoundButton b, boolean on) { AnalysisRunner.setSortPictures(a, on); }
         });
         tgt.addView(sortBox, new LinearLayout.LayoutParams(-1, -2));
+        // Algorithm: Classic (default) / v2 (new); remembered in the "analysis" preferences (Phase A)
+        TextView algoLbl = new TextView(a);
+        algoLbl.setText("Algorithm");
+        algoLbl.setTextColor(Ui.text);
+        algoLbl.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        tgt.addView(algoLbl, new LinearLayout.LayoutParams(-1, -2));
+        final android.widget.RadioGroup algo = new android.widget.RadioGroup(a);
+        algo.setOrientation(LinearLayout.VERTICAL);
+        algo.setContentDescription("Algorithm");
+        final android.widget.RadioButton classicBtn = new android.widget.RadioButton(a), v2Btn = new android.widget.RadioButton(a);
+        classicBtn.setText("Classic (default)");
+        v2Btn.setText("v2 (new): five levels from Safe to Protected, explains every suggestion");
+        for (android.widget.RadioButton rb : new android.widget.RadioButton[]{classicBtn, v2Btn}) {
+            rb.setId(View.generateViewId());
+            rb.setTextColor(Ui.text);
+            rb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            rb.setMinHeight(dp(48));
+            algo.addView(rb, new LinearLayout.LayoutParams(-1, -2));
+        }
+        algo.check(AnalysisRunner.ALGO_V2.equals(AnalysisRunner.algorithm(a)) ? v2Btn.getId() : classicBtn.getId());
+        algo.setOnCheckedChangeListener(new android.widget.RadioGroup.OnCheckedChangeListener() {
+            public void onCheckedChanged(android.widget.RadioGroup g, int id) {
+                AnalysisRunner.setAlgorithm(a, id == v2Btn.getId() ? AnalysisRunner.ALGO_V2 : AnalysisRunner.ALGO_CLASSIC);
+            }
+        });
+        tgt.addView(algo, new LinearLayout.LayoutParams(-1, -2));
         addCard(L, tgt, 16);
 
         LinearLayout row = Ui.row(a);
