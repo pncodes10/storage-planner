@@ -83,6 +83,7 @@ public final class V2Cli {
                 else if (s.equals("--installed-apps-ext")) PlanJson.extApps = a.get(++i);
                 else if (s.equals("--check-plan")) { PlanJson.checkPlan = a.get(++i); assess = true; graph = true; }
                 else if (s.equals("--max-plan-tier")) PlanJson.maxTier = com.storageplanner.v2.model.Tier.valueOf(a.get(++i));
+                else if (s.equals("--allow-your-call")) PlanJson.allowYourCall = true;
                 else if (s.equals("--hash-budget-bytes")) PlanJson.hashBudget = Long.parseLong(a.get(++i));
                 else if (s.equals("--installed-apps")) installedApps = a.get(++i);
                 else if (s.equals("--workers")) { if (Integer.parseInt(a.get(++i)) != 0) err.println("note: --workers ignored, single-threaded until Phase 10 (A11)"); }

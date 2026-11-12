@@ -70,7 +70,7 @@ public final class PlanPropertyTest {
             long[] targets = {ActionPlan.MAX_SAFE, 10 * MB, 60 * MB, 150 * MB, 400 * MB, 5000 * MB};
             Tier prev = null; long prevT = -1;
             for (long t : targets) {
-                Plans.Made m = Plans.make(x.in, t, t == ActionPlan.MAX_SAFE ? null : max);
+                Plans.Made m = Plans.make(x.in, t, t == ActionPlan.MAX_SAFE ? null : max, max == Tier.YOUR_CALL);
                 ActionPlan p = m.plan; plans++;
                 T.check("validator clean " + m.problems, m.problems.isEmpty() && p.validatorDropped == 0);
                 Set<String> seen = new HashSet<String>(), removed = new HashSet<String>(), touched = new HashSet<String>();

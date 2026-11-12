@@ -1,6 +1,7 @@
 package com.storageplanner.v2.store;
 
 import com.storageplanner.v2.model.*;
+import com.storageplanner.v2.model.Record;   // single-type import: java.lang.Record exists in android-34.jar
 import com.storageplanner.v2.util.Hex;
 import com.storageplanner.v2.util.Json;
 import com.storageplanner.v2.util.JsonWriter;

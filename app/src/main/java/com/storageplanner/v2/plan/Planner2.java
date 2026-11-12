@@ -7,8 +7,9 @@ import java.util.*;
 
 /**
  * PHASE_5 4.3: lexicographic greedy (tier -> spec 10.3 priority class -> cost per byte), SAFE always taken, prune pass, single-item
- * swap within the highest tier used (REVIEW_2 F-11). YOUR_CALL options enter a plan only with utility > 0 (ruling A25) and only when
- * the request allows YOUR_CALL. Never selects REVIEW/PROTECTED (they have no options) and never raises risk silently.
+ * swap within the highest tier used (REVIEW_2 F-11). Ruling A29 (supersedes A25's plan gate): a plan holds only SAFE and NO_LOSS items
+ * unless the request explicitly allows YOUR_CALL (allowYourCall); then YOUR_CALL options are ranked by utility with no "utility > 0" gate.
+ * Never selects REVIEW/PROTECTED (they have no options) and never raises risk silently.
  */
 public final class Planner2 {
     private Planner2() {}
@@ -25,8 +26,7 @@ public final class Planner2 {
         }
     };
     static boolean eligible(Option2 o, Tier k) {
-        if (tierRank(o.tier) > tierRank(k) || !UnitBuilder2.plannableTier(o.tier) || o.bytes <= 0) return false;
-        return o.tier != Tier.YOUR_CALL || o.utility > 0;      // A25: utility decides plan inclusion of YOUR_CALL items
+        return tierRank(o.tier) <= tierRank(k) && UnitBuilder2.plannableTier(o.tier) && o.bytes > 0;   // A29: no utility gate
     }
 
     /** Current selection with the §3 bookkeeping. */
@@ -121,10 +121,15 @@ public final class Planner2 {
         if (best != null) s.add(best); else for (Option2 o : g) s.add(o);
     }
 
-    public static ActionPlan plan(List<PlanUnit> units, long target, Tier maxTier) {
-        ActionPlan p = new ActionPlan(); p.targetBytes = target;
-        p.maxTier = maxTier == null ? (target == ActionPlan.MAX_SAFE ? Tier.NO_LOSS : Tier.YOUR_CALL) : maxTier;
-        if (tierRank(p.maxTier) > tierRank(Tier.YOUR_CALL)) p.maxTier = Tier.YOUR_CALL;
+    /** Default request (ruling A29): YOUR_CALL is not allowed. */
+    public static ActionPlan plan(List<PlanUnit> units, long target, Tier maxTier) { return plan(units, target, maxTier, false); }
+
+    /** @param allowYourCall explicit opt-in to the YOUR_CALL tier (A29); without it the plan's maxTier is capped at NO_LOSS. */
+    public static ActionPlan plan(List<PlanUnit> units, long target, Tier maxTier, boolean allowYourCall) {
+        ActionPlan p = new ActionPlan(); p.targetBytes = target; p.allowYourCall = allowYourCall;
+        Tier ceiling = allowYourCall ? Tier.YOUR_CALL : Tier.NO_LOSS;
+        p.maxTier = maxTier == null ? (target == ActionPlan.MAX_SAFE ? Tier.NO_LOSS : ceiling) : maxTier;
+        if (tierRank(p.maxTier) > tierRank(ceiling)) p.maxTier = ceiling;
         Sel s = base(units);
         Tier used = null;
         if (target == ActionPlan.MAX_SAFE) {
@@ -151,7 +156,11 @@ public final class Planner2 {
         finish(p, s);
         p.reasonCodes.add("PL_TARGET_UNREACHABLE");
         p.reasonParams.put("target", Fmt.bytes(target)); p.reasonParams.put("achievable", Fmt.bytes(p.achievableBytes));
-        p.reasonParams.put("withYourCall", Fmt.bytes(p.withYourCallBytes));
+        if (p.maxTier != Tier.YOUR_CALL) {      // A29: say what YOUR_CALL would add, without adding it
+            long extra = Math.max(0, cap(units, Tier.YOUR_CALL) - p.achievableBytes);
+            p.yourCallExtraBytes = extra;
+            p.reasonParams.put("withYourCall", Fmt.bytes(p.achievableBytes + extra));
+        } else p.reasonParams.put("withYourCall", Fmt.bytes(p.withYourCallBytes));
         return p;
     }
     static ActionPlan finish(ActionPlan p, Sel s) {

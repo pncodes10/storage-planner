@@ -28,6 +28,7 @@ public final class PlanValidator {
             boolean rem = it.action == Action.DELETE || it.action == Action.QUARANTINE;
             if (!UnitBuilder2.plannableTier(it.tier)) bad = "tier " + it.tier;
             else if (Tier.rank(it.tier) > Tier.rank(p.maxTier)) bad = "tier above request";
+            else if (it.tier == Tier.YOUR_CALL && !p.allowYourCall) bad = "YOUR_CALL without opt-in";   // A29
             else if (recs != null && (r == null || r.tier != it.tier || r.proposedAction != it.action)) bad = "rec missing or changed";
             else if (r != null && it.action == Action.DELETE && UnitBuilder2.hashPending(r)) bad = "hash pending";
             if (bad == null) for (String f : it.fileIds) {

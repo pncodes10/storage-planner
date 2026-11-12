@@ -23,6 +23,7 @@ final class PlanJson {
     static int sdk = 34;
     static String extApps, checkPlan;
     static Tier maxTier;
+    static boolean allowYourCall;
     static long hashBudget = Long.MAX_VALUE;
     static ActionPlan plan;
     static List<String> staleness;
@@ -53,7 +54,7 @@ final class PlanJson {
         UnitBuilder2.Input in = new UnitBuilder2.Input();
         in.recs = AssessJson.recs; in.files = fm; in.keepers = Plans.keepers(store);
         if (target != null) {
-            Plans.Made m = Plans.make(in, target, maxTier);
+            Plans.Made m = Plans.make(in, target, maxTier, allowYourCall);
             for (String p : m.problems) err.println("plan validator: " + p);
             plan = m.plan;
             plan.mode = AssessJson.mode == null ? "standard" : AssessJson.mode;
@@ -106,7 +107,7 @@ final class PlanJson {
         if (plan == null) { w.nullValue(); return; }
         ActionPlan p = plan;
         w.beginObject().name("planId").value(p.planId).name("planVersion").value(p.planVersion).name("state").value(p.state).name("mode").value(p.mode)
-         .name("targetBytes").value(p.targetBytes).name("maxTier").value(p.maxTier)
+         .name("targetBytes").value(p.targetBytes).name("maxTier").value(p.maxTier).name("allowYourCall").value(p.allowYourCall).name("yourCallExtraBytes").value(p.yourCallExtraBytes)
          .name("achievableBytes").value(p.achievableBytes).name("achievableExactBytes").value(p.achievableExactBytes)
          .name("withYourCallBytes").value(p.withYourCallBytes).name("reachesTarget").value(p.reachesTarget).name("highestTier").value(p.highestTier)
          .name("hashPending").value(p.hashPending).name("validatorDropped").value(p.validatorDropped)

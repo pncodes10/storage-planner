@@ -45,7 +45,7 @@ public final class UnitBuilder2Test {
         T.check("cache file is included in the app cache (display only)", b.displayOnly.size() == 1 && "cache:com.x".equals(b.displayOnly.get(0).includedIn));
         p = x.plan(ActionPlan.MAX_SAFE);
         T.eq("max safe: cache unit (cache file inside it) + SAFE media file", 19 * MB, p.achievableBytes);
-        p = x.plan(400 * MB);
+        p = x.planYourCall(400 * MB);
         T.check("uninstall and its media file never together", !(PlanFx.has(p, "app:com.y") && PlanFx.has(p, mf.fileId)));
         T.check("lower-tier file unit wins over a YOUR_CALL uninstall", !PlanFx.has(p, "app:com.y") && !p.reachesTarget);
         FileRecord zf = x.file("Android/media/com.z/v.mp4", 9 * MB);
@@ -53,7 +53,7 @@ public final class UnitBuilder2Test {
         x.rec("app:com.z", Tier.YOUR_CALL, Action.UNINSTALL_APP, "Y_IDLE_APP", 500 * MB, 0.05);
         b = UnitBuilder2.build(x.in);
         T.check("same tier: app unit wins, file display only", b.displayOnly.size() == 2);
-        p = x.plan(400 * MB);
+        p = x.planYourCall(400 * MB);
         T.check("uninstall chosen at equal tier", PlanFx.has(p, "app:com.z") && !PlanFx.has(p, zf.fileId));
         long sum = 0; for (ActionPlan.PlanItem i : p.items) sum += i.bytes;
         T.eq("bytes counted once", sum, p.withYourCallBytes);

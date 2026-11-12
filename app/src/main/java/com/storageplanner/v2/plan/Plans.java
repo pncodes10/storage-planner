@@ -15,10 +15,12 @@ public final class Plans {
 
     public static final class Made { public ActionPlan plan; public UnitBuilder2.Built built; public List<String> problems = new ArrayList<String>(); }
 
-    public static Made make(UnitBuilder2.Input in, long target, Tier maxTier) {
+    public static Made make(UnitBuilder2.Input in, long target, Tier maxTier) { return make(in, target, maxTier, false); }
+    /** allowYourCall: the request's explicit opt-in to YOUR_CALL items (ruling A29). */
+    public static Made make(UnitBuilder2.Input in, long target, Tier maxTier, boolean allowYourCall) {
         Made m = new Made();
         m.built = UnitBuilder2.build(in);
-        m.plan = Planner2.plan(m.built.units, target, maxTier);
+        m.plan = Planner2.plan(m.built.units, target, maxTier, allowYourCall);
         m.plan.hashPending = m.built.hashPending;
         if (m.built.hashPending > 0) { m.plan.reasonCodes.add("PL_HASH_PENDING"); m.plan.reasonParams.put("pending", String.valueOf(m.built.hashPending)); }
         m.problems.addAll(PlanValidator.validate(m.plan, m.built.recById, in.keepers));

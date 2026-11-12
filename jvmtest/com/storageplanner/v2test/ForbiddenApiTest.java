@@ -53,7 +53,58 @@ public final class ForbiddenApiTest {
             for (String s : p) if (s.contains("Fine.java")) fineClean = false;
             T.check("StringBuilder.delete(int,int) allowed", fineClean);
         } finally { t.close(); }
+        // java.lang name clashes (CI APK javac vs android-34.jar, where java.lang.Record exists)
+        List<String> c = langClashes(src);
+        for (String x : c) System.out.println("  violation: " + x);
+        T.eq("no ambiguous java.lang name in v2 (single-type import required)", 0, c.size());
+        TempTree t2 = TempTree.create();
+        try {
+            t2.file("a/m/Record.java", "package a.m;\npublic interface Record { }\n".getBytes(StandardCharsets.UTF_8));
+            t2.file("a/s/Bad.java", "package a.s;\nimport a.m.*;\nclass Bad<R extends Record> { }\n".getBytes(StandardCharsets.UTF_8));
+            t2.file("a/s/Good.java", "package a.s;\nimport a.m.*;\nimport a.m.Record;\nclass Good<R extends Record> { }\n".getBytes(StandardCharsets.UTF_8));
+            t2.file("a/m/Same.java", "package a.m;\nclass Same<R extends Record> { }\n".getBytes(StandardCharsets.UTF_8));
+            List<String> pc = langClashes(t2.root());
+            T.eq("planted java.lang clash detected (only Bad.java)", 1, pc.size());
+            T.check("clash report names Bad.java", pc.size() == 1 && pc.get(0).contains("Bad.java"));
+        } finally { t2.close(); }
         return T.finish("ForbiddenApiTest");
+    }
+
+    /** java.lang types added after Java 8 that android-34.jar (libcore ~ OpenJDK 17) or a newer JDK may have. A v2 type
+     *  with one of these simple names, reached through an on-demand (wildcard) import, is ambiguous there even though it
+     *  compiles with --release 8. Same-package use is fine (package scope shadows java.lang). */
+    static final String[] NEWER_JAVA_LANG = {"Record", "Module", "ModuleLayer", "ProcessHandle", "StackWalker", "ScopedValue",
+            "MatchException", "WrongThreadException", "StringTemplate"};
+
+    static List<String> langClashes(Path dir) throws IOException {
+        List<String> out = new ArrayList<String>();
+        List<Path> files;
+        try (Stream<Path> s = Files.walk(dir)) { files = s.filter(p -> p.toString().endsWith(".java")).sorted().collect(Collectors.toList()); }
+        List<String[]> clashing = new ArrayList<String[]>();        // {package, simpleName}
+        for (Path f : files) {
+            String n = f.getFileName().toString().replace(".java", "");
+            for (String l : NEWER_JAVA_LANG) if (l.equals(n)) clashing.add(new String[]{pkg(f), n});
+        }
+        for (Path f : files) {
+            String text = new String(Files.readAllBytes(f), StandardCharsets.UTF_8);
+            String pf = pkg(f);
+            for (String[] c : clashing) {
+                if (c[0].equals(pf)) continue;
+                String q = Pattern.quote(c[0]);
+                if (!Pattern.compile("(?m)^\\s*import\\s+" + q + "\\.\\*\\s*;").matcher(text).find()) continue;
+                if (Pattern.compile("(?m)^\\s*import\\s+" + q + "\\." + c[1] + "\\s*;").matcher(text).find()) continue;
+                String body = text.replaceAll("(?m)^\\s*(import|package)\\s.*$", "");
+                if (Pattern.compile("\\b" + c[1] + "\\b").matcher(body).find())
+                    out.add(dir.relativize(f) + " uses " + c[1] + " via import " + c[0] + ".* (ambiguous with java.lang." + c[1] + ")");
+            }
+        }
+        return out;
+    }
+
+    private static String pkg(Path f) throws IOException {
+        java.util.regex.Matcher m = Pattern.compile("(?m)^\\s*package\\s+([\\w.]+)\\s*;")
+                .matcher(new String(Files.readAllBytes(f), StandardCharsets.UTF_8));
+        return m.find() ? m.group(1) : "";
     }
 
     static List<String> scan(Path dir) throws IOException {

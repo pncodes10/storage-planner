@@ -14,8 +14,12 @@ public final class ActionPlan implements Record {
     public String state = "DRAFT";
     public String mode = "standard";
     public long targetBytes;
-    /** Highest tier the request allows (YOUR_CALL for a numeric target, NO_LOSS for MAX_SAFE unless the caller says otherwise). */
-    public Tier maxTier = Tier.YOUR_CALL;
+    /** Highest tier the request allows: NO_LOSS unless the request sets allowYourCall (ruling A29), which raises a numeric target's default to YOUR_CALL. */
+    public Tier maxTier = Tier.NO_LOSS;
+    /** Explicit opt-in to YOUR_CALL items (A29). */
+    public boolean allowYourCall;
+    /** Unreachable target without the YOUR_CALL opt-in: bytes YOUR_CALL items would add (not in the plan). 0 otherwise. */
+    public long yourCallExtraBytes;
     public List<PlanItem> items = new ArrayList<PlanItem>();
     /** SAFE + NO_LOSS item bytes; exactOnly excludes estimated (transform) bytes. */
     public long achievableBytes, achievableExactBytes, withYourCallBytes;
@@ -49,7 +53,7 @@ public final class ActionPlan implements Record {
     public String key() { return planId; }
     public ActionPlan copy() {
         ActionPlan r = new ActionPlan(); r.planId = planId; r.planVersion = planVersion; r.createdAt = createdAt; r.scanId = scanId; r.state = state;
-        r.mode = mode; r.targetBytes = targetBytes; r.maxTier = maxTier; r.items = new ArrayList<PlanItem>(items);
+        r.mode = mode; r.targetBytes = targetBytes; r.maxTier = maxTier; r.allowYourCall = allowYourCall; r.yourCallExtraBytes = yourCallExtraBytes; r.items = new ArrayList<PlanItem>(items);
         r.achievableBytes = achievableBytes; r.achievableExactBytes = achievableExactBytes; r.withYourCallBytes = withYourCallBytes;
         r.reachesTarget = reachesTarget; r.highestTier = highestTier; r.reasonCodes = new ArrayList<String>(reasonCodes);
         r.reasonParams = new TreeMap<String, String>(reasonParams); r.hashPending = hashPending; r.validatorDropped = validatorDropped;

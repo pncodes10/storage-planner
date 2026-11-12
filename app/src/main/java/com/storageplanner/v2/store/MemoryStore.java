@@ -4,6 +4,7 @@ import com.storageplanner.v2.V2;
 import com.storageplanner.v2.device.BlobStore;
 import com.storageplanner.v2.device.Clock;
 import com.storageplanner.v2.model.*;
+import com.storageplanner.v2.model.Record;   // single-type import: java.lang.Record exists in android-34.jar
 
 import java.io.IOException;
 import java.io.InputStream;

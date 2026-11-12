@@ -22,7 +22,9 @@ final class PlanFx {
     }
     Recommendation del(FileRecord f, Tier t, String code, double el, String... deps) { return rec(f.fileId, t, Action.DELETE, code, f.sizeBytes, el, deps); }
     ActionPlan plan(long target) { return Plans.make(in, target, null).plan; }
-    ActionPlan plan(long target, Tier max) { return Plans.make(in, target, max).plan; }
+    /** An explicit max of YOUR_CALL is the request's opt-in to that tier (A29). */
+    ActionPlan plan(long target, Tier max) { return Plans.make(in, target, max, max == Tier.YOUR_CALL).plan; }
+    ActionPlan planYourCall(long target) { return Plans.make(in, target, null, true).plan; }
     static Set<String> files(ActionPlan p) { Set<String> s = new TreeSet<String>(); for (ActionPlan.PlanItem i : p.items) s.addAll(i.fileIds); return s; }
     static boolean has(ActionPlan p, String unitId) { for (ActionPlan.PlanItem i : p.items) if (i.unitId.equals(unitId)) return true; return false; }
     static long tierBytes(ActionPlan p, Tier t) { long b = 0; for (ActionPlan.PlanItem i : p.items) if (i.tier == t) b += i.bytes; return b; }

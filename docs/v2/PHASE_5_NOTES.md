@@ -17,6 +17,9 @@ Not committed by the implementer (commit `c2e85cd` "work in progress" was made b
 
 * `TierAssigner` row 8: `utility > 0` removed from YOUR_CALL eligibility; utility still ranks Y_ candidates. `Planner2` admits a YOUR_CALL option only
   with utility > 0 (plan inclusion).
+  *Superseded by ruling A29:* plans hold only SAFE + NO_LOSS by default; YOUR_CALL enters only with the request's explicit opt-in
+  (`Planner2.plan(…, allowYourCall)`, `Plans.make(…, allowYourCall)`, CLI `--allow-your-call`; an explicit `maxTier` YOUR_CALL in tests),
+  ranked by utility with no `utility > 0` gate. Without opt-in an unreachable target reports `achievableBytes` and `yourCallExtraBytes`.
 * Two tightenings were needed, because the size gate had been hiding them (both only move YOUR_CALL to REVIEW/KEEP):
   * `CandidateRules`: a copy whose mtime is > 1 day before its claimed original's → `R_UNCERTAIN_COPY` (chronology contradicts derivation).
   * Aggressive `Y_SIMILAR_SHOT` only for camera captures in the same area as the keeper; two edits of one photo stay `R_SIMILAR_SHOT`.
@@ -56,5 +59,5 @@ Not committed by the implementer (commit `c2e85cd` "work in progress" was made b
 * Use `Plans.make(...).built`: `units` are conflict-free per F-13 except where `Option2.conflicts` is non-empty (app vs file at different tiers)
   — emit only one side to classic. `displayOnly` units are "included in {includedIn}".
 * Keepers never have a unit (`UnitBuilder2` drops removal recs on keepers, `Plans.keepers` = every group keeper); `userDelete` must not re-add them.
-* hashPending deletes have no unit; YOUR_CALL options with utility ≤ 0 are recommendations but never planned.
+* hashPending deletes have no unit; YOUR_CALL options are planned only on opt-in (A29), then regardless of utility sign.
 * `ActionPlan.items[].fps`/`hashes` are what staleness checks; re-check before any approval request.

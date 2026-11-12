@@ -40,11 +40,13 @@ public final class YourCallEligibilityTest {
             T.check("burst of two edits is never YOUR_CALL", x.v(e2, pol).tier != Tier.YOUR_CALL);
         }
 
-        T.section("A25 plan inclusion by utility");
+        T.section("A29 plan inclusion (supersedes A25's utility gate)");
         PlanFx px = new PlanFx();
         Recommendation small = px.del(px.file("WhatsApp/a.jpg", 100000), Tier.YOUR_CALL, "Y_CHAT_COPY", 0.03);
         ActionPlan p = px.plan(50 * 1000000L);
-        T.check("negative-utility YOUR_CALL rec exists but is not planned", UnitBuilder2.utility(small) <= 0 && PlanFx.tierBytes(p, Tier.YOUR_CALL) == 0 && !p.reachesTarget);
+        T.check("negative-utility YOUR_CALL rec exists; default request does not plan it", UnitBuilder2.utility(small) <= 0 && PlanFx.tierBytes(p, Tier.YOUR_CALL) == 0 && !p.reachesTarget);
+        p = px.planYourCall(50 * 1000000L);
+        T.check("opt-in plans it (no utility > 0 gate)", PlanFx.tierBytes(p, Tier.YOUR_CALL) == 100000);
 
         T.section("hash on demand");
         PlanFx h = new PlanFx();
