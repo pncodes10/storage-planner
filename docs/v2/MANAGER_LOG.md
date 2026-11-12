@@ -76,7 +76,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (13:20 UTC, 12 Nov)
+## State (12:25 UTC, 12 Nov)
 
 - Phases 1-4 done and committed; 28 suites green (re-run by the lead),
   including a property test with 132,867 randomised checks of the safety rules.
