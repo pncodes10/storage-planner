@@ -34,7 +34,7 @@ def sha(p):
 def hash_collision_problems(files):
     """Identical content must be declared: files sharing a sha256 must be linked by
     EXACT_DUPLICATE edges (directly or via a common original), and no two members
-    of one hard_negative_group may share a sha256."""
+    of one hard_negative_group may share a sha256.  Zero-byte files are exempt."""
     parent = {}
 
     def find(x):
@@ -48,7 +48,7 @@ def hash_collision_problems(files):
                 parent[find(e["path"])] = find(r["target"])
     by_hash, out = {}, []
     for e in files:
-        if e.get("sha256"):
+        if e.get("sha256") and e.get("size"):  # zero-byte files trivially share the empty hash
             by_hash.setdefault(e["sha256"], []).append(e)
     for h, grp in sorted(by_hash.items()):
         for i, x in enumerate(grp):

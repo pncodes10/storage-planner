@@ -2,6 +2,7 @@
 and old financial records, encrypted PDFs, scanned-image PDFs, DOCX/XLSX/PPTX,
 CSV/TXT/logs, versions and duplicates."""
 import datetime
+import hashlib
 import io
 import os
 import random
@@ -33,6 +34,34 @@ def pdf_bytes(draw):
     draw(c)
     c.save()
     return b.getvalue()
+
+
+def stamp_invoice(data, key, names):
+    """Deterministic variant of a template invoice: overlay a distinct invoice
+    number, amount and billed-to name on page 1 so the document genuinely differs."""
+    r = rng("invstamp", key)
+    num, amt, who = f"INV-{r.randint(100000, 999999)}", f"{r.randint(1200, 98000)}.{r.randint(0, 99):02d}", r.choice(names)
+    rd = pypdf.PdfReader(io.BytesIO(data))
+    pg = rd.pages[0]
+    w_, h_ = float(pg.mediabox.width), float(pg.mediabox.height)
+
+    def draw(c):
+        c.setFillColorRGB(1, 1, 1)
+        c.rect(0, h_ - 62, w_, 62, stroke=0, fill=1)
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(24, h_ - 22, f"Invoice No: {num}    Amount due: {amt}")
+        c.setFont("Helvetica", 10)
+        c.drawString(24, h_ - 40, f"Billed to: {who}")
+    b = io.BytesIO()
+    c = canvas.Canvas(b, pagesize=(w_, h_), invariant=1)
+    draw(c)
+    c.save()
+    w = pypdf.PdfWriter(clone_from=rd)
+    w.pages[0].merge_page(pypdf.PdfReader(io.BytesIO(b.getvalue())).pages[0])
+    o = io.BytesIO()
+    w.write(o)
+    return o.getvalue(), f"stamped invoice no {num}, amount {amt}, billed to {who} (source identical to another sample)"
 
 
 def bank_statement(r, name, acct, year, month, opening):
@@ -130,6 +159,7 @@ def build(B):
     names = ["Rohan Kulkarni", "Priya Sharma", "Ayesha Khan"]
     # ---- real sample documents (Google Document AI samples)
     real = sorted(k for k in S if k.startswith("doc_") or k.startswith("invoices_synth"))
+    seen_inv = set()
     for i, sid in enumerate(real):
         s = S[sid]
         ext = os.path.splitext(s["path"])[1].lower()
@@ -139,10 +169,16 @@ def build(B):
             if sid.startswith("invoices_synth"):
                 when = rand_dt("inv", sid)
                 rel = B.unique(f"Download/Invoices/Invoice_{when:%Y%m%d}_{i:03d}{ext}")
-                B.copy(rel, s["path"], category="financial_document", subcategory="invoice", tier="KEEP",
-                       acceptable=["PROTECTED", "REVIEW"], importance="high", mnd=True, synthetic=False,
-                       source=B.src_meta(sid), date=when, hard_negative_group="HN_invoice_template",
-                       notes="same invoice template as other group members, different numbers")
+                data = open(s["path"], "rb").read()
+                h, tf = hashlib.sha256(data).hexdigest(), None
+                if h in seen_inv:  # upstream ships byte-identical samples: make this one a different invoice
+                    data, tf = stamp_invoice(data, sid, names)
+                seen_inv.add(hashlib.sha256(data).hexdigest())
+                B.write_bytes(rel, data, category="financial_document", subcategory="invoice", tier="KEEP",
+                              acceptable=["PROTECTED", "REVIEW"], importance="high", mnd=True, synthetic=False,
+                              source=B.src_meta(sid, transform=tf), date=when,
+                              hard_negative_group="HN_invoice_template",
+                              notes="same invoice template as other group members, different numbers")
             else:
                 when = rand_dt("old", sid, start=datetime.datetime(2021, 1, 4, tzinfo=IST),
                                end=datetime.datetime(2021, 12, 30, tzinfo=IST))
