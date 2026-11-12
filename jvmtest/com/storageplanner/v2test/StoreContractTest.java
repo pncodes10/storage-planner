@@ -16,6 +16,7 @@ public final class StoreContractTest {
         r.presence = p; r.changeScanId = changeScan;
         return r;
     }
+    static int count(Iterable<?> it) { int n = 0; for (Object o : it) n++; return n; }
     static List<String> paths(Iterable<FileRecord> it) { List<String> l = new ArrayList<String>(); for (FileRecord r : it) l.add(r.path); return l; }
 
     public static int run(String[] args) throws StoreException {
@@ -65,7 +66,7 @@ public final class StoreContractTest {
         DirRecord d2 = new DirRecord(); d2.volumeId = "v"; d2.path = "a/b"; s.directories().put(d2);
         DirRecord d3 = new DirRecord(); d3.volumeId = "v"; d3.path = "ab"; s.directories().put(d3);
         DirRecord d0 = new DirRecord(); d0.volumeId = "v"; d0.path = ""; s.directories().put(d0);
-        T.eq("dir childrenOf root", 2, s.directories().childrenOf("v", "").size());
+        T.eq("dir childrenOf root", 2, count(s.directories().childrenOf("v", "")));
         int under = 0; for (DirRecord d : s.directories().underPrefix("v", "a")) { under++; T.eq("dir under a", "a/b", d.path); }
         T.eq("dir underPrefix a count", 1, under);
         T.check("dir get", s.directories().get("v", "ab") != null);

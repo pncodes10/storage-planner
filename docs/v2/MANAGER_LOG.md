@@ -85,21 +85,29 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (17:26 UTC, 12 Nov)
+## State (22:17 UTC, 12 Nov)
 
-- Phases 1-5 and Phase A built, reviewed, committed; CI run 60 is the build to
-  test on the phone (v2 stops at the memory guard above ~15,000-42,000 files).
-- Store design (`PHASE_S_STORE.md`) written and reviewed (`REVIEW_S.md`:
-  3 blockers, 10 major, 5 minor, all fixed in the document). Seven slices.
-- Store implementer: running.
+- Phases 1-5 and Phase A done; CI run 60 is the build to test on the phone.
+- Store: slices S0-S2 done (DiskStore core), S3 partly. 38 suites green
+  (re-run by the lead) incl. memory-vs-disk result equality on the dataset.
+  Tests: 2,000 randomised sequences against the in-memory store (968k
+  comparisons), 3,000 store-level kill trials, 200 pipeline kill-and-resume
+  trials, wrong-record injection on all 17 tables, 68 corruption cases; all
+  pass. Index cost 265 bytes per file at 100k files. Production still uses
+  the in-memory store; the disk store is reachable only from the CLI and tests.
+- Bug found and fixed on the way: a codec dropped the archive-entry offset on
+  every reload, so archive backups were no longer verified after a restart
+  (missed savings, not a wrong delete).
+- Fourth and fifth 5-hour usage limits hit (12:50 and 17:40 UTC).
+- Store implementer for S3-S5: running.
 - Open: dataset label fix (A27), ClassicParityTest and five other tests, 7 minor
   Phase A review findings.
 
 ## Next steps
 
-1. Store slices S1-S7; after each stop: lead runs both scripts, commits,
-   checks CI. Exit: 150k-file scale test under -Xmx148m, byte-identical JSON
-   between the two stores, dataset results unchanged.
+1. Store S3 (damage handling in the pipeline), S4-S6 (stage memory changes,
+   switch production to the disk store, capacity guard), S7 (decode budget).
+   Exit: 150k-file scale test under -Xmx148m; dataset results unchanged.
 2. Dataset label fix (A27) and missing tests.
 3. Phase 6 (content signals, A28), then 7-10.
 4. If an agent stops with a usage-limit error: wait for the reset time in the

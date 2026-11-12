@@ -27,21 +27,37 @@ printf 'é' > "$T/Download/é è.txt"
 printf 'r' > "$T/Android/data/com.x/r.bin"
 CLI="java -cp $CLS com.storageplanner.v2test.V2Cli"
 NOW=1792000000000
-set +e
-$CLI scan "$T" --out "$WORK/killed.json" --state-dir "$WORK/state" --snapshot-every-ms 0 --halt-after-commits 5 --now $NOW >/dev/null
-rc=$?
-set -e
-if [ "$rc" != 137 ]; then echo "kill test: expected exit 137 from --halt-after-commits, got $rc"; exit 1; fi
-$CLI scan "$T" --out "$WORK/resumed.json" --state-dir "$WORK/state" --snapshot-every-ms 0 --resume --now $NOW >/dev/null
 $CLI scan "$T" --out "$WORK/clean.json" --now $NOW >/dev/null
-if python3 -I "$REPO/tools/v2eval/evaluate.py" --compare "$WORK/clean.json" "$WORK/resumed.json" >"$WORK/cmp.txt"; then
-  echo "kill test: halted at commit 5 (exit 137), resumed result equals clean run"
-else
-  cat "$WORK/cmp.txt"; echo "kill test: FAILED"; exit 1
-fi
-python3 -I - "$WORK/resumed.json" <<'EOF'
+for STORE in memory disk; do
+  set +e
+  $CLI scan "$T" --out "$WORK/killed-$STORE.json" --state-dir "$WORK/state-$STORE" --store $STORE --snapshot-every-ms 0 --halt-after-commits 5 --now $NOW >/dev/null
+  rc=$?
+  set -e
+  if [ "$rc" != 137 ]; then echo "kill test ($STORE): expected exit 137 from --halt-after-commits, got $rc"; exit 1; fi
+  $CLI scan "$T" --out "$WORK/resumed-$STORE.json" --state-dir "$WORK/state-$STORE" --store $STORE --snapshot-every-ms 0 --resume --now $NOW >/dev/null
+  if python3 -I "$REPO/tools/v2eval/evaluate.py" --compare "$WORK/clean.json" "$WORK/resumed-$STORE.json" >"$WORK/cmp.txt"; then
+    echo "kill test ($STORE store): halted at commit 5 (exit 137), resumed result equals clean run"
+  else
+    cat "$WORK/cmp.txt"; echo "kill test ($STORE store): FAILED"; exit 1
+  fi
+  python3 -I - "$WORK/resumed-$STORE.json" <<'EOF2'
 import json, sys
 s = json.load(open(sys.argv[1], encoding="utf-8"))["scan"]
 assert s["resumedCount"] == 1 and s["state"] == "COMPLETED", s
-EOF
+EOF2
+done
+# ---- store equality (PHASE_S_STORE 5.2): memory vs disk, --assess --target-bytes max, identical apart from timings ----
+$CLI scan "$T" --out "$WORK/eq-memory.json" --state-dir "$WORK/eq-memory" --store memory --now $NOW --target-bytes max >/dev/null
+$CLI scan "$T" --out "$WORK/eq-disk.json" --state-dir "$WORK/eq-disk" --store disk --now $NOW --target-bytes max >/dev/null
+python3 -I - "$WORK/eq-memory.json" "$WORK/eq-disk.json" <<'EOF2'
+import json, sys
+def strip(x):
+    if isinstance(x, dict): return {k: strip(v) for k, v in x.items() if k != "timings"}
+    if isinstance(x, list): return [strip(v) for v in x]
+    return x
+a, b = [strip(json.load(open(p, encoding="utf-8"))) for p in sys.argv[1:3]]
+if json.dumps(a, sort_keys=False) != json.dumps(b, sort_keys=False):
+    print("store equality: FAILED (memory and disk results differ)"); sys.exit(1)
+print("store equality: memory and disk results identical (timings removed)")
+EOF2
 echo "v2 run_tests: ALL PASSED"

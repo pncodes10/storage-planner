@@ -154,13 +154,15 @@ public final class FeatureCodec {
     public static void writeEntry(JsonWriter w, ArchiveEntry e) {
         w.beginObject().name("path").value(e.path).name("rawName").value(e.rawName).name("container").value(e.container).name("depth").value(e.depth)
          .name("size").valueCount(e.size).name("compressedSize").valueCount(e.compressedSize).name("crc32").valueCount(e.crc32)
-         .name("method").valueCount(e.method).name("mtime").valueTime(e.mtime).name("dir").value(e.dir).name("encrypted").value(e.encrypted).endObject();
+         .name("method").valueCount(e.method).name("mtime").valueTime(e.mtime).name("dir").value(e.dir).name("encrypted").value(e.encrypted)
+         .name("localOffset").valueCount(e.localOffset).endObject();   // PHASE_S S3: ArchiveMatcher reads it after a reload
     }
     static ArchiveEntry readEntry(Map<String, Object> m) {
         ArchiveEntry e = new ArchiveEntry();
         e.path = s(m, "path"); e.rawName = s(m, "rawName"); e.container = s(m, "container"); e.depth = Json.integer(m, "depth", 0);
         e.size = l(m, "size"); e.compressedSize = l(m, "compressedSize"); e.crc32 = l(m, "crc32"); e.method = i(m, "method");
         e.mtime = t(m, "mtime"); e.dir = Json.bool(m, "dir", false); e.encrypted = tri(m, "encrypted");
+        e.localOffset = l(m, "localOffset");
         return e;
     }
 

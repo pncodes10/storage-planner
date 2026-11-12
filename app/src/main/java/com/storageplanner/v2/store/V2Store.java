@@ -29,4 +29,6 @@ public interface V2Store extends java.io.Closeable {
     void rollback();
     /** commit() and make it durable now. */
     void flush() throws StoreException;
+    /** Size figures (PHASE_S_STORE 3.8). */
+    StoreStats stats();
 }

@@ -67,7 +67,9 @@ public final class ExactGrouperTest {
             T.eq("total exact edges", 4, edges(fx, RelType.EXACT_DUPLICATE).size());
             int ng = fx.store.duplicateGroups().size();
             // stale hash: change b's twin -> group disappears
+            long bm = t.mtime("Download/b.bin");
             t.file("Download/b.bin", rnd(2000, 9));
+            t.mtime("Download/b.bin", bm + 2000);   // same size: without a new mtime the change is invisible (coarse FS clock)
             fx.scan(ScanKind.INCREMENTAL, false);
             T.eq("changed member: group gone", null, fx.store.duplicateGroups().get(gb.groupId));
             T.eq("groups after change", ng - 1, fx.store.duplicateGroups().size());

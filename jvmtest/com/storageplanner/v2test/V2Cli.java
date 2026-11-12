@@ -32,7 +32,10 @@ public final class V2Cli {
     private V2Cli() {}
 
     static final String USAGE = "usage: V2Cli scan <root> --out <result.json> [--state-dir D] [--volume-id primary] [--kind full|incremental]"
-            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--pretty]";
+            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--pretty]";
+
+    /** In-process tests (DiskKillTest): replaces the state dir's BlobStore (e.g. by a killing or power-loss fake). */
+    static java.util.function.Function<BlobStore, BlobStore> blobsHook;
 
     public static void main(String[] args) {
         int rc = run(args, System.out, System.err);
@@ -47,6 +50,8 @@ public final class V2Cli {
     }
 
     public static int run(String[] args, PrintStream out, PrintStream err) {
+        // results of an earlier in-process run (DiskKillTest runs the CLI many times in one JVM)
+        V2Json.graphCoverage = null; AssessJson.verdicts = null; AssessJson.recs = null; PlanJson.plan = null; PlanJson.staleness = null;
         String enc = System.getProperty("sun.jnu.encoding");
         if (enc == null || !(enc.equalsIgnoreCase("UTF-8") || enc.equalsIgnoreCase("UTF8"))) {
             err.println("V2Cli: file-name encoding is " + enc + ", not UTF-8; run with LC_ALL=C.UTF-8");
@@ -57,7 +62,7 @@ public final class V2Cli {
         String root = null, outFile = null, stateDir = null, volumeId = "primary", kind = "full";
         boolean resume = false, pretty = false;
         List<String> restricted = null, exclude = new ArrayList<String>();
-        Long now = null; long snapEvery = -1; int halt = -1;
+        Long now = null; long snapEvery = -1; int halt = -1; com.storageplanner.v2.store.Stores.Kind storeKind = com.storageplanner.v2.store.Stores.Kind.MEMORY;
         String installedApps = null; long budgetMs = -1, budgetBytes = -1; boolean measureMemory = false;
         V2Json.Options opt = new V2Json.Options();
         boolean graph = false, assess = false; String pairsOut = null, manifest = null; int randomPairs = 600;
@@ -75,6 +80,7 @@ public final class V2Cli {
                 else if (s.equals("--now")) now = Long.parseLong(a.get(++i));
                 else if (s.equals("--snapshot-every-ms")) snapEvery = Long.parseLong(a.get(++i));
                 else if (s.equals("--halt-after-commits")) halt = Integer.parseInt(a.get(++i));
+                else if (s.equals("--store")) storeKind = com.storageplanner.v2.store.Stores.Kind.valueOf(a.get(++i).toUpperCase(Locale.ROOT));
                 else if (s.equals("--max-tier")) opt.maxTier = Integer.parseInt(a.get(++i));
                 else if (s.equals("--hash")) opt.hash = a.get(++i);
                 else if (s.equals("--mode")) opt.mode = a.get(++i);
@@ -127,14 +133,19 @@ public final class V2Cli {
         try {
             if (stateDir != null) {
                 blobs = new DirBlobStore(Paths.get(stateDir));
+                if (blobsHook != null) blobs = blobsHook.apply(blobs);
                 if (halt > 0) blobs = new KillingBlobStore(blobs).killAfterReplaceCommits(halt).haltProcess(true);
-                try { store = MemoryStore.open(blobs, snapEvery, clock); }
+                try { store = com.storageplanner.v2.store.Stores.open(storeKind, blobs, snapEvery, clock); }
                 catch (StoreException e) {
                     err.println("store unreadable, starting fresh: " + e.getMessage());
-                    store = MemoryStore.create(blobs, snapEvery, clock);
+                    store = com.storageplanner.v2.store.Stores.create(storeKind, blobs, snapEvery, clock);
                     cfg.storeReset = true;
                 }
+            } else if (storeKind == com.storageplanner.v2.store.Stores.Kind.DISK) {
+                store = com.storageplanner.v2.store.DiskStore.create(new PowerLossBlobStore(), snapEvery, clock);   // no state dir: in memory
             } else store = MemoryStore.volatileStore();
+        } catch (StoreException e) {
+            err.println("store: " + e.getMessage()); return 3;
         } catch (IOException e) {
             err.println("state dir: " + e); return 3;
         }

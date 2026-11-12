@@ -10,5 +10,6 @@ public interface FileTable extends Table<FileRecord> {
     List<FileRecord> bySha256(String sha256);
     Iterable<FileRecord> byVolume(String volumeId);
     Iterable<FileRecord> underPrefix(String volumeId, String dirPath);
-    List<FileRecord> childrenOf(String volumeId, String dirPath);
+    /** Files whose parent directory is dirPath, ascending (volume, path, fileId); a key snapshot (PHASE_S_STORE 3.8). */
+    Iterable<FileRecord> childrenOf(String volumeId, String dirPath);
 }

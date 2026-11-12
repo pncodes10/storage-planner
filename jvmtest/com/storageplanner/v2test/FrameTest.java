@@ -12,6 +12,7 @@ import com.storageplanner.v2.store.disk.Frame;
 import com.storageplanner.v2.store.disk.FrameException;
 import com.storageplanner.v2.store.disk.SegmentReader;
 import com.storageplanner.v2.store.disk.SegmentWriter;
+import com.storageplanner.v2.store.disk.TableIds;
 import com.storageplanner.v2.util.Json;
 
 import java.io.IOException;
@@ -50,6 +51,7 @@ public final class FrameTest {
         for (int id = 1; id <= ts.length; id++) {
             Table t = (Table) ts[id - 1][0];
             Codecs.Codec c = (Codecs.Codec) ts[id - 1][1];
+            T.check("TableIds.codec(" + id + ") is " + c.table(), TableIds.codec(id) == c && TableIds.id(c.table()) == id);
             int inTable = 0;
             for (Object o : t.all()) {
                 Record r = (Record) o;

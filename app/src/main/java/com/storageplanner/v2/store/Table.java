@@ -11,4 +11,6 @@ public interface Table<R extends Record> {
     int size();
     /** Copies, ascending key order, iterating a key snapshot. */
     Iterable<R> all();
+    /** Keys, ascending, as a snapshot taken now; no record is decoded (PHASE_S_STORE 3.8). */
+    Iterable<String> keys();
 }

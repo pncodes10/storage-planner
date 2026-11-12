@@ -88,6 +88,15 @@ public final class MemoryStore implements V2Store {
     public synchronized int snapshotsWritten() { return snapshotsWritten; }
     public synchronized long commitSeq() { return commitSeq; }
 
+    /** Retained bytes per record measured in PHASE_S_STORE 1.3 (synth 100k); other tables 500. Estimates only. */
+    private static final long[] EST = {1326, 585, 398, 500, 647, 563, 500, 379, 500, 500, 500, 500, 500, 500, 500, 500, 385};
+
+    public synchronized StoreStats stats() {
+        long n = 0, b = 0;
+        for (int i = 0; i < tables.size(); i++) { int k = tables.get(i).map.size(); n += k; b += k * EST[i]; }
+        return new StoreStats(n, b, 0, 0, 0, 0);
+    }
+
     public int schemaVersion() { return V2.STORE_SCHEMA; }
     public FileTable files() { return files; }
     public Table<FeatureRecord> features() { return features; }
@@ -196,6 +205,10 @@ public final class MemoryStore implements V2Store {
 
         public Iterable<R> all() {
             synchronized (lock) { return copies(new ArrayList<String>(map.keySet())); }
+        }
+
+        public Iterable<String> keys() {
+            synchronized (lock) { return Collections.unmodifiableList(new ArrayList<String>(map.keySet())); }
         }
 
         /** Copies of the records under the given keys (skipping keys removed meanwhile), lazily. */
