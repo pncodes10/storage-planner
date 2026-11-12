@@ -34,7 +34,7 @@
  },
  "summary": {
   "files": 2409,
-  "total_bytes": 716024197,
+  "total_bytes": 716153174,
   "real": 1773,
   "synthetic": 636,
   "must_never_delete": 178,
@@ -2706,8 +2706,8 @@
     "description": "Package delivered - doorbell cam"
    },
    "duration_s": 540,
-   "size": 3687821,
-   "sha256": "055c9171a48578f8250185f15413048dffb5e564e433b337ca0c9c65cebe63b7"
+   "size": 3730171,
+   "sha256": "e0dfba9e540182544b4e5fdc328ab9de2b23b360411116f2dd4506e976b2cf51"
   },
   {
    "path": "DCIM/Camera/VID_20231009_130809.mp4",
