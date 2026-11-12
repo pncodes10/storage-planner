@@ -63,23 +63,24 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (02:10 UTC, 12 Nov)
+## State (06:30 UTC, 12 Nov)
 
-- Design reviewed (`REVIEW_1.md`): 3 blockers, 14 major, 22 minor; all fixed in
-  the documents except three questions answered by A10-A12. Notable safety
-  fixes: the same physical file seen through two paths can no longer count as a
-  duplicate of itself; unreadable never becomes "removed"; approvals expire
-  when a file changes.
-- Phase 1 implementer: running.
-- Dataset builder: running.
+- Usage limit hit a second time (~02:45 UTC, reset 06:20 UTC; 3.5 h lost).
+  Pattern: Opus agents exhaust the 5-hour allowance in roughly one hour of
+  work. Agents are now told to stop adding scope at half budget and report.
+- Dataset: done and verified (2,409 files, 0 problems). Builder committed.
+- Phase 1: 128 Java files so far; `tools/v2eval/run_tests.sh` passes
+  (14 suites, 0 failures, incl. kill-and-resume) when run by the lead at
+  06:25 UTC. Implementer resumed to finish, run the CLI on both corpora and
+  write `PHASE_1_NOTES.md`.
+- Phases 3-5 design drafts written (`PHASE_3/4/5.md`), architect resumed to
+  finish PHASE_5 and report. Not yet reviewed.
 
 ## Next steps
 
-1. Phase 1 implemented and tests pass -> lead verifies by running the tests ->
-   commit -> Phase 2 implementer.
-2. Dataset builder reports -> review gaps.
-3. Architect designs phases 3-5 (relationships, risk engine, planner) while
-   Phase 2 is implemented -> review -> implement -> first scored run on both
-   datasets -> Phase A (app switch) -> phases 6-10 as far as the session allows.
+1. Phase 1 report -> lead re-runs tests -> commit -> Phase 2 implementer.
+2. Phases 3-5 design -> reviewer -> implement after Phase 2.
+3. First scored run on both datasets -> Phase A (app switch) -> phases 6-10 as
+   far as the session allows.
 4. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.
