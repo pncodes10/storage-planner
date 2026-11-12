@@ -85,7 +85,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (17:45 UTC, 12 Nov)
+## State (17:26 UTC, 12 Nov)
 
 - Phases 1-5 and Phase A built, reviewed, committed; CI run 60 is the build to
   test on the phone (v2 stops at the memory guard above ~15,000-42,000 files).
