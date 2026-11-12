@@ -25,7 +25,7 @@ X264 = ["-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p", "-x264-pa
 
 
 def ff(*args, inp=None):
-    cmd = [FF, "-hide_banner", "-loglevel", "error", "-y"] + list(args)
+    cmd = [FF, "-hide_banner", "-loglevel", "error", "-y", "-filter_threads", "1", "-filter_complex_threads", "1"] + list(args)
     r = subprocess.run(cmd, input=inp, capture_output=True)
     if r.returncode:
         raise RuntimeError(r.stderr.decode()[-800:])
@@ -169,7 +169,7 @@ def build(B):
         d = rand_dt("long", k)
         rel = f"DCIM/Camera/VID_{d:%Y%m%d_%H%M%S}.mp4"
         en = f"between(t,{start},{start + ln})"
-        fc = (f"[0:v]noise=alls=3:allf=t,format=yuv420p[b];[b][1:v]overlay=x='(t-{start})*{400 // ln}+60':y=150:"
+        fc = (f"[0:v]noise=alls=3:allf=t:all_seed=7,format=yuv420p[b];[b][1:v]overlay=x='(t-{start})*{400 // ln}+60':y=150:"
               f"enable='{en}'[c];[c][2:v]overlay=x=0:y=310:enable='{en}'[v]")
         ff("-loop", "1", "-framerate", "10", "-t", str(dur), "-i", bgp, "-loop", "1", "-framerate", "10", "-i", ovp,
            "-loop", "1", "-framerate", "10", "-i", txp, "-filter_complex", fc, "-map", "[v]", "-t", str(dur),

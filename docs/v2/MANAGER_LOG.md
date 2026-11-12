@@ -49,6 +49,11 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A7 | ML (spec Phase 7, LiteRT) deferred; plug-in interface only. | Spec section 17: no ML becomes a dependency before a measured gain. LiteRT would also add native libraries the current build cannot package. |
 | A8 | Execution engine (delete/quarantine/compress) built and tested on the JVM against a FileOps interface, NOT wired to a delete button. | The shipped app is read-only and the audit forbids deletion; turning that on is the owner's call. |
 | A9 | Safety invariants tested in every phase: unknown != zero; classification never authorises deletion; never the last verified copy; similarity alone != interchangeable; aggressive mode never weakens hard rules. | Spec sections 2.2, 6.3, 9.5. |
+| A10 | SHA-256 is computed only where a decision needs it (size collisions, and every delete candidate before it is proposed), not for every file. | Spec 5.1 lists a hash per file, but spec 14.1 forbids running expensive work on everything; hashing a 128 GB phone in full is hours of I/O. Reviewer agreed. Deviation from 5.1 recorded here on purpose. |
+| A11 | Phase 2 scope cut: MKV, AVI, TAR, extra audio formats, ICO and GIF-frame parsers move to Phase 6; scanning is single-threaded until Phase 10. | Reviewer finding: high cost, no effect on phases 1-5 results. Unparsed formats stay "unknown", which is safe. |
+| A12 | Phase A (app switch) waits for a memory measurement after Phase 2: at most about 1 KB per file in the in-memory store, otherwise SQLite is brought forward. | The phone build holds the whole store in memory until Phase 10. |
+| A13 | Store = one snapshot file replaced atomically at intervals, not a write-ahead log. | Reviewer found a log bug that silently lost every commit after a half-written line; snapshots are simpler and enough for scan recovery. The Phase 9 operation journal gets its own log. |
+| A14 | v2 includes app caches and idle apps (data gathered in Phase 2, planned in Phase 5); exit test: v2's safe bytes are at least classic's. | Spec 10.3 ranks rebuildable data first; the first draft ignored it. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -58,21 +63,23 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (01:27 UTC, 12 Nov)
+## State (02:10 UTC, 12 Nov)
 
-- Design drafts committed: `ARCHITECTURE.md`, `PHASE_1.md`, `PHASE_2.md` (not yet reviewed).
-  Architect agent resumed to finish and report.
-- Dataset builder resumed; scripts in `tools/v2dataset/` committed as work in
-  progress; `/home/user/sp-dataset/` partly built (688 MB).
-- Lost time so far: 2 h (interrupts killed agents) + 2.5 h (usage limit).
+- Design reviewed (`REVIEW_1.md`): 3 blockers, 14 major, 22 minor; all fixed in
+  the documents except three questions answered by A10-A12. Notable safety
+  fixes: the same physical file seen through two paths can no longer count as a
+  duplicate of itself; unreadable never becomes "removed"; approvals expire
+  when a file changes.
+- Phase 1 implementer: running.
+- Dataset builder: running.
 
 ## Next steps
 
-1. Architect reports -> reviewer agent checks the three documents against the
-   spec and the code -> architect/implementer applies the review.
-2. Implementer agent builds Phase 1, then Phase 2 (tests must pass on the JVM).
-3. Dataset builder reports -> review gaps.
-4. Phases 3-5 (relationships, risk engine, planner) -> first scored run on both
+1. Phase 1 implemented and tests pass -> lead verifies by running the tests ->
+   commit -> Phase 2 implementer.
+2. Dataset builder reports -> review gaps.
+3. Architect designs phases 3-5 (relationships, risk engine, planner) while
+   Phase 2 is implemented -> review -> implement -> first scored run on both
    datasets -> Phase A (app switch) -> phases 6-10 as far as the session allows.
-5. If an agent stops with a usage-limit error: wait for the reset time in the
+4. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.

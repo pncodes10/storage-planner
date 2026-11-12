@@ -4,6 +4,11 @@ Implements spec §5.1, §5.2 (non-ML image basics), §5.3 (PDF basics only), §5
 §14.1 tiers 1–3, §14.2 bounded queues. Builds on `ARCHITECTURE.md` and `PHASE_1.md`. Extraction never decides
 anything about deletion; it only records facts, each with an explicit unknown.
 
+Deferred, by name (ARCHITECTURE §11): OCR, text area, face count, document text/dates/amounts/identifiers, OOXML/ODF
+metadata and OLE2/OOXML encryption, video scene/motion/diversity/frame hashes/adaptive sampling, audio silence %,
+speech/music activity and fingerprint → Phase 6; embeddings and category probabilities → Phases 6/7. Until then those
+fields are unknown (never 0 / "no speech" / "no faces").
+
 ## 0. Deliverables
 
 | Path | Classes |
@@ -13,7 +18,7 @@ anything about deletion; it only records facts, each with an explicit unknown.
 | `v2/device/` | `MediaDecoder`, `DecodedImage`, `DecodeStatus`, `InstalledApps`, `InstalledApp`, `Availability`; `V2Device` gains `media()`, `apps()` |
 | `v2/util/` | `Bytes` (u16/u32/u64 LE/BE, bounds-checked), `Io` (`readAt`, `readFully`, `CountingReadableFile`, `SliceReadableFile`), `BoundedInflater` |
 | `v2/features/` | `FileType`, `TypeDetector`, `ExtensionMap`, `MimeMap`, `Signature`; `NameDates`; `ExifReader`; `JpegProbe`, `PngProbe`, `WebpProbe`, `GifProbe`, `BmpProbe`, `HeifProbe`; `Mp4Probe`, `MkvProbe`, `AviProbe`; `AudioProbe`; `PdfProbe`; `ZipProbe`, `TarProbe`, `ArchiveSubtype`; `AxmlParser`, `ApkSignatures`, `Der`, `ApkProbe`; `IntegrityProbe`; `CreatedAt`; `ImageBasics`; `QuickHash`; `Confidence`; `Extractors`; `Limits`; stages `T1MetadataStage`, `T2HashStructStage`, `T3ImageStage`; `ExtractionScheduler`, `CommitPolicy`; `ExtractionCoverage` |
-| `v2/pipeline/` | `Budget` filled in; `Pipeline` default stage list = `[DISCOVER, T1, T2, T3]` filtered by `maxTier` |
+| `v2/stage/`, `v2/pipeline/` | `v2.stage.Budget` filled in; `Pipeline` default stage list = `[DISCOVER, T1, T2, T3]` filtered by `maxTier` |
 | `jvmtest/.../v2test/` | `JvmMediaDecoder`, `JvmInstalledApps`, fixture builders (`Fx*` classes, §11), tests of §11; `FaultyStorageAccess` gains `denyOpen(path)`, `failReadAfter(path, long bytes)` (IOException mid-read) and `mutateAfterOpen(path, Runnable)` |
 | `jvmtest/com/storageplanner/core/CoreOracle.java` | test-only bridge in package `core` exposing `Scanner.quickHash` / `fullHash` (package-private) to v2 tests — no change to `core/` itself |
 | `tools/v2eval/evaluate.py` | Phase-2 extraction metrics (§10) |
@@ -115,7 +120,7 @@ public final class FeatureRecord implements Record {     // key = fileId
 | `AudioInfo` | `container`, `codec` (String, null); `durationMs` (long, -1); `durationConfidence` (double 0..1, NaN); `bitrate` (long, -1); `sampleRate` (int, -1); `channels` (int, -1); `vbr` (Tri) |
 | `ApkInfo` | `packageName`, `versionName` (String, null); `versionCode` (long, -1; includes versionCodeMajor << 32); `minSdk`, `targetSdk` (int, -1); `signerCertSha256` (List<String>; null unknown, empty = unsigned); `signatureScheme` (`none`, `v1`, `v2`, `v3`, `v2+v3`, `v1+v2`… ; null unknown); `split` (Tri); `bundle` (Tri; apks/xapk); `installState` (`NOT_INSTALLED, SAME_VERSION, INSTALLED_NEWER, INSTALLED_OLDER, UNKNOWN`); `installedVersionCode` (long, -1); `sameSigner` (Tri); `parseSource` (`ZIP_AXML`, `PLATFORM`, null); `problem` |
 | `PdfInfo` | `version` (String "1.7", null); `encrypted` (Tri); `linearized` (Tri); `pages` (int, -1); `pagesSource` (`LINEARIZED`, `PAGES_ROOT`, `PAGE_OBJECTS`, null); `objectStreams` (Tri); `incrementalUpdates` (int, -1; number of `%%EOF` − 1 found in scanned regions); `title`, `author`, `producer` (String ≤ 256 chars, null; always null when encrypted ≠ FALSE); `createdAt` (long TIME, `/CreationDate`) |
-| `ArchiveInfo` | `format` (`zip`, `tar`); `subtype` (`apk apks xapk jar ooxml-docx ooxml-xlsx ooxml-pptx odf epub`, null); `listingStatus` (`OK, TRUNCATED, LIMIT, CORRUPT, UNSUPPORTED`); `declaredEntries` (long, -1); `listedEntries` (int); `totalUncompressed`, `totalCompressed` (long, -1); `maxRatio` (double, NaN); `bombSuspect`, `pathTraversal`, `absolutePaths`, `encryptedEntries`, `nameEncodingUncertain` (Tri); `nestedArchives` (int, -1); `nestedListed` (int); `entries` (List<ArchiveEntry>, ≤ `Limits.ARCHIVE_MAX_ENTRIES`) ; `problem` |
+| `ArchiveInfo` | `format` (`zip`, `tar`); `subtype` (`apk apks xapk jar ooxml-docx ooxml-xlsx ooxml-pptx odf epub`, null); `listingStatus` (`OK, TRUNCATED, LIMIT, CORRUPT, UNSUPPORTED`); `declaredEntries` (long, -1); `listedEntries` (int); `totalUncompressed`, `totalCompressed` (long, -1); `maxRatio` (double, NaN); `bombSuspect`, `pathTraversal`, `absolutePaths`, `encryptedEntries`, `nameEncodingUncertain` (Tri); `nestedArchives` (int, -1); `nestedListed` (int); `entries` (List<ArchiveEntry>, ≤ `Limits.ARCHIVE_MAX_ENTRIES`; **stored only when `subtype == null`** — plain zip/tar archives, which Phase 3 matches as backups. For apk/apks/xapk/jar/ooxml/odf/epub the entries are parsed for subtype/APK/integrity but not stored (`entries = null`, counts kept): an APK alone has thousands of entries and the store is in memory — REVIEW_1 F-M12); `problem` |
 | `ArchiveEntry` | `path` (String: `\`→`/`, NFC, leading `./` removed — raw name kept in `rawName` when different); `container` (String, null for top level; outer entry path for nested); `depth` (0/1/2); `size`, `compressedSize` (long, -1); `crc32` (long, -1); `method` (int, -1); `mtime` (long TIME; DOS time read as UTC); `dir` (boolean); `encrypted` (Tri) |
 | `HashRecord` | ARCHITECTURE §2.5; `crc32` is filled whenever a full SHA-256 is computed (same pass) |
 
@@ -132,7 +137,7 @@ public final class FeatureRecord implements Record {     // key = fileId
 | Bit | Stage | Applicable to | "Done" means |
 |---|---|---|---|
 | 1 | `T1_METADATA` | every PRESENT file | type + common metadata + format probe ran for the current fingerprint |
-| 2 | `T2_HASH_STRUCT` | every PRESENT file with size > 0 (hash part); zip-family and tar (structure part) | hash state is current for this scan's size groups (a size-unique file is "done" with `sha256 = null`); archive/APK structure parsed |
+| 2 | `T2_HASH_STRUCT` | every PRESENT file with size > 0 (hash part); zip-family and tar (structure part) | hash state is current for this scan's size groups (a size-unique file is "done" with `sha256 = null`; that "done" is provisional — the hash part is group-based, re-evaluates every size group each scan, and hashes the file as soon as its group gains a member); archive/APK structure parsed |
 | 3 | `T3_IMAGE` | image family | decode attempted; result in `ImageInfo.decodeStatus` |
 
 `tiersFailed` bit k = the tier ran but produced no features (unreadable, probe error, `NO_DECODER`, `TOO_LARGE`, `CORRUPT`);
@@ -148,7 +153,9 @@ to `FileUpsert`.
 
 ### 3.2 `T1MetadataStage` (per file, inside a worker)
 
-1. `size == 0` → type `empty`, `integrity = OK`, `mimeType = null`, `sha256 = SHA256_EMPTY`
+0. `sizeBytes == -1` (unknown; e.g. a provider reported 0, PHASE_1 §4.5) → open, take `rf.size()` as the size; still unknown →
+   type by signature as below, hashes not attempted.
+1. `size == 0` (stat-reported on a path-addressable volume) → type `empty`, `integrity = OK`, `mimeType = null`, `sha256 = SHA256_EMPTY`
    (`e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`) without reading, bits 1–3 done (2 and 3 not applicable),
    confidence 1.0, status `COMPLETE`.
 2. `rf = storage.open(vol, rawPathOrPath)` wrapped in `CountingReadableFile` (bytes go to `Budget`). On `IOException`:
@@ -166,7 +173,7 @@ to `FileUpsert`.
    | png / gif / webp / bmp / ico | `PngProbe` (IHDR, `acTL` → animated, `IEND` in tail), `GifProbe` (logical screen, frames by block walk ≤ 1000 frames / 4 MiB), `WebpProbe` (VP8/VP8L/VP8X dims, ANIM, EXIF chunk → ExifReader), `BmpProbe` | 4 MiB |
    | heic / heif / avif | `HeifProbe` → ImageInfo (`ispe` of primary item, `irot`) + ExifInfo from the `Exif` item | 4 MiB of `meta` + 1 MiB Exif item |
    | tiff / dng | `ExifReader.parseTiff` on the head → dims (0x0100/0x0101), orientation, dates | 1 MiB |
-   | mp4 / mov / 3gp / m4a | `Mp4Probe` → VideoInfo (and AudioInfo for audio-only) | moov ≤ 32 MiB, else first 1 MiB of moov (`problem = MOOV_LARGE`) |
+   | mp4 / mov / 3gp / m4a | `Mp4Probe` → VideoInfo (and AudioInfo for audio-only); boxes are walked by seeking over `ReadableFile` (moov is never loaded whole), reading only `mvhd`, `tkhd`, `mdhd`, `hdlr`, `stsd` and the first `stts` entries | ≤ 1 MiB total; more needed → `problem = MOOV_LARGE`, fields unknown |
    | mkv / webm / avi | `MkvProbe` / `AviProbe` → VideoInfo | 4 MiB |
    | mp3 / aac / flac / ogg / opus / wav / amr | `AudioProbe` → AudioInfo | 2 MiB + 64 KiB tail |
    | pdf | `PdfProbe` → PdfInfo | whole file if ≤ 8 MiB, else first 4 MiB + last 4 MiB |
@@ -184,7 +191,7 @@ to `FileUpsert`.
 
 | Type | OK | TRUNCATED | CORRUPT | ENCRYPTED |
 |---|---|---|---|---|
-| jpeg | file ends with `FF D9` (ignoring trailing zero bytes), or `motionPhoto == TRUE`, or an `ftyp` box starts within the last 64 KiB after an `FF D9` | no `FF D9` in the tail | no SOF marker before SOS | — |
+| jpeg | file ends with `FF D9` (ignoring trailing zero bytes), or `motionPhoto == TRUE`, or an `ftyp` box starts within the last 64 KiB after an `FF D9` | no `FF D9` in the tail **and** no known trailer (Samsung `SEFT`/`SEFH` in the last 4 KiB, `ftyp`) **and** the T3 decode failed; otherwise no `FF D9` in the tail → `UNKNOWN` with problem `jpeg:NO_EOI_IN_TAIL` (Samsung SEF trailers can exceed 64 KiB) | no SOF marker before SOS | — |
 | png | last chunk is `IEND` | no `IEND` | bad signature / IHDR | — |
 | gif | ends with `0x3B` | otherwise | bad header | — |
 | mp4 family | top-level boxes cover the file (trailer allowed) and `moov` (or `moof`) present | a box extends past EOF | no moov/moof | — |
@@ -192,6 +199,9 @@ to `FileUpsert`.
 | zip family (set in T2) | EOCD found and central directory parsed | EOCD missing but local header at 0 | central directory unparseable | every non-directory entry encrypted |
 | tar (T2) | ends with two zero blocks or exact entry coverage | entry data past EOF | header checksum mismatch on first header | — |
 | others | `UNKNOWN` | | | |
+
+Integrity is a heuristic fact for confidence and REVIEW routing only; ARCHITECTURE H4b forbids using it to lower
+utility/loss or to justify any tier below REVIEW (REVIEW_1 F-M8).
 
 ### 3.4 `T2HashStructStage`
 
@@ -205,19 +215,28 @@ first entry `mimetype` stored with `application/vnd.oasis.opendocument.` → `od
 **Part B — hashes** (`HashStage`, runs once per scan over all PRESENT files of all scanned volumes, on the coordinator thread with
 reads in workers):
 
+Part B runs after Part A (it needs the archive listings).
+
 ```
 groups = files PRESENT, readable != FALSE, size >= 1, grouped by size
+entrySizes = set of ArchiveEntry.size (known, >= 1, not dir) of every stored listing of a PRESENT archive (Part A)
 policy ALL        → every file needs a full hash
-policy COLLISIONS → files in groups with >= 2 members need hashing; others: bit 2 done, sha256 stays null (unique by size)
+policy COLLISIONS → files in groups with >= 2 members, or whose size ∈ entrySizes (possible backup in an archive —
+                    Phase 3 needs the file's CRC32 and SHA-256 to match it; REVIEW_1 F-M6), need hashing;
+                    others: bit 2 done, sha256 stays null (unique by size)
 for each group needing hashing, ordered by (size × (members − 1)) descending, then size descending:
     for each member (ascending path): reuse HashRecord if hr.fp sameAs(member fp); else
-        if size <= 131072: compute full SHA-256 (+CRC32) → quickHash = sha256 (one read)
-        else quickHash = QuickHash.of(rf)          // identical algorithm to core.Scanner.quickHash
+        if size <= 131072 or the file is an entrySizes match: full SHA-256 + CRC32 + QuickHash in the same single read
+        else quickHash = QuickHash.of(rf, size)
     subgroups by quickHash with >= 2 members → full SHA-256 + CRC32 for each (reuse if current)
     write HashRecord + FileRecord.sha256 for every member processed; bit 2 done
 ```
 `QuickHash.of(rf, size)`: SHA-256 over bytes `[0, min(65536, size))`, then if `size > 131072` bytes `[size − 65536, size)`, then
 `Long.toString(size)` as ASCII — byte-for-byte the classic definition (verified against `CoreOracle.quickHash`).
+`HashRecord.quickHash` always holds `QuickHash.of` (also for small files, where it is computed from the same buffer as the
+full hash), so it is comparable with classic for every size.
+Hashes the later phases need beyond this (Phase 5: every file entering a destructive recommendation; Phase 9: revalidation)
+are computed on demand by the same `HashStage` code with `reason = "PLAN"` / `"REVALIDATE"` (ARCHITECTURE §2.13 V3).
 Full hash streams 1 MiB buffers; a read error → `HashRecord` not written, `lastError`, bit 2 failed (the file stays unhashed;
 Phase 3 treats it as "unknown", never as unique).
 Budget: bytes read are charged; when exhausted, unprocessed groups' members get bit 2 pending, stage returns `BUDGET_EXHAUSTED`
@@ -247,6 +266,7 @@ Per file: `d = media.decode(vol, rawPathOrPath, 1024, MAX_PIXELS, wantArgb = tru
 | `analysedWidth/Height`, `orientation` | from `d` |
 
 Luma conversion when a decoder supplies only ARGB: `(299 R + 587 G + 114 B) / 1000` (same as `core.Scanner.quality`).
+For a JPEG whose T1 integrity is `UNKNOWN` with `jpeg:NO_EOI_IN_TAIL`: decode `CORRUPT` → integrity `TRUNCATED`; decode OK → stays `UNKNOWN`.
 Animated images: first frame only (`ImageInfo.animated` tells the reader).
 
 `MediaDecoder` contract recap (ARCHITECTURE §3.2): pixels **upright**; never upscaled; `TOO_LARGE` decided from header dimensions
@@ -294,7 +314,8 @@ a match is kept only if the date is valid (calendar check), ≥ 2000-01-01 and �
    length-prefixed signed data → digests (skip) → certificates (sequence of length-prefixed DER) → first certificate. Fingerprint =
    lower-hex SHA-256 of the DER. No block: v1 — entries `META-INF/*.RSA|*.DSA|*.EC` (≤ 1 MiB inflated) parsed by `Der` (tag/length
    walker, ≤ depth 16): `ContentInfo → [0] → SignedData → certificates [0] IMPLICIT` → first certificate TLV → SHA-256. No signature
-   at all → empty list, scheme `none`. Signatures are **not verified** (identity only); `ApkInfo.extra` notes "unverified".
+   at all → empty list, scheme `none`. Signatures are **not verified** (identity only); `FeatureRecord.problems` always carries
+   `apk:SIGNATURE_UNVERIFIED` so later phases cannot mistake the certificate hash for a verified signer.
 4. Install state via `InstalledApps`: `availability == UNAVAILABLE` → `UNKNOWN`; `get(pkg) == null` → `NOT_INSTALLED` only if
    availability `FULL`, else `UNKNOWN`; else compare version codes → `SAME_VERSION` / `INSTALLED_NEWER` (APK is older) /
    `INSTALLED_OLDER` (APK is newer). `sameSigner` = TRUE if both cert lists known and intersect, FALSE if both known and disjoint,
@@ -400,7 +421,7 @@ public final class Budget {
 * Workers never touch the store; Sink results are applied in job order (results carry their sequence number; the coordinator
   applies them in sequence order using a small reorder buffer) so the store content is identical for any worker count.
 
-`Confidence.of(FileRecord, FeatureRecord)` (rounded to 3 decimals; unreadable → 0.1):
+`Confidence.of(FileRecord, FeatureRecord)` = product of the applicable factors below (rounded to 3 decimals; unreadable → 0.1):
 
 | Factor | Values |
 |---|---|
@@ -473,24 +494,24 @@ given fake certificate bytes + optional v1 PKCS#7 built with a tiny DER writer).
 | `ClassicAgreementTest` | on all fixtures and (if present) every dataset/Drive file: v2 type equals `Classifier.magic` or is a listed refinement (`mp4 → {mp4, mov, 3gp}`, `zip → zip family ∪ installer`, `heic → {heic, heif}`, `bin → *`, `mp3 → {mp3, unknown}`); prints each disagreement; fails on any outside the refinement table |
 | `NameDatesTest` | each pattern's examples → exact epoch; invalid dates (`20241332_…`, Feb 30) → null; future (> now + 1 d) → null; pre-2000 → null; `WhatsApp Image … at 5.51.14 PM (2)` → 17:51:14; Drive inventory names (when present) |
 | `ExifReaderTest` | LE and BE; DateTimeOriginal + OffsetTimeOriginal `+05:30` → exact UTC, `tzKnown TRUE`; without offset → local-as-UTC, `tzKnown FALSE`; orientation 1..8; Make/Model/Software trimmed of NULs; GPS pointer → `hasGps TRUE`; IFD offset loop (IFD1 → IFD0) terminates; entry count 60000 → bounded; offset beyond block → field unknown, no exception; orientation agrees with `tools.Exif.orientation` on all fixtures |
-| `JpegProbeTest` | SOF0 and SOF2 dims; SOF after 3 × 60 KiB APP segments found; DQT quality estimate within ±5 of written quality 50/75/95; missing EOI → TRUNCATED; motion-photo XMP + trailing `ftyp` → `motionPhoto TRUE`, integrity OK; no SOF → CORRUPT |
+| `JpegProbeTest` | SOF0 and SOF2 dims; SOF after 3 × 60 KiB APP segments found; DQT quality estimate within ±5 of written quality 50/75/95; missing EOI + undecodable → TRUNCATED; missing EOI in the tail but decodable, or followed by a > 64 KiB Samsung `SEFT` trailer → UNKNOWN, never TRUNCATED; motion-photo XMP + trailing `ftyp` → `motionPhoto TRUE`, integrity OK; no SOF → CORRUPT |
 | `ImageContainerProbesTest` | PNG IHDR/alpha/bit depth, missing IEND → TRUNCATED, `acTL` → animated; GIF 3 frames → `frames 3, animated TRUE`; WebP VP8, VP8L, VP8X dims + ANIM; BMP dims; ICO |
 | `HeifProbeTest` | `FxHeif` primary item 4032×3024 + irot 1 → upright 3024×4032, orientation 6; grid primary item; EXIF item → DateTimeOriginal; missing ispe → dims unknown + problem; box size overflow → no exception; Drive corpus (if present): all `.HEIC` files have dims > 0, type heic/heif |
 | `Mp4ProbeTest` | duration from mvhd (v0 and v1); tkhd 1920×1080 with 90° matrix → rotation 90; stsd `avc1` + `mp4a` → codecs, hasAudio TRUE; stts → fps 30.0 ± 0.01; moov after mdat → `moovAtEnd TRUE`; truncated mdat → TRUNCATED; size-0 last box; 64-bit box size; non-printable box type stops walk with problem; `moof` → fragmented; audio-only M4A → AudioInfo; creation time and track handlers equal `tools.Mp4.read` on the same fixture files |
 | `MkvAviProbeTest` | EBML fixture: Duration (float64) × TimecodeScale → ms; video track 1280×720 `V_VP9`; unknown-size Segment; depth cap; AVI avih → duration/dims |
 | `AudioProbeTest` | MP3 CBR 128 kbps 10 s → duration ± 1%, `durationConfidence 0.6`; with Xing frames → exact, 0.95; ID3v2 of 20 KiB skipped; FLAC total samples → exact; Ogg Vorbis/Opus last-granule duration (Opus pre-skip applied); WAV byte rate; random bytes named `.mp3` → type `mp3` with source EXTENSION (conf 0.5), `audio == null`, problem `audio:NO_FRAME_SYNC`, mismatch UNKNOWN |
 | `PdfProbeTest` | 3-page plain → pages 3 `PAGES_ROOT`, encrypted FALSE, title/author decoded (escapes, octal, UTF-16BE BOM); `/Encrypt 5 0 R` in trailer → TRUE, title null, integrity ENCRYPTED; `/Encrypt` in an xref-stream dict → TRUE; linearized `/N 12` → 12 `LINEARIZED`; incremental update with roots Count 4 then 5 → 5; object-stream PDF → pages -1, problem `OBJECT_STREAMS`; no `%%EOF` → TRUNCATED; neither trailer nor XRef seen (cut head-only file) → encrypted UNKNOWN; 12 MiB file → only head/tail read (CountingReadableFile ≤ 8 MiB + 2 KiB) |
-| `ZipProbeTest` | normal zip: names, sizes, CRCs equal `java.util.zip.ZipFile`'s; UTF-8 flag; non-UTF-8 name → `nameEncodingUncertain`; 120 entries with limit 50 → TRUNCATED, `declaredEntries 120`, `listedEntries 50`; `../evil` → pathTraversal; `/etc/x`, `C:\x` → absolutePaths; declared 10 GiB entry in a 1 KiB file → bombSuspect; encrypted flag → `encryptedEntries`, all-encrypted → integrity ENCRYPTED; 65 535-byte comment → EOCD found; cut in half → TRUNCATED; ZIP64 crafted → sizes from extra; CD > limit → LIMIT; stored nested zip → listed at depth 1 with `container`; deflated nested zip → counted only; zip-in-zip-in-zip all stored → depth 2 listed, depth 3 counted; prefix bytes before the archive (SFX) → still listed; subtype detection docx/xlsx/pptx/odt/epub/jar/apk/apks/xapk |
+| `ZipProbeTest` | normal zip: names, sizes, CRCs equal `java.util.zip.ZipFile`'s; an APK/docx listing keeps counts and subtype but stores `entries == null`; UTF-8 flag; non-UTF-8 name → `nameEncodingUncertain`; 120 entries with limit 50 → TRUNCATED, `declaredEntries 120`, `listedEntries 50`; `../evil` → pathTraversal; `/etc/x`, `C:\x` → absolutePaths; declared 10 GiB entry in a 1 KiB file → bombSuspect; encrypted flag → `encryptedEntries`, all-encrypted → integrity ENCRYPTED; 65 535-byte comment → EOCD found; cut in half → TRUNCATED; ZIP64 crafted → sizes from extra; CD > limit → LIMIT; stored nested zip → listed at depth 1 with `container`; deflated nested zip → counted only; zip-in-zip-in-zip all stored → depth 2 listed, depth 3 counted; prefix bytes before the archive (SFX) → still listed; subtype detection docx/xlsx/pptx/odt/epub/jar/apk/apks/xapk |
 | `TarProbeTest` | ustar entries; GNU long name; checksum mismatch on first header → CORRUPT; data past EOF → TRUNCATED; header limit |
 | `AxmlParserTest` | UTF-8 and UTF-16 pools; package/versionCode/versionName/minSdk/targetSdk; versionCodeMajor combined; attribute names obfuscated to "" → resolved by resource ids; versionName as REFERENCE → null; chunk size past buffer → partial + problem, no exception; string count 10⁶ → limit problem |
 | `ApkSignaturesTest` | v2 block with cert bytes C → `sha256(C)`; v3 only; v2+v3 → scheme `v2+v3`; v1 PKCS#7 (built by `Der` writer) → cert hash; unsigned → empty list `none`; inconsistent block sizes → UNKNOWN (null) with problem |
 | `ApkProbeTest` | `FxApk` + `JvmInstalledApps` stubs: same version+cert → SAME_VERSION / sameSigner TRUE; installed newer → INSTALLED_NEWER; installed older → INSTALLED_OLDER; absent with FULL → NOT_INSTALLED; absent with PARTIAL → UNKNOWN; UNAVAILABLE → UNKNOWN; different cert → sameSigner FALSE; zip named `.apk` without manifest → type `zip`, mismatch BENIGN, `apk == null` |
-| `HashStageTest` | unique sizes are not read (CountingReadableFile 0 bytes); same size different content → quick hashes differ, no full hash; identical content → full SHA-256 equal to `MessageDigest` of the file, CRC32 equal to `java.util.zip.CRC32`; ≤ 128 KiB group → one read, quick = full; quickHash equals `CoreOracle.quickHash` for sizes 1, 65 536, 131 072, 131 073, 10 MiB; zero-byte → `SHA256_EMPTY` without open; policy ALL → every file hashed; incremental: adding one same-size file reads only it (+ full hashes on match); changed fingerprint → re-hash; byte budget → BUDGET_EXHAUSTED, pending bits, next run completes; read error mid-file → no HashRecord, bit failed |
+| `HashStageTest` | unique sizes are not read (CountingReadableFile 0 bytes); same size different content → quick hashes differ, no full hash; identical content → full SHA-256 equal to `MessageDigest` of the file, CRC32 equal to `java.util.zip.CRC32`; ≤ 128 KiB group → one read, both quick and full hash stored; `HashRecord.quickHash` equals `CoreOracle.quickHash` for sizes 1, 65 536, 131 072, 131 073, 10 MiB; a size-unique file whose size equals an entry of a stored zip listing → full SHA-256 + CRC32 computed (F-M6); a formerly size-unique file whose group gains a member in scan 2 → hashed in scan 2; zero-byte → `SHA256_EMPTY` without open; policy ALL → every file hashed; incremental: adding one same-size file reads only it (+ full hashes on match); changed fingerprint → re-hash; byte budget → BUDGET_EXHAUSTED, pending bits, next run completes; read error mid-file → no HashRecord, bit failed |
 | `ImageBasicsTest` | synthetic luma: uniform 128 → contrast 0, brightness 128, exposure 0; checkerboard → sharpness ≫ uniform; all-black → clipLow 1.0; gray ARGB → colorfulness ≈ 0, saturated colours → > 50; histogram sums to 10000; phash equals `ImageFeatures.phash` of the same luma; JPEG with EXIF orientation 6 vs the same picture physically rotated → equal upright dims, phash Hamming ≤ 4 |
 | `JvmMediaDecoderTest` | header claiming 30 000 × 30 000 → TOO_LARGE before decode (heap delta small); HEIC → NO_DECODER; random bytes `.jpg` → CORRUPT; long edge ≤ 1024 and never upscaled (200 px image stays 200 px) |
 | `T1MetadataStageTest` | TempTree with one fixture per type: expected type/mime/integrity/sub-record fields; unreadable (`FaultyStorageAccess.denyOpen`) → UNREADABLE, confidence 0.1, type from extension; probe exception fixture → problem recorded, other fields kept, bit 1 failed; createdAt priority EXIF > container > name > none, never mtime (mtime set to 2030 in fixtures must not appear); HEIC fixture → dims known, tier 3 NO_DECODER, status PARTIAL, `hasPhash false`; file changed during read (Faulty hook changes size after open) → discarded, pending |
 | `IncrementalExtractionTest` | second run: 0 probes executed (probe invocation counter), bytes read 0; modify one file → only it re-extracted; `overrideVersionForTest(PDF, 2)` → only PDFs re-run; `ScanKind.FULL` → all re-run; deleted file's FeatureRecord kept but not selected |
-| `SchedulerTest` | workers 0 vs 3 → identical store JSON lines; in-flight never exceeds capacity + workers + 64 (atomic gauge); `pauseAfterProgress` mid-T1 → PAUSED, resume → equal store; scripted throttle MODERATE → max concurrent workers observed = 1; SEVERE → PAUSED with `PL_PAUSED_DEVICE`; time budget with `FixedClock` → BUDGET_EXHAUSTED, `stoppedBy TIME`; `killAfterCommits(2)` during T1 → reopen + resume → equal to uninterrupted |
+| `SchedulerTest` | workers 0 vs 3 → identical store JSON lines; in-flight never exceeds capacity + workers + 64 (atomic gauge); `pauseAfterProgress` mid-T1 → PAUSED, resume → equal store; scripted throttle MODERATE → max concurrent workers observed = 1; SEVERE → PAUSED with `PL_PAUSED_DEVICE`; time budget with `FixedClock` → BUDGET_EXHAUSTED, `stoppedBy TIME`; `KillingBlobStore.killAfterReplaceCommits(2)` (snapshotEveryMs 0) during T1 → reopen + resume → equal to uninterrupted |
 | `UnknownHandlingTest` (A9) | every undecodable/NO_DECODER image: all pixel fields NaN, `hasPhash false`, confidence ≤ 0.7, status ≠ COMPLETE; truncated JPEG still decodable → features present but integrity TRUNCATED and confidence ≤ 0.6; encrypted PDF: `encrypted TRUE`, title/author null, status COMPLETE only for tiers that apply (no tier 3) and integrity ENCRYPTED; no field anywhere defaults to 0 when unknown (reflection-free check: JSON of every FeatureRecord has `null`, never `0`, for the listed unknown fields of each fixture) |
 | `V2CliPhase2Test` | JSON has `image/video/audio/apk/pdf/archive` per type with `null` unknowns; `--hash all` SHA equals Python-independent `MessageDigest`; `--max-tier 1` → tiers 2/3 pending, status PARTIAL; `--installed-apps` wiring |
 

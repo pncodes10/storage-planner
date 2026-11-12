@@ -35,10 +35,11 @@ All paths under `app/src/main/java/com/storageplanner/` unless noted.
 | `v2.model` | 1 (grows) | Records and enums of §2. No logic beyond `copy()`, `key()`, small derived getters. | `v2` |
 | `v2.util` | 1 | `Json` (reader/writer), `Hex`, `Hashing` (SHA-256, CRC32 helpers), `Bytes` (endian reads), `Io` (bounded reads over `ReadableFile`), `Text` (NFC, safe truncation) | `v2` |
 | `v2.device` | 1 (grows) | Device interfaces of §3 and their small value types | `v2.model`, `v2.util` |
-| `v2.store` | 1 | `V2Store`, table interfaces, `MemoryStore`, snapshot/WAL codec (§4) | `v2.model`, `v2.util`, `v2.device.BlobStore` |
-| `v2.discovery` | 1 | Volumes, capabilities, walker, file ids, change detection, coverage, `PosixStorageAccess` | model, util, device, store |
-| `v2.features` | 2 | Type detection, metadata probes, hashing, image basics, APK/PDF/archive/MP4/audio probes, scheduler/budget | + `core.ImageFeatures`, `core.Classifier`, `tools.Exif` |
-| `v2.pipeline` | 1 (grows) | `Pipeline`, `PipelineConfig`, `Stage`, `StageOutcome`, `Progress` | everything above |
+| `v2.store` | 1 | `V2Store`, table interfaces, `MemoryStore`, snapshot codec (§4) | `v2.model`, `v2.util`, `v2.device.BlobStore` |
+| `v2.stage` | 1 | Stage contract shared by every stage: `Stage`, `StageContext`, `StageOutcome`, `PipelineConfig`, `Budget`, `Throttle`, `CommitHook` (REVIEW_1 F-m13: these were in `v2.pipeline`, which made discovery/features ↔ pipeline a cycle) | model, util, device, store |
+| `v2.discovery` | 1 | Volumes, capabilities, walker, file ids, change detection, coverage, `PosixStorageAccess` | model, util, device, store, stage |
+| `v2.features` | 2 | Type detection, metadata probes, hashing, image basics, APK/PDF/archive/MP4/audio probes, scheduler | + stage, `core.ImageFeatures`, `core.Classifier`, `tools.Exif` |
+| `v2.pipeline` | 1 (grows) | `Pipeline` (orchestrator, default stage list), `PipelineResult` | everything above |
 | `v2.graph` | 3 | Relationship builders, duplicate groups, near-duplicate matcher, archive/backup matcher, keeper selection | model, util, device, store, features |
 | `v2.content` | 3 (interfaces), 6, 7 | `ContentClassifier`, `EmbeddingProvider`, `TextReader` bridges; deterministic classifiers wrapping `core.TextRules`, `core.Codes`, `core.Faces`; Phase 7 model manager | + core utilities |
 | `v2.risk` | 4 | `HardRules`, `UtilityEstimator`, `LossEstimator`, `RecoverabilityEstimator`, `ConfidenceEstimator`, `Assessor` | graph, content |
@@ -166,6 +167,7 @@ fields honest. Key = `fileId`.
 | `scanVersion` | int | -1 | P1 | `V2.SCAN_VERSION` of the scan that last wrote this record |
 | — extras — | | | | |
 | `inode` | long | -1 | P1 | from `FileStat.inode` |
+| `physicalKey` | String | null | P1 | `"<dev>:<ino>"` of the underlying file (POSIX `fileKey()`; Android SAF: provider document id mapped to its shared-storage path when the provider is `com.android.externalstorage.documents`, else null). Two records with equal non-null `physicalKey` are the **same file** (alias route or hard link), never copies (G2) |
 | `presence` | enum `Presence` | — | P1 | `PRESENT, REMOVED, UNVERIFIABLE, VOLUME_ABSENT` |
 | `presenceReason` | String (reason code) | null | P1 | why UNVERIFIABLE/REMOVED (`D_PARENT_UNREADABLE`, `D_PERMISSION_REVOKED`, `D_REPLACED`, ...) |
 | `change` | enum `ChangeState` | — | P1 | last change observed: `ADDED, CHANGED, REMOVED, REPLACED`; it happened in scan `changeScanId` (a record not written in scan S was unchanged in S — unchanged files are never rewritten) |
@@ -173,7 +175,7 @@ fields honest. Key = `fileId`.
 | `rawPath` | String | null = same as `path` | P1 | on-disk name chain when it differs from the NFC `path` (NFD names, NFC collisions); all `StorageAccess` calls use `rawPath != null ? rawPath : path` |
 | `readable`, `writable` | Tri | UNKNOWN | P1 | permissions as reported by stat |
 | `accessMode` | enum `AccessMode` | null | P1 | the grant through which it was seen |
-| `area`, `ownerPackage` | String | null | P1 | `core.Classifier.classify(path, installedPkgs)` → `{area, pkg}` |
+| `area`, `ownerPackage` | String | null | P1 | `core.Classifier.classify(path, installedPkgs)` → `{area, pkg}`. `classify` returns `residue` whenever `pkg` is absent from the set, so v2 passes it only when `InstalledApps.availability() == FULL`; otherwise a `residue` result is stored as area `app_owner_unknown` (REVIEW_1 F-M3). Re-derived at the end of every `DISCOVER` for records with `ownerPackage != null` (write only on change), so install/uninstall is reflected |
 | `hidden` | boolean | — | P1 | any path component starts with `.` |
 | `type` | String | `"unknown"` | P2 | content type from signature (Phase 2 `FileType`) |
 | `typeSource` | enum `TypeSource` | `NONE` | P2 | `SIGNATURE, STRUCTURE, EXTENSION, NONE` |
@@ -198,7 +200,11 @@ identityToken = "ino:" + inode   if Volume.identityScheme == "ino" and inode is 
 Consequences (tested in Phase 1): rename/move → new id; in-place rewrite (same inode) → same id,
 `change=CHANGED`; delete+recreate or atomic-replace at the same path (new inode) → old id `REMOVED`
 (`presenceReason=D_REPLACED`), new id `ADDED`. The id is an application key, never proof of identity:
-execution re-verifies with `Fingerprint` + SHA-256 (spec 4.3, 11.1).
+execution re-verifies with `Fingerprint` + SHA-256 (spec 4.3, 11.1). Same id does **not** imply same content:
+ext4/f2fs reuse inode numbers immediately, so delete + recreate at the same path can keep the id, and on `path`-scheme
+volumes a replaced file always keeps it. Therefore every record that carries a judgement about a file — features,
+hashes, edges, recommendations **and their approval**, feedback (Phase 8) — applies only while its stored `Fingerprint`
+equals the file's current one (rule F1, REVIEW_1 F-M6).
 
 `Fingerprint` (value class): `{long size, long mtime, long inode}`; `sameAs(Fingerprint o)` = sizes equal,
 mtimes equal, and inodes equal when both known. Every derived record (features, hashes, relationships,
@@ -210,7 +216,7 @@ recommendations) stores the fingerprint it was computed from; a mismatch makes i
 public final class DirRecord implements Record {   // key = volumeId + "\u0000" + path
     public String volumeId, path;
     public String rawPath;              // as in FileRecord
-    public DirStatus status;            // see PHASE_1.md §5.1 for the full enum and meaning of each value
+    public DirStatus status;            // see PHASE_1.md §4.2 for the full enum and meaning of each value
     public long lastVisitedScanId = Unknown.LONG;   // scan in which the walker reached this directory (listed or not)
     public long lastListedOkScanId = Unknown.LONG;  // scan in which it was listed completely
     public long mtime = Unknown.TIME, inode = Unknown.LONG;
@@ -222,7 +228,7 @@ public final class DirRecord implements Record {   // key = volumeId + "\u0000" 
 
 ### 2.5 Features, hashes, embeddings (tables `file_features`, `file_hashes`, `file_embeddings`)
 
-`FeatureRecord` (key `fileId`): `Fingerprint fp; int[] extractorVersions` (indexed by `Extractors.*` ids);
+`FeatureRecord` (key `fileId`): `Fingerprint fp; int[] versions` (indexed by `Extractors.*` ids);
 `double confidence;` and at most one non-null sub-record per kind: `ImageInfo image; VideoInfo video;
 AudioInfo audio; ApkInfo apk; PdfInfo pdf; ArchiveInfo archive;` plus `ExifInfo exif; NameDate nameDate;`
 and `Map<String,String> extra` (free-form, small, for later phases). Field-level definitions of every
@@ -269,6 +275,14 @@ Invariant G1 (A9): only `EXACT_DUPLICATE` with `verification == VERIFIED` (full 
 fingerprints current) and `BACKED_UP_BY` with `verification == VERIFIED` (byte-level match, §8) can make two
 nodes *interchangeable*. All other types are context for utility/loss, never interchangeability.
 
+Invariant G2 (REVIEW_1 F-B1): two nodes are interchangeable only if they are **provably different physical files**:
+both `physicalKey`s known and different, or the two volumes are known not to overlap (different `fsUuid`, or
+neither is a `SAF_TREE`/`DIRECTORY` volume whose root may lie inside the other). Equal `physicalKey` → the records
+are aliases of one file (bind mount, SAF route into a walked volume, hard link): no `EXACT_DUPLICATE` edge, and
+`recoverableBytes` of the pair is 0. Unknown distinctness → the edge is stored `UNVERIFIED` (`R_UNCERTAIN_COPY` at
+most), never `VERIFIED`. Without G2, deleting "the copy" of a photo seen through both a SAF tree and Mode B deletes
+the only file.
+
 ### 2.7 DuplicateGroup (table `duplicate_groups`)
 
 ```java
@@ -288,8 +302,9 @@ public final class DuplicateGroup implements Record {
 `backupId` (key, = edgeId of the `BACKED_UP_BY` edge); `subjectId` (fileId); `copyRef` (node ref);
 `kind ∈ {LOCAL_COPY, ARCHIVE_ENTRY, USER_DECLARED}`; `level ∈ {NONE, NAME_MATCH, SIZE_MATCH, CRC32_MATCH,
 SHA256_MATCH}`; `state ∈ {VERIFIED, INCOMPLETE, CORRUPT, MISSING, UNKNOWN}`; `verifiedAt`; `copyFp`.
-Spec 8.3: only `level == SHA256_MATCH` (or `CRC32_MATCH` plus size plus a successful full inflate
-of the entry in Phase 6+) gives `state = VERIFIED`. Name matches are evidence of a *possible* backup only.
+Spec 8.3: only `level == SHA256_MATCH` (the entry inflated in memory under T6 caps and its SHA-256 equal to
+the subject's current SHA-256, subject and archive both PRESENT and fingerprints current) gives `state = VERIFIED`.
+`CRC32_MATCH` (32-bit, plus size and name) is `POSSIBLE` only (REVIEW_1 F-M7: §8 and this section disagreed). Name matches are evidence of a *possible* backup only.
 Cloud backup is never verified (spec 2.2) and has no record kind.
 
 ### 2.9 Assessment (spec 8; not a table of its own)
@@ -331,13 +346,14 @@ CACHE, TEMP, OTHER`; and `UNKNOWN`. Category is always accompanied by `categoryC
 ### 2.11 Recommendation (table `recommendations`, spec 13.2)
 
 ```java
-public enum Action { KEEP, DELETE, COMPRESS, ARCHIVE, QUARANTINE, REVIEW }
+public enum Action { KEEP, DELETE, COMPRESS, ARCHIVE, QUARANTINE, REVIEW,
+                     CLEAR_APP_CACHE, ARCHIVE_APP, UNINSTALL_APP }   // app subjects, Phase 5 (REVIEW_1 F-M11)
 public enum Tier { SAFE, NO_LOSS, YOUR_CALL, REVIEW, PROTECTED }   // KEEP = absence of a recommendation
 public enum ApprovalState { NOT_REQUESTED, PENDING, APPROVED, REJECTED, EXPIRED }
 
 public final class Recommendation implements Record {
     public String recommendationId;     // hex(SHA-256(fileId + action + planVersion))[0..24)
-    public String fileId;
+    public String fileId;               // subject: a fileId, or "app:<pkg>" / "cache:<pkg>" for app subjects (same ids as classic core.Unit)
     public Action proposedAction;
     public Tier tier;
     public long expectedSavingBytes = Unknown.LONG;
@@ -352,6 +368,14 @@ public final class Recommendation implements Record {
     public long createdScanId;
 }
 ```
+
+Rule F1 applied to recommendations: when a scan records `CHANGED`, `REPLACED`, `REMOVED`, `UNVERIFIABLE` or
+`VOLUME_ABSENT` for a file, every `Recommendation` of it in state `PENDING`/`APPROVED` becomes `EXPIRED` in the same
+commit (Phase 5 implements this hook in `DISCOVER`'s end step). An approval is never carried to new content.
+
+App subjects (Phase 5): `cache:<pkg>` → `CLEAR_APP_CACHE` at SAFE (`S_APP_CACHE`, spec 10.3 priority 1 "rebuildable");
+`app:<pkg>` → `ARCHIVE_APP` (API 35+, keeps data) at NO_LOSS or `UNINSTALL_APP` at YOUR_CALL (`Y_IDLE_APP`), from
+`InstalledApp` storage/usage fields (§3.3). Their `fp` is null; revalidation re-reads the app's stats.
 
 Tier semantics (spec 9.4) and the action each tier may carry:
 
@@ -404,7 +428,7 @@ store what they need:
 |---|---|---|
 | V1 | `approvalState == APPROVED` and plan not `STALE`/`CANCELLED` | `H_NOT_APPROVED` |
 | V2 | stat: exists, same `Fingerprint` as `Recommendation.fp` | `H_STALE` (scenario 12) |
-| V3 | SHA-256 recomputed equals stored, for DELETE/QUARANTINE of NO_LOSS duplicates and for every COMPRESS | `H_STALE` |
+| V3 | SHA-256 recomputed equals the SHA-256 stored at recommendation time, for **every** destructive file action (Phase 5 hashes every file it puts in a destructive recommendation — `HashRecord.reason = "PLAN"` — because Tier 2 hashes only size collisions; REVIEW_1 F-M6) | `H_STALE` |
 | V4 | every `dependencyIds` file: present, same fingerprint, readable, SHA-256 equal to the group hash (keeper re-hashed) | `H_KEEPER_MISSING` |
 | V5 | capability for the path still grants `canDelete`/`canWrite` (permission re-read *now*) | `H_PERMISSION_LOST` (scenario 13) |
 | V6 | destination free space ≥ needed + `SPARE_BYTES` (16 MiB, same as `tools.ZipCompressor.SPARE_BYTES`) | `X_LOW_SPACE` (scenario 14) |
@@ -456,18 +480,24 @@ public interface StorageAccess {
     String dirIdentity(String volumeId, String dirPath);
     /** Absolute local path if the file is path-addressable (JVM, Mode B, D), else null (Mode A/C). */
     String localPath(String volumeId, String path);
+    /** Target of a symlink as a normalized path relative to the volume root, "" for the root itself;
+     *  null if it resolves outside the volume's canonical root or cannot be resolved (REVIEW_1 F-M5). */
+    String resolveLink(String volumeId, String path);
 }
 
 public final class VolumeInfo { public String volumeId; public VolumeKind kind; public String label, root, fsUuid;
     public long totalBytes = -1, freeBytes = -1; public boolean mounted = true; public Tri fileKeyStable, caseInsensitive;
     public java.util.List<String> restrictedPrefixes; }
 public enum IoStatus { OK, NOT_FOUND, PERMISSION_DENIED, NOT_A_DIRECTORY, IO_ERROR, PARTIAL_IO_ERROR, UNSUPPORTED;
-    public static IoStatus of(java.io.IOException e) { /* AccessDenied→PERMISSION_DENIED, NoSuchFile/FileNotFound→NOT_FOUND, NotDirectory→NOT_A_DIRECTORY, else IO_ERROR */ } }
+    public static IoStatus of(java.io.IOException e) { /* AccessDenied→PERMISSION_DENIED, java.nio NoSuchFileException→NOT_FOUND, NotDirectory→NOT_A_DIRECTORY,
+        else IO_ERROR. java.io.FileNotFoundException → IO_ERROR: java.io and ContentResolver throw it for "permission denied" and
+        revoked grants too, so it is never evidence of absence (REVIEW_1 F-B2). An implementation returns NOT_FOUND only on
+        positive evidence (ENOENT / NoSuchFileException, or a provider query that succeeded and returned no row). */ } }
 public enum EntryKind { FILE, DIRECTORY, SYMLINK, OTHER, UNKNOWN }
-public final class DirEntry { public String name; public EntryKind kind; public long size = -1, mtime = Long.MIN_VALUE, inode = -1; public String uri; }
+public final class DirEntry { public String name; public EntryKind kind; public long size = -1, mtime = Long.MIN_VALUE, inode = -1; public String uri, physicalKey; }
 public final class DirListing { public IoStatus status; public java.util.List<DirEntry> entries; public String error; }
 public final class FileStat { public IoStatus status; public EntryKind kind; public long size = -1, mtime = Long.MIN_VALUE,
-    birthTime = Long.MIN_VALUE, atime = Long.MIN_VALUE, inode = -1; public Tri readable, writable; public String linkTarget, error; }
+    birthTime = Long.MIN_VALUE, atime = Long.MIN_VALUE, inode = -1; public Tri readable, writable; public String linkTarget, physicalKey, error; }
 
 public interface ReadableFile extends java.io.Closeable {
     long size() throws java.io.IOException;
@@ -488,7 +518,7 @@ public interface MediaDecoder {
     /** Frame of a video at timeMs, same contract as decode; null-status UNSUPPORTED if no video decoder (JVM). Phase 6. */
     DecodedImage videoFrame(String volumeId, String path, long timeMs, int longEdge);
 }
-public enum DecodeStatus { OK, NO_DECODER, UNSUPPORTED_FORMAT, CORRUPT, TOO_LARGE, IO_ERROR, OUT_OF_MEMORY, TIMEOUT }
+public enum DecodeStatus { OK, NO_DECODER, UNSUPPORTED_FORMAT, CORRUPT, TOO_LARGE, IO_ERROR, OUT_OF_MEMORY, TIMEOUT }  // lives in v2.model (ImageInfo stores it)
 public final class DecodedImage { public DecodeStatus status; public int[] luma, argb /*null unless wanted*/;
     public int w, h, origW = -1, origH = -1, orientation = -1 /*EXIF 1..8 applied*/; public String error; }
 ```
@@ -509,7 +539,10 @@ public interface InstalledApps {
 public final class InstalledApp { public String packageName, versionName, label, installerPackage;
     public long versionCode = -1, firstInstallTime = Long.MIN_VALUE, lastUpdateTime = Long.MIN_VALUE;
     public java.util.List<String> signingCertSha256;   // lower-hex, null unknown
-    public Tri system, hasLauncher; }
+    public Tri system, hasLauncher;
+    // Phase 2 adds (REVIEW_1 F-M11; same sources as classic AndroidPlatform.apps(): StorageStatsManager + UsageStatsManager):
+    public long codeBytes = -1, dataBytes = -1 /* excl. cache */, cacheBytes = -1, lastUsed = Long.MIN_VALUE;
+    public Tri game = Tri.UNKNOWN, essential = Tri.UNKNOWN; }
 ```
 JVM implementation reads `installed_apps.json` (dataset) or reports `UNAVAILABLE`.
 
@@ -529,11 +562,11 @@ public interface ScanControl {     // supplied by the caller (service / CLI / te
     void progress(String stage, long done, long total);   // total -1 = unknown
 }
 ```
-Throttle policy (used by every stage, defined once in `v2.pipeline.Throttle`):
+Throttle policy (used by every stage, defined once in `v2.stage.Throttle`):
 
 | Condition (from `sample()`) | Effect |
 |---|---|
-| `thermal >= SEVERE` or (`batteryPercent` in 0..14 and `charging != TRUE`) | stop at next commit, `ScanState.PAUSED`, reason `P_PAUSED_DEVICE` |
+| `thermal >= SEVERE` or (`batteryPercent` in 0..14 and `charging != TRUE`) | stop at next commit, `ScanState.PAUSED`, reason `PL_PAUSED_DEVICE` |
 | `thermal == MODERATE` or `heapFreeBytes < 64 MiB` | concurrency 1, decodes 1 |
 | `storageFreeBytes` in 0..(256 MiB) | do not write snapshots > 10% of free space; Phase 9: no compression |
 | unknown values | no effect (unknown is not "bad") |
@@ -553,7 +586,8 @@ public interface BlobStore {
 }
 ```
 Android: `android.util.AtomicFile` in `getFilesDir()/v2/`. JVM (`DirBlobStore`, jvmtest): temp file +
-`FileChannel.force` + `Files.move(ATOMIC_MOVE)`. v2 itself never renames or deletes.
+`FileChannel.force` + `Files.move(ATOMIC_MOVE)`. v2 itself never renames or deletes. Phases 1–8 use only `read`
+and `replace` (§4.2); `append`/`sync`/`truncate` exist for the Phase 9 operation journal.
 
 ### 3.6 FileOps (Phase 9 only; A8)
 
@@ -578,7 +612,7 @@ public interface V2Device {
     StorageAccess storage(); MediaDecoder media(); InstalledApps apps(); Clock clock();
     ResourceMonitor resources(); BlobStore blobs();
     FileOps fileOps();                  // null = read-only device (the shipped app)
-    com.storageplanner.v2.content.TextReader text();   // Phase 6; null = no OCR
+    TextReader text();                  // v2.device.TextReader, defined in Phase 6 (kept in v2.device so device does not depend on content); null = no OCR
 }
 ```
 
@@ -607,12 +641,14 @@ public interface V2Store extends java.io.Closeable {
     Table<ScanSession> scanSessions();        // scan_sessions
     Table<Volume> volumes();                  // storage_volumes
     DirTable directories();                   // directories (addition)
-    /** Makes every put/remove since the last commit durable, atomically. */
+    /** Consistency point: every put/remove since the last commit forms one atomic unit. Durability may be deferred
+     *  (MemoryStore persists at most every snapshotEveryMs, §4.2); after a crash the store reopens at some earlier
+     *  commit, never between two commits. SQLite (Phase 10) makes every commit durable. */
     void commit() throws StoreException;
     /** Drops uncommitted changes (reloads them from the committed state). */
     void rollback();
-    /** Rewrites durable state compactly (snapshot) — call at scan end; no-op for SQLite. */
-    void compact() throws StoreException;
+    /** commit() and make it durable now — call at stage end, pause, cancel and close. */
+    void flush() throws StoreException;
 }
 public interface Table<R extends Record> {
     R get(String key);                  // a copy; null if absent
@@ -638,26 +674,29 @@ public final class StoreException extends Exception { ... }
 ```
 Concurrency: single writer (the pipeline coordinator thread); all methods `synchronized` in `MemoryStore`.
 
-### 4.2 MemoryStore persistence format (JSON lines)
+### 4.2 MemoryStore persistence format (one atomic snapshot, JSON lines)
 
-Two blobs: `store.snap` (full snapshot, replaced atomically) and `store.wal` (append-only log).
+REVIEW_1 F-B3 / 7(b): the earlier snapshot + write-ahead-log design is replaced by periodic atomic snapshots.
+Interrupted-scan recovery only needs *some* consistent committed state plus idempotent, store-resumable stages
+(§5.2), which a snapshot gives; the WAL only reduced write volume, at the cost of seq/CRC/torn-tail handling (the
+draft had a real bug: after a torn last line, every later commit was appended behind the garbage and silently lost
+on each load). The Phase 9 operation journal, which must be durable per step, gets its own small append-only blob
+then; Phase 10 SQLite makes every commit durable.
+
+One blob, `store.snap`, always written with `BlobStore.replace()` (old content stays until `commit()` of the write):
 
 ```
-store.snap:
-  {"format":"sp-v2-store","schema":1,"lastSeq":<long>,"createdAt":<ms>}
+  {"format":"sp-v2-store","schema":1,"commitSeq":<long>,"createdAt":<ms>}
   {"t":"<table>","v":{<record JSON>}}            one line per record, tables in §4.1 order, keys ascending
   {"end":true,"records":<n>,"crc32":"<8 hex of all preceding bytes>"}
-store.wal:
-  {"seq":<n>,"ops":[{"t":"files","op":"put","v":{...}},{"t":"files","op":"del","k":"..."}],"crc32":"<8 hex of the ops array text>"}
-  ... one line per commit
 ```
-Load: read snapshot (reject if header/trailer/CRC invalid → `StoreException`, the caller starts a fresh
-store and the coverage report says `D_STORE_RESET`); then replay WAL lines with `seq > lastSeq` in order,
-stopping silently at the first line that is truncated or fails its CRC (a torn last write is an
-uncommitted transaction). `commit()`: serialise the pending ops as one line, `append` + `sync`. `compact()`:
-write a new snapshot with `lastSeq = current seq` via `replace()`, commit it, then `truncate("store.wal")`;
-a crash between the two leaves WAL lines with `seq <= lastSeq`, which load skips. Compaction runs at
-stage ends and whenever the WAL exceeds 16 MiB.
+Load: read the snapshot; reject if header/trailer/CRC invalid → `StoreException`, the caller starts a fresh store
+and the coverage report says `D_STORE_RESET`. `commit()`: in memory only (clears the pending-inverse list used by
+`rollback()`), then writes a snapshot if `snapshotEveryMs` has passed since the last one. `snapshotEveryMs` is
+adaptive: `max(60 000, 20 × duration of the last snapshot write)`, which keeps snapshot I/O ≤ 5% of scan time
+whatever the store size. `flush()`: commit + snapshot now (skipped when nothing changed since the last snapshot,
+so an unchanged incremental scan writes one session record's worth of change, i.e. one snapshot). Serialisation
+streams line by line (no whole-store String). A crash at any point leaves either the previous or the new snapshot.
 
 Record ↔ JSON: one codec class per record in `v2.store.Codecs` (`static void write(JsonWriter, FileRecord)`,
 `static FileRecord readFile(java.util.Map<String,Object>)`, ...). Unknowns are written as JSON `null` and read
@@ -670,8 +709,7 @@ renames/semantic changes bump it and add a migration in `Codecs.migrate(int from
 Each `Table` becomes `CREATE TABLE <name>(k TEXT PRIMARY KEY, v BLOB /*the same JSON*/, <index columns>)`;
 index columns: `files(volume_id, path UNIQUE, size_bytes, sha256)`, `file_relationships(src, dst)`,
 `recommendations(file_id)`, `action_operations(op_id, seq)`, `directories(volume_id, path)`. `commit()` =
-`setTransactionSuccessful(); endTransaction(); beginTransaction()`. `compact()` = no-op (or `VACUUM` when
-idle). The same `Codecs` are reused, so both implementations share one record format and one test suite
+`setTransactionSuccessful(); endTransaction(); beginTransaction()`. `flush()` = `commit()`. The same `Codecs` are reused, so both implementations share one record format and one test suite
 (`StoreContractTest` runs against any `V2Store`).
 
 ---
@@ -724,8 +762,9 @@ public final class Pipeline {
   `FeatureRecord.fp` / extractor versions differ from current". Re-running a stage after a kill re-selects
   exactly the unfinished files.
 * `ScanSession.stage` records the stage in progress; `Pipeline.run(resume)` skips completed stages.
-* Commit cadence: every 500 files or 3 s (whichever first) in tier stages; every directory (or every 500
-  entries of a large directory) in `DISCOVER`. Compaction at each stage end.
+* Commit cadence (consistency points): every 500 files or 3 s (whichever first) in tier stages; every directory
+  (or every 500 entries of a large directory) in `DISCOVER`. Durable snapshots per §4.2; `flush()` at each stage
+  end, pause and cancel.
 * A session whose process died is found on next start with `state == RUNNING` and is marked `INTERRUPTED`
   before resuming (so the coverage report can say the scan was interrupted).
 
@@ -748,7 +787,9 @@ Stable string codes; the sentence is a template filled from `Recommendation.reas
 stay in the table with `retired=true`. Prefixes: `S_` safe, `N_` no-loss, `Y_` your call, `R_` review,
 `P_` protected, `H_` hard-rule block, `G_` graph/keeper, `D_` discovery/coverage, `X_` execution,
 `L_` learning, `PL_` planner. Every Recommendation carries ≥ 1 code; `ReasonCatalogTest` checks every code
-used anywhere in v2 sources exists here and every template's placeholders are documented.
+used anywhere in v2 sources exists here and every template's placeholders are documented. Discovery event and
+presence codes (`D_GRANT_*`, `D_LOOP`, `D_VANISHED`, `D_NOT_IN_LISTING`, ... — PHASE_1) are added to this table by
+Phase 1 with a sentence each; the table below lists only those a user sees in a reason.
 
 | Code | Tier | Sentence (user-facing) |
 |---|---|---|
@@ -756,7 +797,10 @@ used anywhere in v2 sources exists here and every template's placeholders are do
 | `S_TRASHED` | SAFE | "Already in the trash; Android would remove it on its own {when}." |
 | `S_THUMBNAIL` | SAFE | "Thumbnail the gallery rebuilds automatically from the original." |
 | `S_APP_CACHE_FILE` | SAFE | "Cache file of {app}; the app recreates it when needed." |
-| `S_UNINSTALLED_LEFTOVER` | SAFE | "Left behind by {pkg}, which is no longer installed." (only for non-media data; media leftovers are `Y_`) |
+| `S_UNINSTALLED_LEFTOVER` | SAFE | "Left behind by {pkg}, which is no longer installed." (only for non-media data; media leftovers are `Y_`; only when `InstalledApps.availability() == FULL`, else REVIEW) |
+| `S_APP_CACHE` | SAFE | "Cache of {app} ({bytes}); the app rebuilds it when needed." (app subject `cache:<pkg>`) |
+| `N_APP_ARCHIVE` | NO_LOSS | "{app} not used for {days} days; archiving keeps its data and reinstalls it on tap." (API 35+) |
+| `Y_IDLE_APP` | YOUR_CALL | "{app} not used for {days} days; uninstalling removes the app and its data." |
 | `N_EXACT_DUPLICATE` | NO_LOSS | "Identical copy: {keeper} has exactly the same content (checked byte for byte) and is kept." |
 | `N_INSTALLER_INSTALLED` | NO_LOSS | "Installer for {app} {version}: the same version, signed by the same developer, is installed." |
 | `N_OLDER_BACKUP` | NO_LOSS | "Older backup of {what}: a newer backup ({newer}) exists and was checked to be complete." |
@@ -821,10 +865,12 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
 
 | Id | Rule | Block code | Test (phase) |
 |---|---|---|---|
-| H1 | A DELETE/QUARANTINE at SAFE or NO_LOSS needs regenerability (S_ rules, structural evidence) or a VERIFIED interchangeable copy (G1) that is present, readable, kept, and not itself in the plan; at any tier, never all members of an exact group | `H_LAST_VERIFIED_COPY` | P4 unit + P5 property test (random graphs) |
+| H1 | A DELETE/QUARANTINE at SAFE or NO_LOSS needs regenerability (S_ rules, structural evidence) or a VERIFIED interchangeable copy (G1, G2) that is present, readable, kept, and not itself in the plan; at any tier, never all members of an exact group | `H_LAST_VERIFIED_COPY` | P4 unit + P5 property test (random graphs) |
 | H2 | VISUALLY_SIMILAR / SEMANTICALLY_SIMILAR / EDITED_FROM / COMPRESSED_FROM / VERSION_OF never justify SAFE or NO_LOSS | `H_SIMILAR_NOT_IDENTICAL` | P3/P5 |
 | H3 | A category/classification is never the only non-size evidence of a DELETE; it can never move a file into SAFE/NO_LOSS; it may raise protection | `H_CLASSIFICATION_ONLY` | P5 (classifier stub returning "meme 0.99" for every file) |
 | H4 | Unknown features never lower U, L or I; a file whose content features are unknown is never SAFE/NO_LOSS unless the rule is purely structural (S_ location rules) | `H_UNKNOWN_FEATURES` | P2 (HEIC corpus), P4 |
+| H4b | Integrity verdicts (`TRUNCATED`, `CORRUPT`, `ENCRYPTED`, archive `LIMIT`/`CORRUPT`) come from heuristic probes and never lower U or L, never raise disposability and never justify any tier below REVIEW; they may only lower confidence, route to REVIEW (`R_UNREADABLE`, `R_ENCRYPTED`, `R_ARCHIVE_UNSAFE`) and deny recoverability (REVIEW_1 F-M8) | `H_UNKNOWN_FEATURES` | P2 fixtures (SEF trailer JPEG), P4 |
+| H10 | Age, size and "not opened" (no reliable atime) are never the only non-structural evidence of a DELETE and never move a file into SAFE/NO_LOSS (spec 2.2) | `H_CLASSIFICATION_ONLY` | P5 |
 | H5 | No destructive action without `APPROVED`; there is no API that approves on the user's behalf (only `ApprovalService.approve(recId, UserToken)`, Phase 9) | `H_NOT_APPROVED` | P9 |
 | H6 | `Protection != NONE` → only KEEP | — | P4 |
 | H7 | Aggressive mode only changes `PresentationPolicy` thresholds (what YOUR_CALL/REVIEW items are shown); `HardRules` output is identical in both modes | — | P5: run both modes, compare blocks |
@@ -836,10 +882,14 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
 ## 8. Phase-3–5 algorithm outline (binding interfaces; detail in their phase plans)
 
 * **Exact duplicates (P3):** group by `sha256` (Phase 2 hashes); zero-byte files never grouped; edge
-  `EXACT_DUPLICATE` VERIFIED when both full hashes are current. Keeper selection order: protected member →
+  `EXACT_DUPLICATE` VERIFIED when both full hashes are current **and G2 holds** (records with equal `physicalKey`
+  are merged as aliases, not grouped). Keeper selection order: protected member →
   canonical location (`area` order of `core.UnitBuilder`'s `prio`: camera, screenshot, document, music, movies,
-  pictures, download, wa_doc, wa_image, wa_video, telegram, wa_sent, wa_sent_video) → earliest `createdAt`
-  → shortest path → smallest fileId.
+  pictures, download, wa_doc, wa_image, wa_video, telegram_media (classic's list says `telegram`, which
+  `Classifier` never returns), wa_sent, wa_sent_video) → earliest `createdAt` → shortest path → smallest fileId.
+* **Duplicate installers (P3, spec 5.6):** besides byte-identical APKs, group APKs by `(packageName, versionCode,
+  signer set)`; members of such a group that are not byte-identical are `VERSION_OF`/`EXACT_DUPLICATE`-candidates
+  only via SHA-256 — same package+version alone never makes them interchangeable.
 * **Near duplicates (P3):** candidates by phash LSH (4 bands × 16 bits), confirm with Hamming ≤ `T_near`,
   aspect ratio within 2%, then structural check (downscaled SSIM ≥ `T_ssim` via `MediaDecoder` luma; T6).
   `T_near` and `T_ssim` calibrated on the dataset by `tools/v2eval/calibrate.py` (Phase 3), starting from
@@ -849,7 +899,8 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
   → `VISUALLY_SIMILAR`.
 * **Archives and backups (P3):** archive entries are nodes `fileId!entryPath`; `CONTAINED_IN` edges from
   listings; a file is `BACKED_UP_BY` an entry when name and size match (POSSIBLE), CRC32 matches the
-  file's CRC32 (CRC32_MATCH), and VERIFIED only after T6 inflates the entry and compares SHA-256.
+  file's CRC32 (CRC32_MATCH), and VERIFIED only after T6 inflates the entry and compares SHA-256. The file's
+  CRC32/SHA-256 exist because Phase 2 puts archive-entry sizes into the size groups it hashes (PHASE_2 §3.4).
   Corrupt/truncated archives (`integrity != OK`) yield `state = CORRUPT` and never support recoverability
   (scenario 10).
 * **Risk (P4):** `ExpectedLoss(delete) = U90.mid × L × (1 − Rv)` where `Rv` = 1.0 VERIFIED_BACKUP / REGENERABLE,
@@ -859,7 +910,10 @@ blocking codes; it has **no mode parameter** (rule H7). Every recommendation pas
 * **Planner (P5):** one action per file; group savings counted once (members minus keeper); priority order of
   spec 10.3; within the lowest feasible tier, greedy by benefit/expected-loss then prune (the classic
   tiered-greedy-prune approach, re-implemented on v2 types); never includes REVIEW/PROTECTED; reports
-  achievable bytes when the target is unreachable (`PL_TARGET_UNREACHABLE`).
+  achievable bytes when the target is unreachable (`PL_TARGET_UNREACHABLE`). Before a file enters a destructive
+  recommendation the planner makes sure it has a current full SHA-256 (hash on demand, `reason = "PLAN"`), stored in
+  the recommendation's evidence for V3. App subjects (§2.11) enter at priority 1 (cache) and as YOUR_CALL/NO_LOSS app
+  actions; their bytes come from `InstalledApp` and are never double counted with files.
 
 ---
 
@@ -877,7 +931,8 @@ java -cp <classes> com.storageplanner.v2test.V2Cli scan <root> --out <result.jso
      [--restricted <prefix>]...   simulate OS-restricted prefixes (default: Android/data, Android/obb)
      [--exclude <relpath>]...     not scanned (e.g. manifest.json); reported in coverage as EXCLUDED_BY_USER
      [--mode standard|aggressive] [--target-bytes N|max]
-     [--halt-after-commits N]     test hook: Runtime.halt(137) after N commits (kill simulation)
+     [--snapshot-every-ms N]      store snapshot interval (0 = every commit is durable; tests use 0)
+     [--halt-after-commits N]     test hook: Runtime.halt(137) after N durable snapshot writes (kill simulation)
      [--pretty]
 ```
 
@@ -959,12 +1014,12 @@ written to `--out` for the next run's `--baseline`.
 | Phase | Packages | Deliverables | Measurable exit criteria |
 |---|---|---|---|
 | 1 Storage discovery & capabilities | `v2`, `v2.model` (P1 subset), `v2.util`, `v2.device` (StorageAccess, Clock, ResourceMonitor, BlobStore, ScanControl, V2Device), `v2.store`, `v2.discovery`, `v2.pipeline` (DISCOVER only); jvmtest device impls + tests; `V2Cli scan` (discovery + coverage); `evaluate.py` (coverage metrics); `tools/v2test.sh`; CI step | see PHASE_1.md | all P1 tests pass; `ForbiddenApiTest` passes; dataset: 100% manifest files found with equal sizes; ids identical across two scans; resume-after-halt test gives a store equal to an uninterrupted scan; incremental scan after `mutations.json` reports exactly the added/changed/removed set |
-| 2 Metadata & incremental scanner | `v2.features`, `v2.device` (MediaDecoder, InstalledApps), pipeline T1–T3 | see PHASE_2.md | type accuracy ≥ 0.99; SHA-256 (with `--hash all`) equals manifest for 100%; every HEIC in the Drive corpus: dims known (ispe), pixel features unknown, status not `UNREADABLE`; second incremental run re-extracts 0 files; encrypted PDFs `encrypted=TRUE`; archive bomb/traversal fixtures flagged; ≥ 300 files/s tier 1 on JVM dataset |
+| 2 Metadata & incremental scanner | `v2.features`, `v2.device` (MediaDecoder, InstalledApps incl. per-app storage/usage fields of §3.3), pipeline T1–T3 | see PHASE_2.md | type accuracy ≥ 0.99; SHA-256 (with `--hash all`) equals manifest for 100%; every HEIC in the Drive corpus: dims known (ispe), pixel features unknown, status not `UNREADABLE`; second incremental run re-extracts 0 files; encrypted PDFs `encrypted=TRUE`; archive bomb/traversal fixtures flagged; ≥ 300 files/s tier 1 on JVM dataset |
 | 3 Exact duplicates & relationship graph | `v2.graph`, `v2.content` (interfaces + deterministic wrappers), T6 SSIM; `tools/v2eval/calibrate.py` | relationships + groups in V2Cli JSON | exact dup P = 1.000, R ≥ 0.99; near-dup P ≥ 0.95, R ≥ 0.80 at calibrated thresholds; backup verification: 0 false VERIFIED on corrupted-backup scenario |
 | 4 Utility, recoverability, expected loss | `v2.risk` | `assessment` in JSON | DDRR = 0 (with a provisional tiering of assessments); every must_never_delete file has `loss ≥ 0.5` or `protection != NONE` or `recoverability ∈ {VERIFIED_BACKUP}`; unknown-input property tests pass |
-| 5 Planner | `v2.plan` | recommendations, plan, reason sentences | gates in §10 (DDRR 0 in both modes, precision, recall, recovery error, scenarios 1–11); 100% recommendations have ≥ 1 catalogued reason with all params filled |
-| A App integration | `app.v2`, small edits in `SetupScreen`, `AnalysisRunner`, `MainActivity` (restore path), `Session.replan` | Classic / v2 switch | CI build + audit pass; `V2AdapterTest` (JVM) proves the 5 tiers map to distinguishable Options and REVIEW/PROTECTED are never planned; classic path byte-identical (classic jvmtests unchanged) |
-| 6 OCR, document intelligence, adaptive video | `v2.content` (TextReader, document parser, video sampler), T4, T6 | categories for docs/screenshots | measured gain on dataset scenarios 2, 8, 11 vs Phase 5 baseline with no regression in DDRR/precision |
+| 5 Planner | `v2.plan` | recommendations, plan, reason sentences; **app caches and idle apps** as app subjects (`cache:<pkg>` → `CLEAR_APP_CACHE`/`S_APP_CACHE` at plan priority 1 "rebuildable data"; `app:<pkg>` → `ARCHIVE_APP`/`N_APP_ARCHIVE` on API 35+ or `UNINSTALL_APP`/`Y_IDLE_APP`), from `InstalledApps` (§3.3, §2.11); recommendation expiry on change (F1); hash-on-demand for destructive candidates | gates in §10 (DDRR 0 in both modes, precision, recall, recovery error, scenarios 1–11); 100% recommendations have ≥ 1 catalogued reason with all params filled; with the dataset's `installed_apps.json`, v2's SAFE+NO_LOSS bytes ≥ classic's R0+R1 bytes on the same input (no regression from ignoring caches) |
+| A App integration | `app.v2`, small edits in `SetupScreen`, `AnalysisRunner`, `MainActivity` (restore path), `Session.replan` | Classic / v2 switch; app-subject recommendations adapted to `Unit.forCache`/`Unit.forApp` with the classic action names `clear_cache`/`archive_app`/`uninstall_app` | CI build + audit pass; `V2AdapterTest` (JVM) proves the 5 tiers map to distinguishable Options and REVIEW/PROTECTED are never planned; classic path byte-identical (classic jvmtests unchanged) |
+| 6 OCR, document intelligence, adaptive video, audio | `v2.content` (TextReader, document parser, video sampler), T4, T6; face count via `core.Faces`; OOXML/ODF metadata (docProps) and OLE2/OOXML encryption detection; audio silence %, speech/music activity and fingerprint behind a device `AudioDecoder` interface (spec 5.5; "no speech/music" is never evidence of disposability, H4) | categories for docs/screenshots | measured gain on dataset scenarios 2, 8, 11 vs Phase 5 baseline with no regression in DDRR/precision |
 | 7 LiteRT & embeddings (optional) | `v2.content.models` | model manager; provider impls | ships only if a model improves a §10 metric by a pre-registered margin on the dataset *and* the private corpus; otherwise documented as not adopted |
 | 8 Personal learning | `v2.learn` | feedback capture, preference model, explanations | property test: learning never changes `HardRules` output or moves a file into SAFE/NO_LOSS; labels kept distinct; reset works |
 | 9 Execution | `v2.exec`, jvmtest `TempDirFileOps` | journal, quarantine/restore, compression verify, `V2Cli exec-sim` | scenarios 12–15 PASS; kill at every journal phase recovers; undo success 100% in tests; no UI wiring without owner sign-off |
@@ -999,8 +1054,13 @@ written to `--out` for the next run's `--baseline`.
 1. **Switch.** `SetupScreen` gets a two-option control "Algorithm: Classic / v2" stored as
    `SharedPreferences("analysis").getString("algorithm", "classic")`; helpers
    `AnalysisRunner.algorithm(Context)` / `setAlgorithm(Context, String)` next to `sortPictures`.
-2. **Branch.** `AnalysisRunner.run`: `if ("v2".equals(algorithm(app))) return V2Runner.run(app, targetGb, pr);`
-   before any classic code. `MainActivity` restore path (currently `new UnitBuilder(s.result, …)` at the
+2. **Branch.** `AnalysisRunner.run(Context app, double targetGb, boolean measure, Scanner.Progress pr)` (4 parameters):
+   `if ("v2".equals(algorithm(app))) return V2Runner.run(app, targetGb, measure, pr);` before any classic code.
+   Background execution (spec 14.3): v2 runs inside the existing foreground `AnalysisService`; WorkManager is an
+   AndroidX library and cannot be used (no third-party code), and a `JobService` would fail the audit's
+   "exactly one service" check — periodic background scans are an owner decision for Phase 10.
+   Mode A on API 33+ needs `READ_MEDIA_*` permissions, which the audit's exact permission set forbids; until the
+   owner changes that, the Android `StorageAccess` reports Mode A only on API ≤ 32. `MainActivity` restore path (currently `new UnitBuilder(s.result, …)` at the
    `ResultFiles.load` site) branches the same way to `V2Runner.restore(app)`, which reloads the v2 store
    from `AndroidBlobStore` and re-adapts (no rescan).
 3. **Adapter** `com.storageplanner.app.v2.V2Adapter` (android-free source file, compiled into jvmtest):
@@ -1043,9 +1103,9 @@ writes entries to disk (listing and bounded in-memory inflate only).
 | # | Choice | Rejected alternative | Why |
 |---|---|---|---|
 | C1 | `PosixStorageAccess` (pure `java.nio.file`) lives in `v2.discovery`, shared by JVM and Android Mode B/D; fault injection via jvmtest decorators | JVM-only implementation in jvmtest plus a second Android copy | Same walker semantics on both platforms; java.nio.file exists from API 26; a duplicate implementation would drift. It contains no Android API, so A1 still holds. |
-| C2 | File id identity token = inode only where the volume's inode numbers are stable, frozen per volume (`identityScheme`) | Path only; path + size + mtime | Path-only lets a file replaced at the same path inherit approvals/feedback of the old one. Size/mtime would change the id on every edit, losing feedback and history. Inodes on vfat/exFAT SD cards are synthesised per mount, hence the per-volume switch. |
+| C2 | File id identity token = inode only where the volume's inode numbers are stable, frozen per volume (`identityScheme`) | Path only; path + size + mtime | Path-only lets a file replaced at the same path inherit approvals/feedback of the old one. Size/mtime would change the id on every edit, losing feedback and history. Inodes on vfat/exFAT SD cards are synthesised per mount, hence the per-volume switch. Phase A must establish `fileKeyStable` per Android volume type (FUSE on 11+, sdcardfs on 9–10) by measurement, defaulting to FALSE; a wrong TRUE only renames ids after a reboot (history lost, never wrong approvals, rule F1). |
 | C3 | 128-bit (32 hex) truncation of the SHA-256 file id and edge id | Full 64 hex | Half the memory/JSON size; collision probability for 10^7 files ≈ 10^-25. Content hashes (`sha256`) stay full length. |
-| C4 | Store = in-memory tables + JSON-lines snapshot + WAL; checkpoints written in the same WAL frame as data | Binary snapshot like `core.ResultStore`; full snapshot per checkpoint | JSON lines are inspectable and share the codec with V2Cli; WAL makes a checkpoint cost O(batch) instead of O(store). SQLite later reuses the codecs. |
+| C4 | Store = in-memory tables + one JSON-lines snapshot replaced atomically at most every `snapshotEveryMs` (adaptive, ≤ 5% of scan time) and at stage ends (changed by REVIEW_1 F-B3) | WAL + snapshot (the draft); binary snapshot like `core.ResultStore` | Recovery needs a consistent state, not every batch; stages resume idempotently from any committed state. Removes seq/CRC/torn-tail/compaction logic. Cost: a kill loses ≤ one interval of work. JSON lines share the codec with V2Cli; SQLite (Phase 10) reuses the codecs. |
 | C5 | Added a 16th table `directories` | Derive directory state from files | "Removed" vs "unverifiable" needs per-directory listing status of this scan; without it a permission loss would look like mass deletion. |
 | C6 | Sequential stages (discover → T1 → T2 → T3), each resumable from store state | Fully streaming pipeline (extract while walking) | Tier 2 needs global size groups; sequential stages make resume trivially correct. Discovery is a small part of the cost. |
 | C7 | Incremental scan = full listing + stat of every entry, reuse of extraction by fingerprint | Skip listing of directories whose mtime is unchanged | Directory mtime does not change when a file inside is rewritten in place; skipping would miss changes (scenario 12 risk). Listing is cheap relative to extraction. |

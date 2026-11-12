@@ -33,13 +33,13 @@
   "hard_negative_group": "files sharing a group id look alike (same template/scene/app) but are DIFFERENT content and must not be grouped as duplicates"
  },
  "summary": {
-  "files": 2364,
-  "total_bytes": 713251259,
-  "real": 1734,
-  "synthetic": 630,
+  "files": 2409,
+  "total_bytes": 716024197,
+  "real": 1773,
+  "synthetic": 636,
   "must_never_delete": 178,
   "by_category": {
-   "advertisement": 30,
+   "advertisement": 35,
    "apk": 11,
    "app_data": 1,
    "archive": 7,
@@ -56,7 +56,7 @@
    "personal_photo": 249,
    "pets": 46,
    "photo_of_screen": 13,
-   "product": 25,
+   "product": 65,
    "qr_code": 72,
    "receipt": 56,
    "screenshot": 201,
@@ -85,12 +85,12 @@
    "S15": 11
   },
   "by_tier": {
-   "KEEP": 1463,
+   "KEEP": 1503,
    "NO_LOSS": 6,
    "PROTECTED": 104,
    "REVIEW": 99,
    "SAFE": 334,
-   "YOUR_CALL": 358
+   "YOUR_CALL": 363
   },
   "by_relationship": {
    "BACKED_UP_BY": 7,
@@ -4389,6 +4389,81 @@
    "sha256": "3ed289e7234229e96ff26a067f3017c1337af810bd94bc40672aea31028da767"
   },
   {
+   "path": "Download/aquaclear_aquarium_cleaning_kit.webp",
+   "category": "product",
+   "subcategory": null,
+   "scenarios": [],
+   "relationships": [],
+   "importance": "low",
+   "expected_tier": "KEEP",
+   "acceptable_tiers": [
+    "YOUR_CALL",
+    "KEEP"
+   ],
+   "must_never_delete": false,
+   "synthetic": false,
+   "source": {
+    "id": "cymbal_pets_aquaclear_aquarium_cleaning_kit",
+    "url": "https://storage.googleapis.com/cloud-samples-data/bigquery/tutorials/cymbal-pets/images/aquaclear-aquarium-cleaning-kit.png",
+    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
+    "transform": "converted to webp, 1600px"
+   },
+   "mtime": 1724247370,
+   "mtime_iso": "2024-08-21T19:06:10+05:30",
+   "size": 70138,
+   "sha256": "fbb8cde521b8b44bb0c65ce6cba86a43d7bfb1d0a4b4a53efc972325577e9cf3"
+  },
+  {
+   "path": "Download/aquaclear_aquarium_filter_media.webp",
+   "category": "product",
+   "subcategory": null,
+   "scenarios": [],
+   "relationships": [],
+   "importance": "low",
+   "expected_tier": "KEEP",
+   "acceptable_tiers": [
+    "YOUR_CALL",
+    "KEEP"
+   ],
+   "must_never_delete": false,
+   "synthetic": false,
+   "source": {
+    "id": "cymbal_pets_aquaclear_aquarium_filter_media",
+    "url": "https://storage.googleapis.com/cloud-samples-data/bigquery/tutorials/cymbal-pets/images/aquaclear-aquarium-filter-media.png",
+    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
+    "transform": "converted to webp, 1600px"
+   },
+   "mtime": 1614659913,
+   "mtime_iso": "2021-03-02T10:08:33+05:30",
+   "size": 95606,
+   "sha256": "420dfb24192a0ab33c70990de37c3376e11630e3b00597eb0b85efdd1e54ba4b"
+  },
+  {
+   "path": "Download/aquaclear_aquarium_thermometer.webp",
+   "category": "product",
+   "subcategory": null,
+   "scenarios": [],
+   "relationships": [],
+   "importance": "low",
+   "expected_tier": "KEEP",
+   "acceptable_tiers": [
+    "YOUR_CALL",
+    "KEEP"
+   ],
+   "must_never_delete": false,
+   "synthetic": false,
+   "source": {
+    "id": "cymbal_pets_aquaclear_aquarium_thermometer",
+    "url": "https://storage.googleapis.com/cloud-samples-data/bigquery/tutorials/cymbal-pets/images/aquaclear-aquarium-thermometer.png",
+    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
+    "transform": "converted to webp, 1600px"
+   },
+   "mtime": 1712119048,
+   "mtime_iso": "2024-04-03T10:07:28+05:30",
+   "size": 33812,
+   "sha256": "40762ca333718239042d515273892a60ac9170c788224f6f9a03bc123d4f3073"
+  },
+  {
    "path": "Download/com.specimen.bank_v3.1.0.apk",
    "category": "apk",
    "subcategory": null,
@@ -4665,8 +4740,8 @@
    },
    "mtime": 1626594765,
    "mtime_iso": "2021-07-18T13:22:45+05:30",
-   "size": 181415,
-   "sha256": "d34d0f291413345437de1dd57a288fe9d2184ae60ecde42e7c088a259d3709de"
+   "size": 114664,
+   "sha256": "de07fc98f6fc64fac58e050f74052062e5da3c1131f2f77465964852ad0ba158"
   },
   {
    "path": "Download/offer_16.jpg",
@@ -4688,8 +4763,8 @@
    },
    "mtime": 1713411358,
    "mtime_iso": "2024-04-18T09:05:58+05:30",
-   "size": 107350,
-   "sha256": "d2d4e4c80e2a1e38a1b91f6afd4de1a02aa8f402f880f4d398792606181464f0"
+   "size": 108830,
+   "sha256": "fa8c9fe320f0fda0f2ca0d7c0237435bad48c46b6ab454c2ac95993a941d8e7b"
   },
   {
    "path": "Download/offer_22.jpg",
@@ -4711,8 +4786,8 @@
    },
    "mtime": 1697119291,
    "mtime_iso": "2023-10-12T19:31:31+05:30",
-   "size": 122543,
-   "sha256": "c7703dd661e50730f0483ab865e4f876e1bdda5ce6eb628f630e4ab533c21a9c"
+   "size": 105718,
+   "sha256": "9827837dd17f6a80ab0fb1daef34631de9ae9be28d9c15205d0e00c8f2382cf1"
   },
   {
    "path": "Download/player-9.0.0-beta.apk",
@@ -5789,7 +5864,7 @@
    "sha256": "d486549bb45950db2d849c17315ea15f7ea880a12261eb78937cb463e31c2900"
   },
   {
-   "path": "Pictures/Screenshots/.trashed-1735000000-Screenshot_20241208-145651_Feedgram.jpg",
+   "path": "Pictures/Screenshots/.trashed-1735000000-Screenshot_20241128-220031_Messages.png",
    "category": "screenshot",
    "subcategory": "trashed",
    "scenarios": [
@@ -5798,7 +5873,7 @@
    "relationships": [
     {
      "type": "EXACT_DUPLICATE",
-     "target": "Pictures/Screenshots/Screenshot_20241208-145651_Feedgram.jpg"
+     "target": "Pictures/Screenshots/Screenshot_20241128-220031_Messages.png"
     }
    ],
    "importance": "disposable",
@@ -5816,8 +5891,8 @@
    "mtime": 1681530222,
    "mtime_iso": "2023-04-15T09:13:42+05:30",
    "notes": "Android 11+ trash entry",
-   "size": 226646,
-   "sha256": "f3807c121a00683ed3c80b4509a2006603a475768b6a6229fa7e84b55ee5d1d8"
+   "size": 111883,
+   "sha256": "2600a4468fe3e7380855eaf22355cd16fb8603423ebf9a6c2d665e3339050a84"
   },
   {
    "path": "Pictures/Screenshots/Screenshot_20210204-084544_Messages.png",
@@ -6851,7 +6926,7 @@
    "sha256": "78785e28f9452656ca8af92d72373fc40d2ebd8c4bea790c0abce1ca55bb22b8"
   },
   {
-   "path": "WhatsApp/Media/.Statuses/76448575e92c9287d261a8ac170641e3.jpg",
+   "path": "WhatsApp/Media/.Statuses/9a9f00424ba684558a5813ae02b4a84a.jpg",
    "category": "temp_cache",
    "subcategory": "status_cache",
    "scenarios": [
@@ -6860,7 +6935,7 @@
    "relationships": [
     {
      "type": "EXACT_DUPLICATE",
-     "target": "WhatsApp/Media/WhatsApp Images/IMG-20240102-WA0000.jpg"
+     "target": "WhatsApp/Media/WhatsApp Images/IMG-20210311-WA0000.jpg"
     }
    ],
    "importance": "disposable",
@@ -6871,18 +6946,18 @@
    "must_never_delete": false,
    "synthetic": false,
    "source": {
-    "id": "tf_flowers:roses/21346056089_e6f8074e5f_m.jpg",
+    "id": "tf_flowers:roses/272481307_1eb47ba3e0_n.jpg",
     "url": "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz",
-    "licence": "CC BY 2.0 — CC-BY by stanze - https://www.flickr.com/photos/stanzebla/21346056089/",
+    "licence": "CC BY 2.0 — CC-BY by Eddy Van 3000 - https://www.flickr.com/photos/e3000/272481307/",
     "transform": "verbatim"
    },
-   "mtime": 1645803683,
-   "mtime_iso": "2022-02-25T21:11:23+05:30",
-   "size": 19953,
-   "sha256": "cb2228ac98291c40a8b42ee73628aece2179900efff810164be7bb9906bcef5a"
+   "mtime": 1672759401,
+   "mtime_iso": "2023-01-03T20:53:21+05:30",
+   "size": 38604,
+   "sha256": "fcc6ecf37e24c30e5c8455f3af612506d2d64e11712e36576ac56341fd356588"
   },
   {
-   "path": "WhatsApp/Media/.Statuses/a7862d03b5cb047faed7a90ebe30623c.jpg",
+   "path": "WhatsApp/Media/.Statuses/bbde18f804d865cf4554a4d5251230e9.jpg",
    "category": "temp_cache",
    "subcategory": "status_cache",
    "scenarios": [
@@ -6891,38 +6966,7 @@
    "relationships": [
     {
      "type": "EXACT_DUPLICATE",
-     "target": "WhatsApp/Media/WhatsApp Images/IMG-20230220-WA0000.jpg"
-    }
-   ],
-   "importance": "disposable",
-   "expected_tier": "SAFE",
-   "acceptable_tiers": [
-    "SAFE"
-   ],
-   "must_never_delete": false,
-   "synthetic": false,
-   "source": {
-    "id": "veg_pumpkin_1",
-    "url": "https://storage.googleapis.com/cloud-samples-data/ai-platform-unified/datasets/images/vegetable_images/train/Pumpkin/images/0038.jpg",
-    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
-    "transform": "re-encoded q80"
-   },
-   "mtime": 1718967966,
-   "mtime_iso": "2024-06-21T16:36:06+05:30",
-   "size": 14304,
-   "sha256": "fb8dcda6e5f3f5a25b722c42ca104f526684f0d7a80b65752fa78c30bddd86d6"
-  },
-  {
-   "path": "WhatsApp/Media/.Statuses/d5591952da4094fe0d030737935677be.jpg",
-   "category": "temp_cache",
-   "subcategory": "status_cache",
-   "scenarios": [
-    "S03"
-   ],
-   "relationships": [
-    {
-     "type": "EXACT_DUPLICATE",
-     "target": "WhatsApp/Media/WhatsApp Images/IMG-20211230-WA0000.jpg"
+     "target": "WhatsApp/Media/WhatsApp Images/IMG-20220807-WA0001.jpg"
     }
    ],
    "importance": "disposable",
@@ -6934,12 +6978,44 @@
    "synthetic": true,
    "source": {
     "id": "synthetic",
-    "licence": "generated by tools/v2dataset (CC0); fonts: Noto/Anton (OFL)"
+    "licence": "generated by tools/v2dataset (CC0); fonts: Noto/Anton (OFL)",
+    "base": "DCIM/Camera/IMG_20210117_122941.jpg"
    },
-   "mtime": 1615006499,
-   "mtime_iso": "2021-03-06T10:24:59+05:30",
-   "size": 77877,
-   "sha256": "0e98efe7655e23fbeac35e68863e4c7045ea6d8b8bf97ca207be3846a2967ba7"
+   "mtime": 1621417367,
+   "mtime_iso": "2021-05-19T15:12:47+05:30",
+   "size": 144730,
+   "sha256": "4e1ee4792fcee0ecccd362b6b8afdb3ff5e91c5a1e84c07875c3ae8e2950619b"
+  },
+  {
+   "path": "WhatsApp/Media/.Statuses/faefb16191a5d53a95f02605cf1eadbb.jpg",
+   "category": "temp_cache",
+   "subcategory": "status_cache",
+   "scenarios": [
+    "S03"
+   ],
+   "relationships": [
+    {
+     "type": "EXACT_DUPLICATE",
+     "target": "WhatsApp/Media/WhatsApp Images/IMG-20230523-WA0000.jpg"
+    }
+   ],
+   "importance": "disposable",
+   "expected_tier": "SAFE",
+   "acceptable_tiers": [
+    "SAFE"
+   ],
+   "must_never_delete": false,
+   "synthetic": false,
+   "source": {
+    "id": "tf_flowers:sunflowers/4745980581_a0b7585258_n.jpg",
+    "url": "https://storage.googleapis.com/download.tensorflow.org/example_images/flower_photos.tgz",
+    "licence": "CC BY 2.0 — CC-BY by Maggie McCain - https://www.flickr.com/photos/vamcmag/4745980581/",
+    "transform": "verbatim"
+   },
+   "mtime": 1712115907,
+   "mtime_iso": "2024-04-03T09:15:07+05:30",
+   "size": 61775,
+   "sha256": "9fb936a6171be44c541e221e51babffa6492b84daa4a8b40e9a0c7ebfd8555af"
   },
   {
    "path": "WhatsApp/Media/WhatsApp Documents/Invoice_March_1.pdf",
@@ -7085,57 +7161,7 @@
    "sha256": "7fa243f273211c3cc418ff857dfac6d27d732879fabbe3546ce5cd1ba30fa249"
   },
   {
-   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210207-WA0002.jpg",
-   "category": "product",
-   "subcategory": null,
-   "scenarios": [],
-   "relationships": [],
-   "importance": "low",
-   "expected_tier": "KEEP",
-   "acceptable_tiers": [
-    "YOUR_CALL",
-    "KEEP"
-   ],
-   "must_never_delete": false,
-   "synthetic": false,
-   "source": {
-    "id": "genai_shoes",
-    "url": "https://storage.googleapis.com/cloud-samples-data/generative-ai/image/shoes.jpg",
-    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
-    "transform": "whatsapp recompression"
-   },
-   "mtime": 1612714811,
-   "mtime_iso": "2021-02-07T21:50:11+05:30",
-   "size": 77984,
-   "sha256": "01bf9180545bc0f4db70ac1a9c19a2434bd464641c4333eb370a4e5c3f2095fb"
-  },
-  {
-   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210326-WA0000.jpg",
-   "category": "product",
-   "subcategory": null,
-   "scenarios": [],
-   "relationships": [],
-   "importance": "low",
-   "expected_tier": "KEEP",
-   "acceptable_tiers": [
-    "YOUR_CALL",
-    "KEEP"
-   ],
-   "must_never_delete": false,
-   "synthetic": false,
-   "source": {
-    "id": "genai_black_bag",
-    "url": "https://storage.googleapis.com/cloud-samples-data/generative-ai/image/black-bag.jpg",
-    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
-    "transform": "whatsapp recompression"
-   },
-   "mtime": 1616759336,
-   "mtime_iso": "2021-03-26T17:18:56+05:30",
-   "size": 69016,
-   "sha256": "62836189a7ab1a772d25492435084c9734be26cc39b162e8eaf6decb46be3ed4"
-  },
-  {
-   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210507-WA0000.jpg",
+   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210415-WA0001.jpg",
    "category": "meme_greeting",
    "subcategory": "forwarded_duplicate",
    "scenarios": [
@@ -7144,7 +7170,7 @@
    "relationships": [
     {
      "type": "EXACT_DUPLICATE",
-     "target": "WhatsApp/Media/WhatsApp Images/IMG-20210506-WA0000.jpg"
+     "target": "WhatsApp/Media/WhatsApp Images/IMG-20210414-WA0000.jpg"
     }
    ],
    "importance": "disposable",
@@ -7158,60 +7184,41 @@
     "id": "synthetic",
     "licence": "generated by tools/v2dataset (CC0); fonts: Noto/Anton (OFL)"
    },
-   "mtime": 1620360775,
-   "mtime_iso": "2021-05-07T09:42:55+05:30",
-   "size": 66314,
-   "sha256": "3277a6469adcdb93091efc43cca34d05bf6d7831c4500e613501f296233f9607"
+   "mtime": 1618470612,
+   "mtime_iso": "2021-04-15T12:40:12+05:30",
+   "size": 84838,
+   "sha256": "84c39c09b701b85fcf4742e6a85b84162e0d1937c0d929ed7aee7dba819009a9"
   },
   {
-   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210526-WA0000.jpg",
-   "category": "product",
-   "subcategory": null,
-   "scenarios": [],
-   "relationships": [],
-   "importance": "low",
-   "expected_tier": "KEEP",
+   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210521-WA0001.jpg",
+   "category": "meme_greeting",
+   "subcategory": "forwarded_recompressed",
+   "scenarios": [
+    "S13"
+   ],
+   "relationships": [
+    {
+     "type": "COMPRESSED_FROM",
+     "target": "WhatsApp/Media/WhatsApp Images/IMG-20210521-WA0000.jpg",
+     "transform": "re-forward: 800px q60"
+    }
+   ],
+   "importance": "disposable",
+   "expected_tier": "SAFE",
    "acceptable_tiers": [
-    "YOUR_CALL",
-    "KEEP"
+    "SAFE",
+    "YOUR_CALL"
    ],
    "must_never_delete": false,
-   "synthetic": false,
+   "synthetic": true,
    "source": {
-    "id": "genai_pixel_tablet",
-    "url": "https://storage.googleapis.com/cloud-samples-data/generative-ai/image/pixel-tablet.jpg",
-    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
-    "transform": "whatsapp recompression"
+    "id": "synthetic",
+    "licence": "generated by tools/v2dataset (CC0); fonts: Noto/Anton (OFL)"
    },
-   "mtime": 1622049150,
-   "mtime_iso": "2021-05-26T22:42:30+05:30",
-   "size": 93386,
-   "sha256": "8f7b63187788587b1f9468b14b8937dd354bfa77c5bfda515ef93a4b4ce18ec9"
-  },
-  {
-   "path": "WhatsApp/Media/WhatsApp Images/IMG-20210718-WA0000.jpg",
-   "category": "product",
-   "subcategory": null,
-   "scenarios": [],
-   "relationships": [],
-   "importance": "low",
-   "expected_tier": "KEEP",
-   "acceptable_tiers": [
-    "YOUR_CALL",
-    "KEEP"
-   ],
-   "must_never_delete": false,
-   "synthetic": false,
-   "source": {
-    "id": "genai_luggage",
-    "url": "https://storage.googleapis.com/cloud-samples-data/generative-ai/image/luggage.png",
-    "licence": "Google Cloud public sample data bucket gs://cloud-samples-data, published by Google for use with Google Cloud samples/tutorials (samples repos are Apache-2.0); evaluation use only, verify before redistribution",
-    "transform": "whatsapp recompression"
-   },
-   "mtime": 1626580667,
-   "mtime_iso": "2021-07-18T09:27:47+05:30",
-   "size": 194793,
-   "sha256": "5757647499b7352e24fd79793c934f12971dbd1985d1f715ec8ada981148cc54"
+   "mtime": 1621591863,
+   "mtime_iso": "2021-05-21T15:41:03+05:30",
+   "size": 30430,
+   "sha256": "ec10f26fe6447340cd9f409791ebd2b7df54e75d11c414ef5f3509c62fa7146e"
   },
   {
    "path": "WhatsApp/Media/WhatsApp Images/IMG-20211021-WA0000.jpg",
@@ -9234,5 +9241,5 @@
    "sha256": "cc59704941a8328c09720feaabd6f0455d93a0caffe225cada10dbe7da9eccb8"
   }
  ],
- "note": "trimmed sample: 317 of 2364 entries"
+ "note": "trimmed sample: 317 of 2409 entries"
 }

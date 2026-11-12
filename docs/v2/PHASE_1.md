@@ -11,10 +11,11 @@ Implements spec §4 (4.1–4.3) on the architecture in `ARCHITECTURE.md` (read t
 | `v2/model/` | `Unknown`, `Tri`, `Record`, `Fingerprint`, `AccessMode`, `AccessGrant`, `VolumeKind`, `Volume`, `FileRecord`, `Presence`, `ChangeState`, `Protection`, `Recoverability`, `ExtractionStatus`, `DirRecord`, `DirStatus`, `ScanSession`, `ScanKind`, `ScanState`, `ScanCheckpoint`, `ScanEvent`, `InaccessibleLocation`, `InaccessReason`, `CoverageReport` (+ `VolumeCoverage`, `AreaCoverage`). Records of later phases (`FeatureRecord`, `HashRecord`, `Relationship`, ...) are created now as empty-bodied classes with their key field only, so the store schema is complete from day one. |
 | `v2/util/` | `Json`, `JsonWriter`, `JsonException`, `Hex`, `Hashing`, `Text` |
 | `v2/device/` | `StorageAccess`, `VolumeInfo`, `DirListing`, `DirEntry`, `EntryKind`, `FileStat`, `IoStatus`, `ReadableFile`, `Clock`, `ResourceMonitor`, `ResourceState`, `Thermal`, `DeviceProfile`, `BlobStore`, `ScanControl`, `V2Device` (Phase 2 adds `MediaDecoder`, `InstalledApps`; Phase 9 `FileOps`) |
-| `v2/store/` | `V2Store`, `Table`, `FileTable`, `DirTable`, `RelationshipTable`, `RecommendationTable`, `JournalTable`, `StoreException`, `MemoryStore`, `Codecs`, `Wal`, `Snapshot` |
+| `v2/store/` | `V2Store`, `Table`, `FileTable`, `DirTable`, `RelationshipTable`, `RecommendationTable`, `JournalTable`, `StoreException`, `MemoryStore`, `Codecs`, `Snapshot` |
+| `v2/stage/` | `Stage`, `StageContext`, `StageOutcome`, `PipelineConfig`, `Throttle`, `Budget`, `CommitHook` (ARCHITECTURE §1: shared stage contract, avoids a discovery ↔ pipeline cycle) |
 | `v2/discovery/` | `PathNormalizer`, `FileIds`, `VolumeRegistry`, `CapabilityRegistry`, `WalkLimits`, `Walker`, `DirectoryReconciler`, `FileUpsert`, `DiscoveryEngine`, `CoverageBuilder`, `PosixStorageAccess`, `MediaFamilies` |
-| `v2/pipeline/` | `Stage`, `StageContext`, `StageOutcome`, `PipelineConfig`, `Pipeline`, `PipelineResult`, `Throttle`, `Budget`, `CommitHook` |
-| `jvmtest/com/storageplanner/v2test/` | `T`, `AllV2Tests`, `TempTree`, `FixedClock`, `JvmResourceMonitor`, `DirBlobStore`, `FaultyStorageAccess`, `MediaOnlyStorageAccess`, `SimulatedKill`, `TestControl`, `JvmDevice`, `V2Cli`, and the test classes of §10 |
+| `v2/pipeline/` | `Pipeline`, `PipelineResult` |
+| `jvmtest/com/storageplanner/v2test/` | `T`, `AllV2Tests`, `TempTree`, `FixedClock`, `JvmResourceMonitor`, `DirBlobStore`, `KillingBlobStore`, `FaultyStorageAccess`, `MediaOnlyStorageAccess`, `SimulatedKill`, `TestControl`, `JvmDevice`, `V2Cli`, and the test classes of §10 |
 | `tools/v2test.sh` | compile + run (ARCHITECTURE §1) |
 | `tools/v2eval/evaluate.py` | Phase-1 metrics: discovery coverage and mutation check (§9) |
 | `tools/v2eval/apply_mutations.py` | applies `mutations.json` to a *copy* of the dataset (only if the dataset agent does not ship one) |
@@ -38,6 +39,11 @@ prefix of one volume. The walker asks `CapabilityRegistry` for the grant that co
 
 `canWrite`/`canDelete` are `FALSE` for every grant in Phases 1–8 (A8).
 
+Mode A listings are **never authoritative for absence** (REVIEW_1 F-M2): MediaStore omits files in `.nomedia`
+folders, items not yet indexed or pending, and — with Android 14 partial photo access — everything the user did not
+select. A file missing from a Mode A listing is `UNVERIFIABLE` (`D_MEDIA_ONLY_VISIBILITY`), never `REMOVED`.
+On API 33+ Mode A needs `READ_MEDIA_*`, which the app's audited permission set does not contain (ARCHITECTURE §13).
+
 ### 1.1 `CapabilityRegistry` (v2.discovery)
 
 ```java
@@ -56,8 +62,9 @@ public final class CapabilityRegistry {
 now → `active=false, revokedAt=now`), `D_GRANT_CHANGED` (any Tri or `mediaTypes` differ; detail lists the fields),
 `D_GRANT_RESTORED` (stored inactive, present again). `MediaFamilies.of(extension)` → `"image" | "video" |
 "audio" | null` using fixed lists (image: jpg jpeg png gif webp heic heif avif bmp dng; video: mp4 m4v 3gp 3g2
-mkv webm mov avi ts; audio: mp3 m4a aac ogg oga opus flac wav amr awb mid midi). `authoritativeFor` = grant
-not media-restricted, or `MediaFamilies.of(ext)` is in `grant.mediaTypes`.
+mkv webm mov avi ts; audio: mp3 m4a aac ogg oga opus flac wav amr awb mid midi). `authoritativeFor` = the best grant
+exists, is not `A_MEDIASTORE`, and has `canList == TRUE` (the `extension` parameter is kept for coverage detail only;
+`MediaFamilies` is used by `MediaOnlyStorageAccess` and coverage).
 
 ---
 
@@ -82,6 +89,7 @@ public final class ScanSession implements Record {      // key = String.format("
     public int eventsDropped;
     public java.util.Map<String, Long> counters = new java.util.TreeMap<String, Long>();
     public String pauseReason;                          // reason code, null
+    public String lastError;                            // exception class + message (≤ 200 chars) when state FAILED, null
     public java.util.List<AccessGrant> grantsAtStart;   // for D_GRANTS_CHANGED_DURING_SCAN
 }
 public final class ScanCheckpoint {
@@ -114,12 +122,14 @@ public final class VolumeRegistry {
 ```
 Algorithm:
 1. `infos = sa.volumes()`; drop infos whose `volumeId` is null/empty (event `D_VOLUME_INVALID`).
-2. Alias de-duplication: two infos whose `root` values are equal after `PosixStorageAccess.canonical(root)`
-   (or one root is inside the other) — keep the one with `kind` order PRIMARY_SHARED < SECONDARY_SHARED <
+2. Alias de-duplication: two infos whose `root` values are **equal** after `PosixStorageAccess.canonical(root)`
+   — keep the one with `kind` order PRIMARY_SHARED < SECONDARY_SHARED <
    REMOVABLE < DIRECTORY < SAF_TREE < APP_PRIVATE, then smaller id; event `D_VOLUME_ALIAS` for the dropped one.
-   (A SAF tree inside primary storage is *not* dropped: it is a different access route; the walker of the
-   primary volume skips nothing because of it, and coverage reports both. Duplicated files across the two are
-   expected and are excluded from duplicate grouping in Phase 3 by `(volume kind SAF_TREE, same canonical path)`.)
+   Nested roots are not aliases and are both kept (e.g. `getExternalFilesDir()` lies under primary's restricted
+   `Android/data`; a SAF tree may lie inside primary). A SAF tree inside a walked volume is a second route to the
+   same files: its records carry the same `physicalKey` as the primary records where it can be derived
+   (ARCHITECTURE §2.3), and Phase 3 never treats such records as copies (invariant G2, REVIEW_1 F-B1). When Mode B
+   covers the whole tree, the Android implementation should not report the SAF tree as a volume at all.
 3. For each info: load stored `Volume` by id or create one with `firstSeenAt = now`. Copy kind, label, root,
    fsUuid, total/free, caseInsensitive, restrictedPrefixes, `mounted = info.mounted`, `lastSeenAt = now`.
    `identityScheme` is set **only when null**: `"ino"` if `info.fileKeyStable == TRUE`, else `"path"`. If a later
@@ -164,7 +174,7 @@ read; only processing was cut). All others are non-authoritative.
 public final class Walker {
     public Walker(StorageAccess sa, V2Store store, Volume vol, CapabilityRegistry caps, WalkLimits lim,
                   Clock clock, ScanControl control, Throttle throttle, ScanSession session, CommitHook commit,
-                  java.util.Set<String> installedPackages);
+                  java.util.Set<String> installedPackages /* null = not known completely (no InstalledApps, or availability != FULL) */);
     /** Walks vol from session.checkpoint.frontier. Returns DONE (frontier empty), PAUSED, CANCELLED. */
     public StageOutcome walk() throws StoreException;
 }
@@ -194,10 +204,16 @@ return DONE
 
 1. `raw = rawPathOf(dir)` (from the `DirRecord`, else = `dir`). `depth = PathNormalizer.depth(dir)`.
 2. Loop check: `id = sa.dirIdentity(vol, raw)`; if `id != null && visited.contains(id)` → `DirRecord(dir).status = LOOP`,
-   `lastVisitedScanId = scan`, event `D_LOOP` (path + identity), `markSubtreeUnverifiable(dir, "D_LOOP")` is **not** done
-   (the subtree's files belong to the first-visited alias); return. Else `visited.add(id)`.
+   `lastVisitedScanId = scan`, event `D_LOOP` (path + identity), `subtreeUnverifiable(dir, "D_LOOP")` — records stored
+   under the alias path from earlier scans would otherwise stay PRESENT unverified and look like copies of the
+   first-visited files (REVIEW_1 F-B1); return. Else `visited.add(id)`.
 3. `listing = sa.list(vol, raw)`.
-   * `NOT_FOUND` → `DirectoryReconciler.directoryGone(dir)` (§4.5); return.
+   * `NOT_FOUND` → DirRecord status `NOT_FOUND`; `subtreeUnverifiable(dir, "D_VANISHED_DURING_SCAN")`; return. A listing
+     failure never removes anything (REVIEW_1 F-B2): removal of a vanished directory is decided by the next
+     authoritative listing of its parent (§4.5 `reconcile`), which needs no special case. If `dir == ""` (the volume
+     root): additionally treat the volume as absent for this scan (`VolumeRegistry` step 4 semantics, event
+     `D_VOLUME_ABSENT`) — this covers a card removed between `refresh` and the walk, and a resumed checkpoint whose
+     volume is gone.
    * `PERMISSION_DENIED`, `IO_ERROR`, `NOT_A_DIRECTORY`, `UNSUPPORTED` → DirRecord status `PERMISSION_DENIED` /
      `READ_ERROR` / `NOT_A_DIRECTORY` / `READ_ERROR`, `error = listing.error`; if the stored DirRecord had
      `lastListedOkScanId` known, call `permissionProbe(dir)` (§4.6); `DirectoryReconciler.subtreeUnverifiable(dir,
@@ -214,7 +230,8 @@ return DONE
    2. `if excluded.contains(child)` → DirRecord(child) `EXCLUDED` (directories) or counter `excludedFiles`; `subtreeUnverifiable`
       for directories; continue.
    3. `if child.length() > maxPathChars` → as in §4.1; continue.
-   4. Resolve kind: if `entry.kind == UNKNOWN` or (`FILE` and `entry.size < 0`) → `st = sa.stat(vol, childRaw)`; use `st`.
+   4. Resolve kind: if `entry.kind == UNKNOWN` or (`FILE` and (`entry.size < 0` or, on an `ino` volume, `entry.inode < 0`))
+      → `st = sa.stat(vol, childRaw)`; use `st`.
    5. `DIRECTORY`: if `depth + 1 > maxDepth` → DirRecord `DEPTH_LIMIT` + `subtreeUnverifiable(child, "D_DEPTH_LIMIT")`;
       else if `isRestricted(child)` → DirRecord `RESTRICTED` + `subtreeUnverifiable(child, "D_OS_RESTRICTED")`;
       else if `!caps.canList(vol, child)` → DirRecord `NOT_GRANTED` + `subtreeUnverifiable(child, "D_NOT_GRANTED")`;
@@ -239,10 +256,11 @@ return DONE
 * `followSymlinks == false` (default, and the only setting Phase A uses): every symlink entry gets a DirRecord
   `SYMLINK_SKIPPED` (with `error = linkTarget` if known), counter `symlinksSkipped`. Nothing behind it is walked, so
   a file reachable through both a link and its real path is recorded once.
-* `followSymlinks == true`: `id = sa.dirIdentity(vol, childRaw)` (resolves the target). If the target is not a directory →
-  `SYMLINK_SKIPPED`. If `id` is a `path:` identity whose canonical path is not inside the volume's canonical root →
-  `OUTSIDE_ROOT`. If `visited.contains(id)` → `LOOP`. Else the link is walked like a directory (its children get paths
-  under the link name).
+* `followSymlinks == true`: `target = sa.resolveLink(vol, childRaw)`; `null` → `OUTSIDE_ROOT` (checked for every link,
+  whatever form `dirIdentity` returns — `PosixStorageAccess` always returns `ino:` identities, so the draft's
+  "`path:` identity outside the root" test never fired; REVIEW_1 F-M5). Then `id = sa.dirIdentity(vol, childRaw)`. If the
+  target is not a directory → `SYMLINK_SKIPPED`. If `visited.contains(id)` → `LOOP`. Else the link is walked like a
+  directory (its children get paths under the link name).
 * Independently of symlinks, step 2 of §4.3 catches bind-mount aliases and FUSE oddities (same identity under two
   paths).
 
@@ -264,10 +282,14 @@ final class DirectoryReconciler {
 ```
 
 `FileUpsert.apply`:
-1. Attributes: `size`, `mtime`, `inode` from `st` if given, else from `e`; `readable`/`writable` from `st` (UNKNOWN if
+1. Attributes: `size`, `mtime`, `inode`, `physicalKey` from `st` if given, else from `e`; `readable`/`writable` from `st` (UNKNOWN if
    no stat was needed). If `st.status ∈ {PERMISSION_DENIED, IO_ERROR}`: size/mtime from `e` if known else unknown,
    `readable = FALSE`, `lastError = st.status + ": " + st.error`.
-2. `token = ("ino".equals(vol.identityScheme) && inode >= 0) ? "ino:" + inode : ""`; `id = FileIds.of(vol.volumeId, path, token)`.
+2. Identity guard (REVIEW_1 F-M1): on an `ino` volume with `inode < 0` (stat failed) the id cannot be computed. Do **not**
+   fall back to the empty token (that would make a new id and mark the existing record `REPLACED`/REMOVED merely because a
+   stat failed). Instead: if `files.byPath(vol, path)` gives a record with presence `PRESENT` → `UNVERIFIABLE`,
+   `presenceReason = "D_STAT_FAILED"`, `lastError`; counter `statFailed`; return. Otherwise
+   `token = ("ino".equals(vol.identityScheme)) ? "ino:" + inode : ""`; `id = FileIds.of(vol.volumeId, path, token)`.
 3. `old = files.byPath(vol, path)` (the record at this path with presence ≠ REMOVED, if any).
    If `old != null && !old.fileId.equals(id)` → `old.presence = REMOVED; old.change = REPLACED; old.changeScanId = scanId;
    old.removedScanId = scanId; old.presenceReason = "D_REPLACED"`; put.
@@ -275,7 +297,13 @@ final class DirectoryReconciler {
    * `cur == null` → new `FileRecord`: ids, `path`, `rawPath`, `name = PathNormalizer.name(path)`, `extension =
      Text.extension(name)`, size, `modifiedAt = mtime`, `lastAccessedAt` (only if `vol.atimeReliable == TRUE`), inode,
      `presence = PRESENT`, `change = ADDED`, `firstSeenScanId = changeScanId = scanId`, readable/writable,
-     `accessMode = caps.best(vol, parent).mode`, `{area, ownerPackage} = core.Classifier.classify(path, installed)`,
+     `accessMode = caps.best(vol, parent).mode`, `{area, ownerPackage} = core.Classifier.classify(path, installed == null ?
+     emptySet : installed)` — `path` here is relative to shared storage: for a `SAF_TREE` volume whose tree maps to a
+     shared-storage path (externalstorage provider document id `primary:DCIM`) that prefix is prepended, otherwise area is
+     `user_other` (F-m20) — with a `residue` result stored as `app_owner_unknown` when `installed == null` (REVIEW_1 F-M3;
+     `DiscoveryEngine` re-derives areas of records with `ownerPackage != null` at stage end),
+     `size == 0` reported by a Mode A/C provider (`uri != null`) is stored as `-1` (unknown) — providers report 0 for
+     pending/virtual documents; Phase 2 measures it by opening the file,
      `hidden = any component starts with '.'`, `scanVersion = V2.SCAN_VERSION`, Phase-2 fields at their unknown values; put.
    * `cur.presence != PRESENT` (it was REMOVED / UNVERIFIABLE / VOLUME_ABSENT) → `presence = PRESENT`, `presenceReason =
      null`, `removedScanId = -1`; if it was `REMOVED` → `change = ADDED, changeScanId = scanId`; then continue with the
@@ -285,17 +313,21 @@ final class DirectoryReconciler {
    * otherwise: no write (also when only `readable`/`writable` are unknown in this listing).
    Counters are *not* incremented here; `DiscoveryEngine` derives them at the end (so they are exact after a resume).
 
-`FileUpsert.vanished`: if `byPath` gives a record with presence ≠ REMOVED → `REMOVED`, `change = REMOVED`,
-`presenceReason = "D_VANISHED"`, `changeScanId = removedScanId = scanId`.
+`FileUpsert.vanished`: only when `st.status == NOT_FOUND` (positive evidence, ARCHITECTURE §3.1 `IoStatus.of`) **and**
+`caps.authoritativeFor(vol, parent, ext)`; then if `byPath` gives a record with presence ≠ REMOVED → `REMOVED`, `change = REMOVED`,
+`presenceReason = "D_VANISHED"`, `changeScanId = removedScanId = scanId`. Otherwise → `UNVERIFIABLE` (`D_STAT_FAILED`).
 
-`DirectoryReconciler.reconcile(dir, names, authoritative)`:
+`DirectoryReconciler.reconcile(dir, names, authoritative)` — `names` maps each name to its resolved `EntryKind`:
 * For each stored file `f` in `files.childrenOf(vol, dir)` with presence ∈ {PRESENT, UNVERIFIABLE} whose name key
-  (`PathNormalizer.name(f.path)`) is not in `names`:
+  (`PathNormalizer.name(f.path)`) is not in `names`, **or is in `names` as a DIRECTORY/SYMLINK** (a file replaced by a
+  directory of the same name is gone as a file):
   * `authoritative && caps.authoritativeFor(vol, dir, f.extension)` → REMOVED (`presenceReason = "D_NOT_IN_LISTING"`,
     `change = REMOVED`, scan ids).
   * else → `UNVERIFIABLE`, `presenceReason = authoritative ? "D_MEDIA_ONLY_VISIBILITY" : "D_PARTIAL_LISTING"` (write only if it changes).
-* For each stored `DirRecord d` in `directories.childrenOf(vol, dir)` whose name is not in `names`: if authoritative →
-  `directoryGone(d.path)`; else `subtreeUnverifiable(d.path, "D_PARTIAL_LISTING")`.
+* For each stored `DirRecord d` in `directories.childrenOf(vol, dir)` whose name is not in `names` or is in `names` as a
+  FILE/OTHER (a directory replaced by a file): if authoritative → `directoryGone(d.path)`; else
+  `subtreeUnverifiable(d.path, "D_PARTIAL_LISTING")`. (A name now listed as SYMLINK keeps the DirRecord `SYMLINK_SKIPPED`
+  written by §4.4, and its stored subtree becomes `UNVERIFIABLE` with `D_SYMLINK`.)
 
 `directoryGone(dir)`: every file in `files.underPrefix(vol, dir)` with presence ≠ REMOVED → REMOVED (`D_DIR_REMOVED`);
 every DirRecord in `directories.underPrefix(vol, dir)` and `dir` itself → `status = NOT_FOUND, lastVisitedScanId = scanId`.
@@ -303,9 +335,11 @@ every DirRecord in `directories.underPrefix(vol, dir)` and `dir` itself → `sta
 `subtreeUnverifiable(dir, reason)`: every file in `files.underPrefix(vol, dir)` with presence `PRESENT` → `UNVERIFIABLE`,
 `presenceReason = reason` (records already UNVERIFIABLE keep their first reason; no other field changes).
 
-Resulting guarantee (tested): a file becomes `REMOVED` only if an authoritative listing of its parent — or of an
-ancestor that no longer contains the path — was obtained in this scan, or a stat returned NOT_FOUND. Permission
-loss, I/O errors, limits, restrictions, exclusions and unmounted volumes never produce `REMOVED`.
+Resulting guarantee (tested): a file becomes `REMOVED` only if an authoritative (non-Mode-A) listing of its parent — or
+of an ancestor that no longer contains the path — was obtained in this scan, or a stat returned positive NOT_FOUND evidence
+for a file that the same authoritative listing had just shown. Permission loss, I/O errors, stat failures, a directory
+listing that fails with NOT_FOUND, limits, restrictions, exclusions, loops, Mode A visibility and unmounted volumes never
+produce `REMOVED` (nor `REPLACED`).
 
 ### 4.6 Permission-change detection
 
@@ -327,7 +361,7 @@ loss, I/O errors, limits, restrictions, exclusions and unmounted volumes never p
 | same id, different size or mtime | `CHANGED` (same id) |
 | same path, different inode on an `ino` volume | old id `REPLACED` (presence REMOVED), new id `ADDED` |
 | path missing from an authoritative parent listing | `REMOVED` |
-| path missing from a non-authoritative listing / parent unreadable / limits / revoked | `UNVERIFIABLE` (no change state) |
+| path missing from a non-authoritative listing (incl. any Mode A listing) / parent unreadable / parent listing NOT_FOUND / stat failed on an `ino` volume / limits / loop / revoked | `UNVERIFIABLE` (no change state) |
 | file of an unmounted volume | `VOLUME_ABSENT` |
 | identical size + mtime + inode | nothing written ("unchanged" = `changeScanId < scanId`) |
 | content changed with size and mtime forged back | not detected in Phase 1/2 (documented limit); execution revalidates SHA-256 (ARCHITECTURE V3) |
@@ -389,7 +423,7 @@ public final class CoverageReport {
     public java.util.List<InaccessibleLocation> inaccessible; public int inaccessibleTotal;   // listed ≤ maxListed, sorted (volumeId, path)
     public java.util.List<ScanEvent> events; public int eventsDropped;
     public java.util.Map<String, Long> anomalies;   // undecodableNames, nameCollisions, invalidNames, vanishedDuringScan,
-                                                    // specialFilesSkipped, pathTooLong, symlinksSkipped, excludedFiles, readErrors
+                                                    // specialFilesSkipped, pathTooLong, symlinksSkipped, excludedFiles, readErrors, statFailed
     public java.util.List<AreaCoverage> areas;      // per (volumeId, area): files, bytes — areas from core.Classifier
     public Object extraction;                       // Phase 2 fills (PHASE_2.md §9); null in Phase 1
 }
@@ -443,18 +477,22 @@ public final class DiscoveryEngine implements Stage {
 4. While `volumeQueue` not empty: build a `Walker` for `volumeQueue[0]`; `walk()`. On `DONE`: if complete set
    `volume.lastFullScanId = scanId`; remove the volume from the queue; `frontier = [""]`; commit. On `PAUSED`/`CANCELLED`
    → return that outcome (the session keeps the checkpoint).
-5. End: re-read grants (§4.6); rewrite subtree reasons for revoked grants; derive counters from records
+5. End: re-read grants (§4.6); rewrite subtree reasons for revoked grants; re-derive `area` of every PRESENT record with
+   `ownerPackage != null` from the current installed set (ARCHITECTURE §2.3; write only on change); derive counters from records
    (`added/changed/removed/replaced` = records with `changeScanId == scanId` by `change`; dir counts by status);
-   `session.checkpoint = null`; `stagesDone += "DISCOVER"`; commit; `store.compact()`; return `DONE`.
+   `session.checkpoint = null`; `stagesDone += "DISCOVER"`; `store.flush()`; return `DONE`.
 
 `Pipeline.run(control)` (Phase-1 behaviour):
 * `resume == true`: latest session (highest scanId) with state RUNNING/PAUSED/INTERRUPTED; if RUNNING (process died) set
   INTERRUPTED + event `D_INTERRUPTED`; then `state = RUNNING`, `resumedCount++`, event `D_RESUMED`; commit.
-* otherwise: new `ScanSession` (scanId = 1 + max existing, state RUNNING, kind, `startedAt = clock.nowMillis()`, versions); commit.
+* otherwise: every older session still `RUNNING`/`PAUSED`/`INTERRUPTED` is set `INTERRUPTED` → `CANCELLED` (event
+  `D_SUPERSEDED`), then a new `ScanSession` (scanId = 1 + max existing, state RUNNING, kind, `startedAt = clock.nowMillis()`, versions); commit.
 * For each configured stage not in `stagesDone`: `session.stage = id`; commit; `outcome = stage.run(ctx)`;
-  `PAUSED/CANCELLED/BUDGET_EXHAUSTED` → set state PAUSED/CANCELLED/PAUSED, commit, return. `FAILED`/exception → state FAILED,
-  `lastError`, commit, rethrow `StoreException` only.
-* All done: `state = COMPLETED, endedAt = now, stage = null`; commit; compact; return `PipelineResult {session, coverage}`.
+  `PAUSED/CANCELLED/BUDGET_EXHAUSTED` → set state PAUSED/CANCELLED/PAUSED, `flush()`, return. `FAILED` or an `Exception` → state
+  FAILED, `lastError`, `flush()`, rethrow (wrapped in `StoreException` if it is not one). **`Error`s are never caught** (REVIEW_1
+  F-M4): an `OutOfMemoryError` or a test's `SimulatedKill` must behave like process death — the session stays `RUNNING` in
+  the last snapshot and the next start marks it `INTERRUPTED` and resumes it. (Marking it FAILED would make it unresumable.)
+* All done: `state = COMPLETED, endedAt = now, stage = null`; `flush()`; return `PipelineResult {session, coverage}`.
 * `ScanKind.FULL` vs `INCREMENTAL` makes no difference to the walk (C7 in ARCHITECTURE); it is recorded, and Phase 2
   uses it to ignore cached extraction. Starting from an empty store is the same as a full first scan.
 
@@ -467,8 +505,10 @@ conditions and sets `pauseReason = "PL_PAUSED_DEVICE"`.
 
 ```java
 public final class MemoryStore implements V2Store {
-    public static MemoryStore open(BlobStore blobs) throws StoreException;   // loads store.snap + store.wal (ARCHITECTURE §4.2)
+    public static MemoryStore open(BlobStore blobs, long snapshotEveryMs /* -1 = adaptive (§4.2), 0 = every commit */, Clock clock)
+        throws StoreException;                                               // loads store.snap (ARCHITECTURE §4.2)
     public static MemoryStore volatileStore();                               // no persistence (unit tests); commit() only clears pending ops
+    public long changedPutsSinceOpen();                                      // puts whose record differed from the stored one (tests)
 }
 ```
 * Each table: `TreeMap<String, R>` (key order) + pending op list since last commit.
@@ -482,8 +522,9 @@ public final class MemoryStore implements V2Store {
 * `put` stores `record.copy()`; `get`/`all` return copies (record classes implement a field-by-field `copy()`; lists are
   copied, `Fingerprint` is immutable).
 * `JournalTable.put` of an existing key → `IllegalStateException`.
-* `commit()`: no pending ops → no-op. Else one WAL line (ARCHITECTURE §4.2), `blobs.append("store.wal")`, write, close,
-  `blobs.sync("store.wal")`; `seq++`. If the WAL length exceeds 16 MiB → `compact()`.
+* `commit()`: clear the pending-inverse list; `commitSeq++`; if `dirty` and `clock.monotonicNanos()` shows ≥ `snapshotEveryMs`
+  since the last snapshot → write one (`Snapshot.write` streams tables in order through `blobs.replace("store.snap")`, then
+  `commit()` of the `AtomicWrite`). `flush()`: commit + snapshot if dirty.
 * `rollback()`: re-apply the inverse of pending ops (kept as `(table, key, previousValueOrNull)`), then clear.
 
 ---
@@ -498,16 +539,18 @@ public final class MemoryStore implements V2Store {
 | `FixedClock` | `nowMillis()` returns a settable value (default 1 792 000 000 000); `advance(ms)`; `monotonicNanos()` advances 1 ms per call |
 | `JvmResourceMonitor` | heap from `Runtime`; battery/thermal UNKNOWN; profile from `-Dv2.profile`; scriptable: `script(ResourceState... states)` |
 | `DirBlobStore` | `BlobStore` over a directory: `replace` = temp file in the same dir + `FileChannel.force(true)` + `Files.move(ATOMIC_MOVE, REPLACE_EXISTING)`; `append` = `FileOutputStream(append=true)`; `sync` = `FileChannel.force`; `truncate` = `FileChannel.truncate(0)` |
-| `FaultyStorageAccess` | decorator; rules: `denyList(path)`, `ioErrorList(path)`, `partialList(path, int entriesBeforeError)`, `vanishOnStat(path)`, `injectEntry(dir, DirEntry)` (e.g. kind OTHER, or a name with U+FFFD), `aliasIdentity(path, String identity)`, `setGrants(List<AccessGrant>)`, `revokeAfterListCalls(int n, String grantId)`, `killOnListCall(int n)` (throws `SimulatedKill`), `volumeOverrides(VolumeInfo)` (fake total/free, mounted=false), `listCalls()` counter |
-| `SimulatedKill` | `extends Error` — not caught by v2 code (v2 catches only `Exception` subclasses; rule checked by `ForbiddenApiTest`: no `catch (Throwable` / `catch (Error` in v2 outside `Pipeline.run`'s rethrow-after-marking block, which must rethrow Errors) |
+| `KillingBlobStore` | decorator over `DirBlobStore`: `killAfterReplaceCommits(n)` throws `SimulatedKill` right after the n-th successful `AtomicWrite.commit()` (kill after a durable commit), `killBeforeReplaceCommit(n)` throws inside the n-th `commit()` before the move (kill during a snapshot write — old snapshot must load); `replaceCommits()` counter. Every commit made by any class goes through it, unlike a `CommitHook` wrapper |
+| `FaultyStorageAccess` | decorator; rules: `denyList(path)`, `ioErrorList(path)`, `partialList(path, int entriesBeforeError)`, `vanishOnStat(path)` (also blanks the entry's attributes in its parent's listing — kind UNKNOWN, size -1 — so the walker actually stats it), `statFails(path)` (stat → IO_ERROR, listing attributes blanked), `listNotFound(path)`, `injectEntry(dir, DirEntry)` (e.g. kind OTHER, or a name with U+FFFD), `aliasIdentity(path, String identity)`, `setGrants(List<AccessGrant>)`, `revokeAfterListCalls(int n, String grantId)`, `killOnListCall(int n)` (throws `SimulatedKill`), `volumeOverrides(VolumeInfo)` (fake total/free, mounted=false), `listCalls()` counter |
+| `SimulatedKill` | `extends Error` — never caught by v2 code (v2 catches only `Exception` subclasses; `ForbiddenApiTest`: no `catch (Throwable` / `catch (Error` / `catch (OutOfMemoryError` anywhere in v2, no exception) |
 | `MediaOnlyStorageAccess` | decorator simulating Mode A: lists only files whose `MediaFamilies.of(ext)` ∈ configured types (directories still listed), grants = one A_MEDIASTORE grant with `mediaTypes` |
-| `TestControl` | `ScanControl` with `cancelAfterProgress(n)`, `pauseAfterProgress(n)`, and a `CommitHook` wrapper `killAfterCommits(n)` (throws `SimulatedKill` *after* the n-th successful commit) |
+| `TestControl` | `ScanControl` with `cancelAfterProgress(n)`, `pauseAfterProgress(n)`; kills after commits are done with `KillingBlobStore` and `snapshotEveryMs = 0` |
 | `JvmDevice` | `V2Device` wiring for tests and V2Cli (`fileOps()` null, `text()` null) |
 | `V2Cli` | ARCHITECTURE §9; Phase 1 implements `scan` with `--state-dir`, `--volume-id`, `--kind`, `--resume`, `--restricted`, `--exclude`, `--now`, `--halt-after-commits`, `--pretty`; `static int run(String[] args, PrintStream out, PrintStream err)` used by tests, `main` calls it and exits |
 
 `V2Cli scan` wiring: `PosixStorageAccess` with one `DIRECTORY` volume (`root` = argument, `fileKeyStable = TRUE`,
 `restrictedPrefixes` = `--restricted` values or default `[Android/data, Android/obb]`), one B_ALL_FILES grant;
-`MemoryStore.open(new DirBlobStore(stateDir))` or `volatileStore()`; `Pipeline` with `[DiscoveryEngine]`; JSON via
+`MemoryStore.open(new DirBlobStore(stateDir), --snapshot-every-ms or -1, clock)` (wrapped in `KillingBlobStore` for
+`--halt-after-commits`, whose kill is `Runtime.halt(137)`) or `volatileStore()`; `Pipeline` with `[DiscoveryEngine]`; JSON via
 `V2Json.writeResult(...)` (a jvmtest class; field order exactly as ARCHITECTURE §9). Exit codes: 0 ok, 2 usage, 3
 store error, 4 encoding not UTF-8, 137 halt hook.
 
@@ -530,6 +573,8 @@ public final class PosixStorageAccess implements StorageAccess {
   and `atime` are always unknown (JDK 21 on Linux reports mtime as creation time).
 * `open`: `FileChannel.open(p, READ)` wrapped as `ReadableFile` (`read(pos, ..)` = `channel.read(ByteBuffer.wrap(..), pos)`).
 * `dirIdentity`: `"ino:" + fileKey().toString()` when non-null, else `"path:" + canonical(p)`; null on error.
+* `physicalKey` (in `list` entries and `stat`): `fileKey().toString()` parsed to `"<dev>:<ino>"`, null if unavailable.
+* `resolveLink`: `canonical(p)` (i.e. `toRealPath()`), relativised against `canonical(root)`; null if not under it or on error.
 * `volumes`: for each root: `mounted = Files.isDirectory(root)`; total/free `-1` for `DIRECTORY`, else
   `Files.getFileStore(root).getTotalSpace()/getUsableSpace()`.
 
@@ -539,18 +584,18 @@ public final class PosixStorageAccess implements StorageAccess {
 
 | Test class | Cases (each is a `T.check`) |
 |---|---|
-| `ForbiddenApiTest` | scans every `.java` under `app/src/main/java/com/storageplanner/v2/`: no `import android.`, `java.awt`, `javax.imageio`, `java.net`, `java.lang.reflect`; no `Class.forName`, `ClassLoader`, `ProcessBuilder`, `Runtime.getRuntime().exec`, `System.load`, `.delete()` (no-argument call, i.e. `File.delete`; `StringBuilder.delete(int,int)` is fine), `.renameTo(`, `Files.move`, `Files.delete`, `deleteOnExit`, `System.currentTimeMillis`, `System.nanoTime`, `new Date()`; no `catch (Throwable` / `catch (Error` except in `v2/pipeline/Pipeline.java` (marks the session FAILED, then rethrows); no import of `core.Scanner/UnitBuilder/Planner/Review/Unit/Option/FileItem/ResultStore/Sorter`; a planted violation in a temp copy is detected (self-test) |
+| `ForbiddenApiTest` | scans every `.java` under `app/src/main/java/com/storageplanner/v2/`: no `import android.`, `java.awt`, `javax.imageio`, `java.net`, `java.lang.reflect`; no `Class.forName`, `ClassLoader`, `ProcessBuilder`, `Runtime.getRuntime().exec`, `System.load`, `.delete()` (no-argument call, i.e. `File.delete`; `StringBuilder.delete(int,int)` is fine), `.renameTo(`, `Files.move`, `Files.delete`, `deleteOnExit`, `System.currentTimeMillis`, `System.nanoTime`, `new Date()`; no `catch (Throwable` / `catch (Error` / `catch (OutOfMemoryError` anywhere; no import of `core.Scanner/UnitBuilder/Planner/Review/Unit/Option/FileItem/ResultStore/Sorter`; a planted violation in a temp copy is detected (self-test) |
 | `PathNormalizerTest` | NFD `é` → NFC `é`; `""`/`.`/`..`/`a/b`(as a name)/NUL rejected; `normalizeRelative("a//b/")` = `a/b`; `a/../b` rejected; `join`, `parent` (`""`→null), `name`, `depth`; `isUnder("ab","a")` false, `isUnder("a/b","a")` true, `isUnder(x,"")` true; backslash, leading space, emoji `😀`, Devanagari `हिन्दी`, Arabic preserved; 255-byte UTF-8 name accepted |
 | `FileIdsTest` | the 5 golden vectors; output length 32, lower-case hex; each argument change changes the id; separator ambiguity (`("a","bc")` vs `("ab","c")` as volume/path) gives different ids |
 | `JsonTest` | round-trip of nested maps/lists; escapes `"` `\` control chars, U+2028, surrogate pair emoji; `Long.MAX_VALUE` stays a `Long`; doubles formatted deterministically (6 decimals max, no exponent, `-0.0` → `0`); NaN/Infinity written as `null`; `valueTime(Unknown.TIME)` → `null`; depth > 64 rejected; malformed inputs (trailing comma, unterminated string, bare word) throw `JsonException` with offset |
 | `StoreContractTest` | (runs against `MemoryStore.volatileStore()`; Phase 10 reuses it for SQLite) copy semantics (mutate returned record → store unchanged); `byPath` preference (present over removed); `bySize`, `bySha256` updated on change and remove; `childrenOf`/`underPrefix` boundaries (`a` vs `ab`, root `""`), ascending order; `all()` key order; journal duplicate key throws; `rollback` restores previous values incl. removed records |
-| `StorePersistenceTest` | commit + reopen equal (all 16 tables, a record with every unknown sentinel and NaN round-trips); torn last WAL line (truncate 1..k bytes) → earlier commits intact, no exception; corrupted CRC in line 3 of 5 → lines 1–2 applied, a `D_STORE_WAL_TRUNCATED` flag readable via `MemoryStore.loadReport()`; corrupt snapshot → `StoreException`; compact then reopen equal; WAL lines with `seq <= lastSeq` skipped (simulate crash between snapshot replace and truncate); unknown JSON field ignored; missing field → unknown value; WAL > 16 MiB triggers compaction |
+| `StorePersistenceTest` | flush + reopen equal (all 16 tables, a record with every unknown sentinel and NaN round-trips); `killBeforeReplaceCommit` during the 2nd snapshot → reopen gives exactly the 1st snapshot's state; `killAfterReplaceCommits(2)` → the 2nd state; snapshot cut at every 997th byte offset or with one flipped byte → `StoreException` (caller resets, `D_STORE_RESET`), never a partial load; `snapshotEveryMs = 60000` with `FixedClock`: commits within the interval write nothing, the first commit after it writes one snapshot; `flush()` with nothing dirty writes nothing; unknown JSON field ignored; missing field → unknown value |
 | `CapabilityRegistryTest` | longest prefix wins; tie order B > C > A > D; inactive grant ignored; refresh events ADDED/REVOKED/CHANGED/RESTORED with correct `revokedAt`; `authoritativeFor` true for unrestricted grant, true for `.jpg` under image-only grant, false for `.pdf` under it |
 | `VolumeRegistryTest` | first sight: `identityScheme` "ino"/"path" by stability; later stability change keeps scheme + event; alias dedupe (same canonical root) keeps the primary + `D_VOLUME_ALIAS`; volume unmounted → its PRESENT files `VOLUME_ABSENT` + event once (second refresh: no new event, no writes); remount + walk → PRESENT again |
-| `WalkerTest` | (TempTree + PosixStorageAccess, `--release 8` APIs only) 1 basic tree: every file once, sizes/mtimes equal to `Files` values, ids = `FileIds.of(..., "ino:"+inode)`, deterministic order of `files.all()`; 2 zero-byte files: `sizeBytes == 0`, presence PRESENT; 3 Unicode: NFD-named file on disk → `path` NFC, `rawPath` NFD, `sa.stat(rawPath)` OK; emoji/Devanagari names; 127×`é` (254-byte) name; 4 `maxPathChars = 64` → `PATH_TOO_LONG` dir record and counter, no crash; 5 symlink loop (`a/loop -> ..`): default → `SYMLINK_SKIPPED`, each real file once; `followSymlinks=true` → walk terminates, `LOOP` recorded, each real file once; link to a directory outside the root → `OUTSIDE_ROOT`; 6 bind-mount alias via `aliasIdentity` → `LOOP`; 7 unreadable dir (`denyList`) → `PERMISSION_DENIED`, coverage lists it, previously known files under it `UNVERIFIABLE` with `D_PARENT_UNREADABLE`, none `REMOVED`; 8 vanishing file (`vanishOnStat`) → not recorded on first scan, `REMOVED` (`D_VANISHED`) when known, counter `vanishedDuringScan == 1`; 9 `maxDepth = 3` on depth-5 tree → `DEPTH_LIMIT`, deeper known files `UNVERIFIABLE`; 10 `maxEntriesPerDir = 10` with 25 files → 10 records, `entriesSkipped = 15`, `TRUNCATED_ENTRY_LIMIT`; known files among the unprocessed 15 untouched; 11 injected `OTHER` entry → `specialFilesSkipped == 1`; 12 `partialList(dir, 3)` → `PARTIAL_IO_ERROR`, known files missing from the partial listing `UNVERIFIABLE`, none `REMOVED`; 13 restricted `Android/data` (readable on disk) → `RESTRICTED`, not listed, coverage `OS_RESTRICTED`; 14 excluded path → `EXCLUDED`, nothing below recorded; 15 injected U+FFFD name with vanish → `undecodableNames == 1`, coverage `UNDECODABLE_NAMES`; 16 NFC/NFD twins in one dir → two records, second keeps raw path, `D_NAME_COLLISION`; 17 `maxTotalEntries = 20` → `TOTAL_LIMIT`, `complete == false` |
-| `DiscoveryResumeTest` | reference = uninterrupted scan of a 3-level tree with one 1 200-file directory (`commitEvery = 500`); for k in {1, 2, 4, 7}: `killOnListCall(k)` (kill before commit) and `killAfterCommits(k)` (kill after commit): discard the store, reopen from the same `DirBlobStore`, `Pipeline.run(resume=true)` → `COMPLETED`; files and directories tables equal to the reference (compared as Codecs JSON lines); `resumedCount == 1`; events include `D_INTERRUPTED`, `D_RESUMED`; two kills in one scan → still equal; `pauseAfterProgress` → `PAUSED` then resume → equal; `cancelAfterProgress` → `CANCELLED`, a following non-resume run creates scanId 2 and completes |
-| `IncrementalScanTest` | scan 1; then: add file; append to file (same inode, mtime +2 s); `replaceAtomically` a file; delete a file; rename a file; delete a directory with 3 files; add a directory with 2 files; `touch` only (mtime change) a file; scan 2 (INCREMENTAL) → `ADDED` = {new, renamed target, 2 in new dir, replacement}, `CHANGED` = {appended, touched}, `REPLACED` = {old id of replaced}, `REMOVED` = {deleted, rename source, 3 in deleted dir}; all others not written in scan 2 (count WAL ops of scan 2's commits ≤ changed records + DirRecords + session puts); on a `"path"`-scheme volume the replaced file keeps its id and is `CHANGED`; same-size content change with mtime restored → not detected (asserts the documented limit) |
-| `PermissionChangeTest` | grant for `Documents` revoked between scans (`setGrants`) → event `D_GRANT_REVOKED`, `Documents` `NOT_GRANTED`, its files `UNVERIFIABLE` with `D_PERMISSION_REVOKED`, none REMOVED; re-granted → `D_GRANT_RESTORED`, files PRESENT; `revokeAfterListCalls` mid-scan → `D_GRANTS_CHANGED_DURING_SCAN`, coverage `grantsChangedDuringScan == true`, affected files UNVERIFIABLE; Mode A (`MediaOnlyStorageAccess`) after a Mode B scan → `.pdf`/`.apk` files `UNVERIFIABLE` (`D_MEDIA_ONLY_VISIBILITY`), `.jpg` deleted on disk → REMOVED, coverage has `MEDIA_ONLY_VISIBILITY` |
+| `WalkerTest` | (TempTree + PosixStorageAccess, `--release 8` APIs only) 1 basic tree: every file once, sizes/mtimes equal to `Files` values, ids = `FileIds.of(..., "ino:"+inode)`, deterministic order of `files.all()`; 2 zero-byte files: `sizeBytes == 0`, presence PRESENT; 3 Unicode: NFD-named file on disk → `path` NFC, `rawPath` NFD, `sa.stat(rawPath)` OK; emoji/Devanagari names; 127×`é` (254-byte) name; 4 `maxPathChars = 64` → `PATH_TOO_LONG` dir record and counter, no crash; 5 symlink loop (`a/loop -> ..`): default → `SYMLINK_SKIPPED`, each real file once; `followSymlinks=true` → walk terminates, `LOOP` recorded, each real file once; link to a directory outside the root → `OUTSIDE_ROOT` (nothing outside read: `listCalls` has no path outside); 6 bind-mount alias via `aliasIdentity` → `LOOP`, and records stored under the alias path by an earlier scan (alias visited first then) become `UNVERIFIABLE` (`D_LOOP`), never REMOVED; 6b hard link (`Files.createLink`) → two records with equal `physicalKey`; 7 unreadable dir (`denyList`) → `PERMISSION_DENIED`, coverage lists it, previously known files under it `UNVERIFIABLE` with `D_PARENT_UNREADABLE`, none `REMOVED`; 8 vanishing file (`vanishOnStat`) → not recorded on first scan, `REMOVED` (`D_VANISHED`) when known, counter `vanishedDuringScan == 1`; 9 `maxDepth = 3` on depth-5 tree → `DEPTH_LIMIT`, deeper known files `UNVERIFIABLE`; 10 `maxEntriesPerDir = 10` with 25 files → 10 records, `entriesSkipped = 15`, `TRUNCATED_ENTRY_LIMIT`; known files among the unprocessed 15 untouched; 11 injected `OTHER` entry → `specialFilesSkipped == 1`; 12 `partialList(dir, 3)` → `PARTIAL_IO_ERROR`, known files missing from the partial listing `UNVERIFIABLE`, none `REMOVED`; 13 restricted `Android/data` (readable on disk) → `RESTRICTED`, not listed, coverage `OS_RESTRICTED`; 14 excluded path → `EXCLUDED`, nothing below recorded; 15 injected U+FFFD name with vanish → `undecodableNames == 1`, coverage `UNDECODABLE_NAMES`; 16 NFC/NFD twins in one dir → two records, second keeps raw path, `D_NAME_COLLISION`; 17 `maxTotalEntries = 20` → `TOTAL_LIMIT`, `complete == false`; 18 (REVIEW_1 F-B2) `listNotFound("")` on the volume root after a first scan → zero REMOVED, all files `UNVERIFIABLE`/`VOLUME_ABSENT`; `listNotFound("a")` on a subdirectory → its files UNVERIFIABLE in this scan, REMOVED only in the next scan once the parent listing no longer contains `a`; 19 (F-M1) `statFails(f)` on an `ino` volume for a known file → `UNVERIFIABLE` (`D_STAT_FAILED`), same fileId, nothing REPLACED; 20 directory `x` replaced by a file `x` (and vice versa) → old subtree REMOVED (`D_DIR_REMOVED`) / old file REMOVED, new record ADDED |
+| `DiscoveryResumeTest` | (store opened with `snapshotEveryMs = 0`, plus one run with 60 000 and `FixedClock` to cover "resume from an older snapshot") reference = uninterrupted scan of a 3-level tree with one 1 200-file directory (`commitEvery = 500`); for k in {1, 2, 4, 7}: `killOnListCall(k)` (kill before commit) and `KillingBlobStore.killAfterReplaceCommits(k)` (kill after commit) and `killBeforeReplaceCommit(k)`: discard the store, reopen from the same `DirBlobStore`, `Pipeline.run(resume=true)` → `COMPLETED`; files and directories tables equal to the reference (compared as Codecs JSON lines); `resumedCount == 1`; events include `D_INTERRUPTED`, `D_RESUMED`; two kills in one scan → still equal; `pauseAfterProgress` → `PAUSED` then resume → equal; `cancelAfterProgress` → `CANCELLED`, a following non-resume run creates scanId 2 and completes |
+| `IncrementalScanTest` | scan 1; then: add file; append to file (same inode, mtime +2 s); `replaceAtomically` a file; delete a file; rename a file; delete a directory with 3 files; add a directory with 2 files; `touch` only (mtime change) a file; scan 2 (INCREMENTAL) → `ADDED` = {new, renamed target, 2 in new dir, replacement}, `CHANGED` = {appended, touched}, `REPLACED` = {old id of replaced}, `REMOVED` = {deleted, rename source, 3 in deleted dir}; all others not written in scan 2 (`changedPutsSinceOpen()` during scan 2 ≤ changed records + changed DirRecords + session puts); on a `"path"`-scheme volume the replaced file keeps its id and is `CHANGED`; same-size content change with mtime restored → not detected (asserts the documented limit) |
+| `PermissionChangeTest` | grant for `Documents` revoked between scans (`setGrants`) → event `D_GRANT_REVOKED`, `Documents` `NOT_GRANTED`, its files `UNVERIFIABLE` with `D_PERMISSION_REVOKED`, none REMOVED; re-granted → `D_GRANT_RESTORED`, files PRESENT; `revokeAfterListCalls` mid-scan → `D_GRANTS_CHANGED_DURING_SCAN`, coverage `grantsChangedDuringScan == true`, affected files UNVERIFIABLE; Mode A (`MediaOnlyStorageAccess`) after a Mode B scan → `.pdf`/`.apk` files `UNVERIFIABLE` (`D_MEDIA_ONLY_VISIBILITY`); a `.jpg` hidden by the decorator (simulating `.nomedia` / partial photo access) → `UNVERIFIABLE`, not REMOVED; a `.jpg` deleted on disk → also `UNVERIFIABLE` (Mode A is never authoritative, F-M2); coverage has `MEDIA_ONLY_VISIBILITY`; `installed == null` → an `Android/media/<pkg>/x` file has area `app_owner_unknown`, never `residue`; with a FULL installed set lacking `<pkg>` → `residue`, and after the package appears → re-derived to its media area (F-M3) |
 | `CoverageTest` | Σ `areas.bytes` == Σ `discoveredBytes`; every non-OK DirRecord of the scan is in `inaccessible` (cap 5 in this test → 5 listed, `inaccessibleTotal` correct); restricted prefixes listed even if absent on disk; DIRECTORY volume totals `-1` and `unaccountedBytes == -1`; with `volumeOverrides(total=10 GB, free=4 GB)` → `used = 6 GB`, `unaccounted = used − discovered`; unmounted volume → `VOLUME_ABSENT` entry |
 | `V2CliTest` | `run(["scan", tmp, "--out", f])` exit 0; JSON parses with `Json`; top-level keys in ARCHITECTURE §9 order; Phase-2+ sections present and empty/null; two runs byte-identical after removing `timings`; `--state-dir` + second run with `--kind incremental` reports changes; `--halt-after-commits` is exercised only by the shell test below (it halts the JVM) |
 
@@ -593,7 +638,7 @@ public final class PosixStorageAccess implements StorageAccess {
 
 | # | Choice | Rejected alternative | Why |
 |---|---|---|---|
-| 1-1 | Removal is decided per directory at the time its listing is complete (`DirectoryReconciler`) | A global "not seen this scan → removed" sweep based on a per-file `lastSeenScanId` | The sweep needs every unchanged file rewritten every scan (≈ 60 MB of WAL per 100 k files on a phone) and gives wrong answers after partial walks. Per-directory reconciliation writes only changes and is naturally correct after resume. |
+| 1-1 | Removal is decided per directory at the time its listing is complete (`DirectoryReconciler`) | A global "not seen this scan → removed" sweep based on a per-file `lastSeenScanId` | The sweep needs every unchanged file rewritten every scan (and a dirty store, hence a snapshot, on every unchanged scan) and gives wrong answers after partial walks. Per-directory reconciliation writes only changes and is naturally correct after resume. |
 | 1-2 | A partially processed directory is re-processed from its start on resume (no "last name done" cursor) | Persist the last processed name | Upserts are idempotent and no-ops when unchanged; a name cursor would miss files created before the cursor between kill and resume. Cost: at most one directory re-statted. |
 | 1-3 | Symlinks are not followed by default; following exists only as an option with canonical-root and visited-set checks | Follow symlinks with loop detection | Shared storage on Android has no meaningful symlinks; following risks double counting and escaping the granted root. The option keeps the loop-protection code tested. |
 | 1-4 | Restricted prefixes (Android/data, Android/obb) are reported, never listed, even if listing would "succeed" | Try to list and report what comes back | On Android 11+ these return empty listings, which would look like "covered and empty". |

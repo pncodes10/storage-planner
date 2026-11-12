@@ -146,7 +146,7 @@ def build(B):
     pets = [i for i in ids if S[i].get("cat") == "pets"]
     food = [i for i in ids if S[i].get("cat") == "food" and S[i]["kind"] == "photo"]
     scenery = [i for i in ids if S[i].get("cat") == "travel_scenery"]
-    product = [i for i in ids if S[i].get("cat") == "product" and S[i]["kind"] == "photo"]
+    product = [i for i in ids if S[i].get("cat") == "product" and S[i]["kind"] in ("photo", "listing")]
     misc = [i for i in ids if S[i].get("cat") in ("unknown", "personal_photo") and S[i]["kind"] == "photo"
             and not i.startswith("docci_")]
     if B.quick:
