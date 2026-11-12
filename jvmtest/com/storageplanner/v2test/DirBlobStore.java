@@ -26,6 +26,20 @@ public class DirBlobStore implements BlobStore {
     }
     public long length(String name) { Path p = dir.resolve(name); try { return Files.exists(p) ? Files.size(p) : -1; } catch (IOException e) { return -1; } }
 
+    public RandomRead openRead(String name) throws IOException {
+        Path p = dir.resolve(name);
+        if (!Files.exists(p)) return null;
+        final FileChannel ch = FileChannel.open(p, StandardOpenOption.READ);
+        return new RandomRead() {
+            public int read(long pos, byte[] b, int off, int len) throws IOException {
+                if (len == 0) return 0;
+                return ch.read(java.nio.ByteBuffer.wrap(b, off, len), pos);
+            }
+            public long length() throws IOException { return ch.size(); }
+            public void close() throws IOException { ch.close(); }
+        };
+    }
+
     public AtomicWrite replace(final String name) throws IOException {
         final Path tmp = dir.resolve(name + ".tmp-" + (++tmpSeq));
         final FileOutputStream fos = new FileOutputStream(tmp.toFile());

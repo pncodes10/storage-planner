@@ -141,6 +141,21 @@ public final class AndroidV2Device implements V2Device {
             try { o.getFD().sync(); } finally { o.close(); }
         }
         public long length(String name) { File x = f(name); return x.exists() ? x.length() : -1; }
+        /** Segments of the disk store are plain files (not AtomicFiles); read-only handle, no delete or rename. */
+        public RandomRead openRead(String name) throws IOException {
+            File x = f(name);
+            if (!x.exists()) return null;
+            final java.io.RandomAccessFile raf = new java.io.RandomAccessFile(x, "r");
+            return new RandomRead() {
+                public synchronized int read(long pos, byte[] b, int off, int len) throws IOException {
+                    if (len == 0) return 0;
+                    raf.seek(pos);
+                    return raf.read(b, off, len);
+                }
+                public long length() throws IOException { return raf.length(); }
+                public void close() throws IOException { raf.close(); }
+            };
+        }
         public AtomicWrite replace(String name) throws IOException {
             final AtomicFile af = new AtomicFile(f(name));
             final FileOutputStream fos = af.startWrite();

@@ -15,6 +15,7 @@ public final class AllV2Tests {
             {"JsonTest", (Suite) JsonTest::run},
             {"StoreContractTest", (Suite) StoreContractTest::run},
             {"StorePersistenceTest", (Suite) StorePersistenceTest::run},
+            {"FrameTest", (Suite) FrameTest::run},
             {"CapabilityRegistryTest", (Suite) CapabilityRegistryTest::run},
             {"VolumeRegistryTest", (Suite) VolumeRegistryTest::run},
             {"WalkerTest", (Suite) WalkerTest::run},
