@@ -20,6 +20,7 @@ public final class PlanStaleness {
             for (String id : it.requires) { FileRecord f = files.get(id); if (f != null) it.fps.put(id, f.fingerprint()); }
             Recommendation r = recs == null ? null : recs.get(it.recId);
             if (r != null && r.reasonParams.containsKey("appStats")) it.appStats = r.reasonParams.get("appStats");
+            if (r != null && it.fileIds.size() == 1) for (String e : r.evidenceRefs) if (e.startsWith("sha256:")) it.hashes.put(it.fileIds.get(0), e.substring(7));
         }
     }
     /**
@@ -28,7 +29,18 @@ public final class PlanStaleness {
      * @param apps current installed apps by package; null skips app checks
      */
     public static List<String> check(ActionPlan p, Map<String, FileRecord> current, Map<String, Recommendation> currentRecs, Map<String, InstalledApp> apps) {
+        return check(p, current, currentRecs, apps, null);
+    }
+    /** As above; with a hasher, every planned file with a recorded SHA-256 is re-hashed (catches same-size, same-mtime overwrites). */
+    public static List<String> check(ActionPlan p, Map<String, FileRecord> current, Map<String, Recommendation> currentRecs, Map<String, InstalledApp> apps,
+                                     HashOnDemand.Hasher hasher) {
         List<String> why = new ArrayList<String>();
+        if (hasher != null) for (ActionPlan.PlanItem it : p.items) for (Map.Entry<String, String> h : it.hashes.entrySet()) {
+            FileRecord f = current.get(h.getKey());
+            if (f == null || f.presence != Presence.PRESENT) continue;     // reported below
+            String now = hasher.sha256(f);
+            if (now == null || !now.equals(h.getValue())) why.add(it.unitId + ": content of " + (f.path == null ? h.getKey() : f.path) + " changed (hash)");
+        }
         for (ActionPlan.PlanItem it : p.items) {
             for (Map.Entry<String, Fingerprint> e : it.fps.entrySet()) {
                 FileRecord f = current.get(e.getKey());

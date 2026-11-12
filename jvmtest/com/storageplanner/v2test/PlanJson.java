@@ -67,7 +67,9 @@ final class PlanJson {
             for (Recommendation r : AssessJson.recs) cur.put(PlanStaleness.key(r.fileId, r.proposedAction), r);
             Map<String, InstalledApp> am = new HashMap<String, InstalledApp>();
             for (InstalledApp a : ext.list()) am.put(a.packageName, a);
-            staleness = PlanStaleness.check(old, fm, cur, am);
+            staleness = PlanStaleness.check(old, fm, cur, am, new HashOnDemand.Hasher() {
+                public String sha256(FileRecord f) { return f.path == null ? null : PlanJson.sha256(Paths.get(root, f.path)); }
+            });
             if (plan == null) plan = old;
             else if (!staleness.isEmpty()) plan.staleReasons.addAll(staleness);
         }
@@ -86,6 +88,8 @@ final class PlanJson {
             it.unitId = Json.str(m, "unitId"); it.recId = Json.str(m, "recommendationId"); it.code = Json.str(m, "reasonCode");
             it.action = Action.valueOf(Json.str(m, "action")); it.tier = Tier.valueOf(Json.str(m, "tier")); it.bytes = Json.lng(m, "bytes", 0);
             it.appStats = Json.str(m, "appStats");
+            Map<String, Object> hs = (Map<String, Object>) m.get("hashes");
+            if (hs != null) for (Map.Entry<String, Object> e : hs.entrySet()) it.hashes.put(e.getKey(), (String) e.getValue());
             for (Object f : Json.list(m, "fileIds")) it.fileIds.add((String) f);
             for (Object f : Json.list(m, "requires")) it.requires.add((String) f);
             Map<String, Object> fps = (Map<String, Object>) m.get("fps");
@@ -120,6 +124,7 @@ final class PlanJson {
              .name("exact").value(it.exact).name("priorityClass").value(it.priorityClass).name("cost").value(AssessJson.r(it.cost))
              .name("utility").value(AssessJson.r(it.utility)).name("fileIds").strings(it.fileIds).name("requires").strings(it.requires);
             if (it.appStats != null) w.name("appStats").value(it.appStats);
+            w.name("hashes").beginObject(); for (Map.Entry<String, String> e : it.hashes.entrySet()) w.name(e.getKey()).value(e.getValue()); w.endObject();
             w.name("fps").beginObject();
             for (Map.Entry<String, Fingerprint> e : it.fps.entrySet()) w.name(e.getKey()).beginArray().value(e.getValue().size).value(e.getValue().mtime).value(e.getValue().inode).endArray();
             w.endObject().endObject();

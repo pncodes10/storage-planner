@@ -38,6 +38,8 @@ public final class ActionPlan implements Record {
         /** Fingerprints at plan time for fileIds and requires (staleness, PHASE_5 7); app subjects: "v=<versionCode>,c=<cache>,d=<data>". */
         public Map<String, Fingerprint> fps = new TreeMap<String, Fingerprint>();
         public String appStats;
+        /** SHA-256 per file at plan time (from the rec's "sha256:" evidence, V3); re-checked by PlanStaleness when a hasher is given. */
+        public Map<String, String> hashes = new TreeMap<String, String>();
     }
 
     public static int versionOf(String planId) {

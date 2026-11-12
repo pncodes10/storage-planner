@@ -124,6 +124,8 @@ def discovery(args):
             ok = phase3(args, r) and ok
         if n >= 4:   # phase 2/3 gates run on their own (--gate phase3) against the same snapshot
             ok = phase4(args, r) and ok
+        if n >= 5:
+            ok = phase5(args, r) and ok
         print("GATE %s %s" % (args.gate, "PASSED" if ok else "FAILED"))
         return 0 if ok else 1
     return 0
@@ -878,6 +880,158 @@ def phase4(args, r):
     return ok
 
 
+def plan_tiers(plan):
+    out = {"files": {}, "apps": {}}
+    for it in plan["items"]:
+        k = "apps" if not it["fileIds"] else "files"
+        out[k][it["tier"]] = out[k].get(it["tier"], 0) + it["bytes"]
+    return out
+
+
+def phase5(args, r):
+    """PHASE_5 9: plan metrics over V2Cli --target-bytes runs (each a full result with a plan) + scenario 12 staleness."""
+    man = manifest_files(args.dataset)
+    mby = {nfc(e["path"]): e for e in man if "symlink_target" not in e}
+    rows, ok = [], True
+
+    def row(name, value, gate=None, passed=None):
+        nonlocal ok
+        if passed is False:
+            ok = False
+        rows.append((name, value, gate or "", "" if passed is None else ("PASS" if passed else "FAIL")))
+
+    def acc_of(e):
+        rel = {x["type"] for x in e.get("relationships", [])}
+        cap = bool(rel) and rel <= CAP_TYPES and e["category"] not in ("thumbnail_cache", "temp_cache")
+        a = list(e["acceptable_tiers"])
+        if cap:
+            a = [t for t in a if t not in ("SAFE", "NO_LOSS")] or ["YOUR_CALL"]
+        return a
+    acc = {p: acc_of(e) for p, e in mby.items()}
+    shaset = {}
+    for p, e in mby.items():
+        if e.get("sha256") and e.get("size", 0) > 0:
+            shaset.setdefault(e["sha256"], []).append(p)
+
+    def safe_ok(p, removed_paths):
+        """A26: inside a byte-identical non-mnd set, removing any member is correct while another member survives."""
+        e = mby.get(p)
+        if not e or e["must_never_delete"]:
+            return False
+        if "SAFE" in acc[p]:
+            return True
+        ps = shaset.get(e.get("sha256"), [])
+        return len(ps) > 1 and not any(mby[q]["must_never_delete"] for q in ps) and any(q not in removed_paths for q in ps if q != p) \
+            and any("SAFE" in acc[q] for q in ps)
+    # truly recoverable bytes per tier (manifest): SAFE+NO_LOSS = acceptable contains SAFE after the spec cap; YOUR_CALL = acceptable
+    # contains YOUR_CALL but not SAFE
+    true_safe = sum(e["size"] for p, e in mby.items() if "SAFE" in acc[p] and not e["must_never_delete"])
+    true_yc = sum(e["size"] for p, e in mby.items() if "YOUR_CALL" in acc[p] and "SAFE" not in acc[p] and not e["must_never_delete"])
+    row("manifest truly recoverable bytes: SAFE/NO_LOSS (after spec cap) / YOUR_CALL-only", "%d / %d" % (true_safe, true_yc))
+    plans = {}
+    for kv in (args.plans or "").split(","):
+        if "=" in kv:
+            n, path = kv.split("=", 1)
+            plans[n] = load(path)
+    if args.result and r.get("plan"):
+        plans.setdefault("result", r)
+    for name, pr in plans.items():
+        plan = pr.get("plan")
+        if not plan:
+            row("plan %s" % name, "missing", "present", False)
+            continue
+        path_of = {f["fileId"]: nfc(f["path"]) for f in pr["files"]}
+        recs = {x["recommendationId"]: x for x in pr.get("recommendations", [])}
+        keepers = {g["keeperId"] for g in pr.get("duplicateGroups", []) if g.get("keeperId")}
+        t = plan_tiers(plan)
+        tgt = "max" if plan["targetBytes"] >= 2 ** 63 - 1 else str(plan["targetBytes"])
+        row("plan %s target %s: reachesTarget / highestTier / reasons" % (name, tgt),
+            "%s / %s / %s" % (plan["reachesTarget"], plan["highestTier"], ",".join(plan["reasonCodes"]) or "-"))
+        row("  bytes per tier (files)", json.dumps(t["files"], sort_keys=True))
+        row("  bytes per tier (app subjects)", json.dumps(t["apps"], sort_keys=True))
+        row("  achievable / exactOnly / withYourCall", "%d / %d / %d" % (plan["achievableBytes"], plan["achievableExactBytes"], plan["withYourCallBytes"]))
+        # consistency
+        seen, dup, bad = set(), 0, []
+        tot = 0
+        for it in plan["items"]:
+            tot += it["bytes"]
+            for f in it["fileIds"]:
+                dup += f in seen
+                seen.add(f)
+                if it["action"] == "DELETE" and f in keepers:
+                    bad.append("keeper " + path_of.get(f, f))
+            x = recs.get(it["recommendationId"])
+            if x is None or x["tier"] in ("REVIEW", "PROTECTED") or x["tier"] != it["tier"]:
+                bad.append("rec " + it["unitId"])
+            if x is not None and x.get("reasonParams", {}).get("hashPending") == "true" and it["action"] == "DELETE":
+                bad.append("hashPending " + it["unitId"])
+        removed = {f for it in plan["items"] if it["action"] == "DELETE" for f in it["fileIds"]}
+        touched = {f for it in plan["items"] for f in it["fileIds"]}
+        for it in plan["items"]:
+            for q in it.get("requires", []):
+                if it["action"] in ("DELETE", "UNINSTALL_APP") and q in touched:
+                    bad.append("requires " + path_of.get(q, q))
+        nyc = sum(it["bytes"] for it in plan["items"] if it["tier"] != "YOUR_CALL")
+        cons = dup == 0 and not bad and tot == plan["withYourCallBytes"] and nyc == plan["achievableBytes"] and plan["validatorDropped"] == 0
+        row("  plan consistency (no file twice, no keeper/REVIEW/PROTECTED/hashPending, requires kept, sums)",
+            "dup %d, violations %d %s" % (dup, len(bad), bad[:3]), "0", cons)
+        mnd = [path_of.get(f) for f in touched if mby.get(path_of.get(f), {}).get("must_never_delete")]
+        row("  must_never_delete files in plan", "%d %s" % (len(mnd), mnd[:3]), "= 0", not mnd)
+        removed_paths = {path_of.get(f) for f in removed}
+        # storage-recovery accuracy per tier (file items only)
+        for tier in ("SAFE", "NO_LOSS", "YOUR_CALL"):
+            items = [it for it in plan["items"] if it["tier"] == tier and it["fileIds"] and it["action"] == "DELETE"]
+            planned = sum(it["bytes"] for it in items)
+            corr = 0
+            for it in items:
+                for f in it["fileIds"]:
+                    p = path_of.get(f)
+                    e = mby.get(p)
+                    if e and not e["must_never_delete"] and (safe_ok(p, removed_paths) if tier != "YOUR_CALL" else ("SAFE" in acc[p] or "YOUR_CALL" in acc[p])):
+                        corr += e["size"]
+            row("  %s delete bytes planned / correct (%% of planned)" % tier, "%d / %d (%.1f%%)" % (planned, corr, 100.0 * corr / planned if planned else 100.0))
+        sn = sum(it["bytes"] for it in plan["items"] if it["tier"] in ("SAFE", "NO_LOSS") and it["fileIds"] and it["action"] == "DELETE")
+        sc = sum(mby[path_of[f]]["size"] for it in plan["items"] if it["tier"] in ("SAFE", "NO_LOSS") and it["action"] == "DELETE"
+                 for f in it["fileIds"] if path_of.get(f) in mby and safe_ok(path_of[f], removed_paths))
+        row("  storage-recovery accuracy SAFE+NO_LOSS: correct planned / truly recoverable", "%d / %d = %.3f" % (sc, true_safe, sc / true_safe if true_safe else 1.0))
+        row("  storage-recovery wrong bytes (SAFE+NO_LOSS planned on files not acceptable SAFE)", "%d (%.2f%% of planned)" % (sn - sc, 100.0 * (sn - sc) / sn if sn else 0.0), "<= 2%", sn == 0 or (sn - sc) <= 0.02 * sn)
+        if not plan["reachesTarget"]:
+            row("  unreachable reports achievable", "PL_TARGET_UNREACHABLE" in plan["reasonCodes"] and "achievable" in plan.get("reasonParams", {}), "true",
+                "PL_TARGET_UNREACHABLE" in plan["reasonCodes"])
+        if tgt == "max":
+            row("  max safe has no YOUR_CALL", plan["withYourCallBytes"] == plan["achievableBytes"], "true", plan["withYourCallBytes"] == plan["achievableBytes"])
+    # scenario 12
+    if args.stale:
+        st = load(args.stale)
+        plan = st.get("plan") or {}
+        reasons = " ".join(plan.get("staleReasons", []))
+        muts = load(args.mutations_file or (args.dataset.rstrip("/") + "/mutations.json"))["mutations"]
+        pre = plans.get("s12pre")
+        cover_ok = True
+        if pre:
+            pid = {f["fileId"]: nfc(f["path"]) for f in pre["files"]}
+            inplan = {}
+            for it in pre["plan"]["items"]:
+                for f in it["fileIds"] + it.get("requires", []):
+                    inplan[pid.get(f, f)] = f
+            for mu in muts:
+                for q in (mu["path"], mu.get("target")):
+                    if q and nfc(q) in inplan:
+                        hit = nfc(q) in reasons or inplan[nfc(q)] in reasons
+                        cover_ok = cover_ok and hit
+                        row("  S12 %s %s (in plan)" % (mu["op"], q), "named in stale reasons" if hit else "NOT NAMED", "named", hit)
+        row("scenario S12 plan state after mutation", plan.get("state"), "STALE", plan.get("state") == "STALE" and cover_ok)
+        row("  stale reasons", len(plan.get("staleReasons", [])))
+        for x in plan.get("staleReasons", [])[:8]:
+            row("    " + x, "")
+    else:
+        row("scenario S12", "N/A (no --stale run)")
+    w = max(len(x[0]) for x in rows)
+    for name, value, gate, res in rows:
+        print("%-*s  %s  %s  %s" % (w, name, value, gate, res))
+    return ok
+
+
 def summary(args):
     """Aggregate tier counts of a result without a manifest (e.g. a real photo corpus): no paths, no names."""
     from collections import Counter
@@ -917,6 +1071,9 @@ def main(argv):
     ap.add_argument("--out")
     ap.add_argument("--fold", default="1", help="phase3: accuracy rows on fold 0, 1 or all (F-03); safety rows always on all pairs")
     ap.add_argument("--incremental", help="phase2: result of a second --kind incremental run on the same --state-dir")
+    ap.add_argument("--plans", help="phase5: name=result.json,... (V2Cli runs with --target-bytes on the same snapshot)")
+    ap.add_argument("--stale", help="phase5: result of a --check-plan run on a mutated copy (scenario 12)")
+    ap.add_argument("--mutations", dest="mutations_file", help="phase5: mutations.json used for --stale")
     ap.add_argument("--summary", action="store_true", help="phase4: aggregate tier counts of --result without a manifest")
     a = ap.parse_args(argv)
     if a.summary and a.result:
