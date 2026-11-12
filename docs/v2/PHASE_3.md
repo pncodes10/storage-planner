@@ -374,10 +374,17 @@ also stripping `[-_ ](v\d+|final|draft|old|new|protected|signed|copy)` → `newe
 `eligible(m)`: `presence == PRESENT`, `readable != FALSE`, `extractionStatus != UNREADABLE`, fingerprint current, hash current
 (exact groups), not a non-canonical alias, and `Volume.mounted`. "Accessible" (spec 6.3 step 23) = eligible.
 
-`KeeperSelector.exact(members)`: among eligible members, the first by ARCHITECTURE §8 order — `protection != NONE` →
-canonical `area` rank (`camera, screenshot, document, music, movies, pictures, download, wa_doc, wa_image, wa_video, telegram_media,
-wa_sent, wa_sent_video`, others after) → earliest known `createdAt` (unknown last) → no edit/copy suffix in the name (`NameStem`
-stripped nothing) → shortest path → smallest fileId. `keeperReasons`: `G_KEEPER_CANONICAL` if decided by area, `G_KEEPER_OLDEST`
+`KeeperSelector.exact(members)` (**lead ruling on REVIEW_2 F-06**, replaces the earlier order): among eligible members, the first by —
+1. `protection != NONE`;
+2. `locRank`: 0 = user-organised (area `camera, screenshot, document, music, movies, pictures`, or any path under `Documents/`);
+   1 = other; 2 = `download`; 3 = chat (`wa_*`, `telegram_media`); 4 = temp/cache/trash (`temp, ext_cache, thumbnails, trash, wa_status`,
+   `.trashed-*`, `.Statuses`);
+3. `nameRank`: 0 = descriptive, 1 = generic — generic if `NameStem` stripped a copy suffix (`(1)`, ` - copy`, `~2`), or the stem
+   matches the closed list `GraphConfig.GENERIC_NAMES`: `temp\d*`, `tmp\d*`, `document\d*`, `file\d*`, `untitled\d*`, `download\d*`,
+   `new( document)?\d*`, `IMG-\d{8}-WA\d{4}`, `[0-9a-f]{16,}`, `\d+` (case-insensitive, after stripping `(n)`);
+4. oldest known `mtime` (unknown last); 5. path (ascending, NFC); 6. smallest fileId.
+Within `locRank` 0 the classic area order (`camera, screenshot, document, music, movies, pictures`) is **not** applied: equal rank
+falls through to the name. `keeperReasons`: `G_KEEPER_CANONICAL` if decided by area, `G_KEEPER_OLDEST`
 by time, `G_KEEPER_QUALITY` never for exact groups. No eligible member → `keeperId = null`, `keeperFallback = true`: no member of
 that group gets a group-based recommendation (Phase 4: REVIEW `R_UNCERTAIN_COPY` if the group was otherwise actionable).
 Trashed members (`.trashed-*`) are never keepers while another member is eligible.

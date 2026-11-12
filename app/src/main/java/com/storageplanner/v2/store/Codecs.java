@@ -273,14 +273,8 @@ public final class Codecs {
     }
     static String s(Object o) { return o instanceof String ? (String) o : null; }
 
-    public static final Codec<FeatureRecord> FEATURE = new Simple<FeatureRecord>("file_features", "fileId") {
-        Object get(FeatureRecord r, int i) { return r.fileId; }
-        FeatureRecord make(Object[] v) { FeatureRecord r = new FeatureRecord(); r.fileId = s(v[0]); return r; }
-    };
-    public static final Codec<HashRecord> HASH = new Simple<HashRecord>("file_hashes", "fileId") {
-        Object get(HashRecord r, int i) { return r.fileId; }
-        HashRecord make(Object[] v) { HashRecord r = new HashRecord(); r.fileId = s(v[0]); return r; }
-    };
+    public static final Codec<FeatureRecord> FEATURE = FeatureCodec.FEATURE;
+    public static final Codec<HashRecord> HASH = FeatureCodec.HASH;
     public static final Codec<EmbeddingRecord> EMBEDDING = new Simple<EmbeddingRecord>("file_embeddings", "fileId", "modelId") {
         Object get(EmbeddingRecord r, int i) { return i == 0 ? r.fileId : r.modelId; }
         EmbeddingRecord make(Object[] v) { EmbeddingRecord r = new EmbeddingRecord(); r.fileId = s(v[0]); r.modelId = s(v[1]); return r; }

@@ -9,6 +9,15 @@ public final class Budget {
     private long startNanos = Long.MIN_VALUE;
 
     public void start(Clock clock) { startNanos = clock.monotonicNanos(); }
+    public void chargeBytes(long n) { bytesRead += n; }
+    public void chargeDecode() { decodes++; }
+    /** "BYTES", "DECODES", "TIME", or null when not exhausted. */
+    public String stoppedBy(Clock clock) {
+        if (maxBytesRead >= 0 && bytesRead >= maxBytesRead) return "BYTES";
+        if (maxDecodes >= 0 && decodes >= maxDecodes) return "DECODES";
+        if (maxMs >= 0 && startNanos != Long.MIN_VALUE && (clock.monotonicNanos() - startNanos) / 1000000L >= maxMs) return "TIME";
+        return null;
+    }
     public boolean exhausted(Clock clock) {
         if (maxBytesRead >= 0 && bytesRead >= maxBytesRead) return true;
         if (maxDecodes >= 0 && decodes >= maxDecodes) return true;

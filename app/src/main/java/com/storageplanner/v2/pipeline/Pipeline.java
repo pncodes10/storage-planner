@@ -27,11 +27,26 @@ public final class Pipeline {
 
     public Pipeline(V2Device device, V2Store store, PipelineConfig config, List<Stage> stages) {
         this.device = device; this.store = store; this.config = config == null ? new PipelineConfig() : config;
-        this.stages = stages == null ? defaultStages() : new ArrayList<Stage>(stages);
+        this.stages = stages == null ? defaultStages(this.config, device) : new ArrayList<Stage>(stages);
     }
 
-    /** Phase-1 default stage list. */
+    /** Phase-1 default stage list (discovery only). */
     public static List<Stage> defaultStages() { return new ArrayList<Stage>(Collections.<Stage>singletonList(new DiscoveryEngine())); }
+
+    /** [DISCOVER, T1, T2, T3] filtered by config.maxTier; the installed set goes to discovery only when availability is FULL. */
+    public static List<Stage> defaultStages(PipelineConfig config, V2Device device) {
+        List<Stage> l = new ArrayList<Stage>();
+        java.util.Set<String> installed = null;
+        if (device != null && device.apps() != null && device.apps().availability() == com.storageplanner.v2.device.Availability.FULL) {
+            installed = new java.util.TreeSet<String>();
+            for (com.storageplanner.v2.device.InstalledApp a : device.apps().list()) installed.add(a.packageName);
+        }
+        l.add(new DiscoveryEngine(new com.storageplanner.v2.discovery.WalkLimits(), installed));
+        if (config.maxTier >= 1) l.add(new com.storageplanner.v2.features.T1MetadataStage());
+        if (config.maxTier >= 2) l.add(new com.storageplanner.v2.features.T2HashStructStage());
+        if (config.maxTier >= 3) l.add(new com.storageplanner.v2.features.T3ImageStage());
+        return l;
+    }
 
     static boolean open(ScanState s) { return s == ScanState.RUNNING || s == ScanState.PAUSED || s == ScanState.INTERRUPTED; }
 

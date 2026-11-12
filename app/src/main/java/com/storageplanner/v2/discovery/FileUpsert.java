@@ -90,6 +90,8 @@ final class FileUpsert {
             cur.sizeBytes = size; cur.modifiedAt = mtime; cur.inode = inode;
             if (!addedNow && !(cur.change == ChangeState.ADDED && cur.changeScanId == scanId)) { cur.change = ChangeState.CHANGED; cur.changeScanId = scanId; }
             cur.scanVersion = V2.SCAN_VERSION;
+            int t = (1 << 1) | (1 << 2) | (1 << 3);   // Phase 2: content changed, tiers 1-3 must run again
+            if (((cur.tiersDone | cur.tiersFailed) & t) != 0) { cur.tiersPending |= (cur.tiersDone | cur.tiersFailed) & t; cur.tiersDone &= ~t; cur.tiersFailed &= ~t; }
         }
         String rp = rawPathOrNull != null && !rawPathOrNull.equals(path) ? rawPathOrNull : null;
         cur.rawPath = rp;
