@@ -17,6 +17,14 @@ public final class ReasonCatalog {
         c("S_APP_LOG", "SAFE", "Log file written by {app}; apps do not need old logs.");
         c("S_EXPIRED_STATUS", "SAFE", "Viewed WhatsApp status older than a day; WhatsApp no longer shows it.");
         c("S_EMPTY_FILE", "SAFE", "Empty file (0 bytes); it holds no content.");
+        // Phase 5 (PHASE_5 6.1, 12 C-4)
+        c("S_APP_CACHE", "SAFE", "Cache of {app} ({bytes}); the app rebuilds it when needed.");
+        c("N_APP_ARCHIVE", "NO_LOSS", "{app} has not been used for {idle}; Android can archive it and keep your data, restoring it from the store when you tap it.");
+        c("Y_IDLE_APP", "YOUR_CALL", "{app} has not been used for {idle}; uninstalling it frees {bytes} including its data.");
+        c("PL_NEEDS_YOUR_CALL", "PLAN", "To reach {target}, {n} items ({bytes}) need your decision; {safe} can be freed without any.");
+        c("PL_TARGET_UNREACHABLE", "PLAN", "{target} cannot be reached within the allowed risk; {achievable} can be freed safely ({withYourCall} with items that need your decision).");
+        c("PL_HASH_PENDING", "PLAN", "{pending} items are still being checked and will be offered later.");
+        c("PL_VALIDATOR_DROPPED", "PLAN", "{dropped} items were removed from the plan by the final safety check.");
         c("S_UNINSTALLED_LEFTOVER", "SAFE", "Left behind by {pkg}, which is no longer installed.");
         c("N_EXACT_DUPLICATE", "NO_LOSS", "Identical copy: {keeper} has exactly the same content (checked byte for byte) and is kept.");
         c("N_SAME_CONTENT_DIFFERENT_NAME", "NO_LOSS", "Same content as {keeperName}, which is kept; only the name differs ({name}).");

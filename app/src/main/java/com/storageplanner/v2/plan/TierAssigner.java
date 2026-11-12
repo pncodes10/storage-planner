@@ -38,7 +38,9 @@ public final class TierAssigner {
         for (Candidate c : cands) {                                                                               // row 8 (+HC15)
             if (!is(c, "Y_") || !c.action.removal()) continue;
             Double el = a.elPess.get(c.action), ut = a.utility.get(c.action);
-            boolean ok = passes(c) && el != null && el <= pol.tYourCall && c.confidence >= pol.cYourCall && ut != null && ut > 0;
+            // A25: eligibility by the kind of evidence (candidate code + loss/confidence gates), never by a size floor;
+            // utility only ranks YOUR_CALL candidates here and orders plan inclusion in Planner2.
+            boolean ok = passes(c) && el != null && el <= pol.tYourCall && c.confidence >= pol.cYourCall && ut != null;
             if (ok && (best == null || ut > bu)) { best = c; bu = ut; }
             if (!ok && passes(c)) { failedY = true; if (firstFailed == null) firstFailed = c; }
         }

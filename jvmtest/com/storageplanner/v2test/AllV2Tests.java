@@ -37,6 +37,9 @@ public final class AllV2Tests {
             {"HardRulesTest", (Suite) HardRulesTest::run},
             {"EstimatorsTest", (Suite) EstimatorsTest::run},
             {"RiskPropertyTest", (Suite) RiskPropertyTest::run},
+            {"UnitBuilder2Test", (Suite) UnitBuilder2Test::run},
+            {"Planner2Test", (Suite) Planner2Test::run},
+            {"PlanPropertyTest", (Suite) PlanPropertyTest::run},
         };
         List<String> only = Arrays.asList(args);
         int failures = 0, ran = 0;

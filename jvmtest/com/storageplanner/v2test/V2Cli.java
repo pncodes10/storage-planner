@@ -78,7 +78,12 @@ public final class V2Cli {
                 else if (s.equals("--max-tier")) opt.maxTier = Integer.parseInt(a.get(++i));
                 else if (s.equals("--hash")) opt.hash = a.get(++i);
                 else if (s.equals("--mode")) opt.mode = a.get(++i);
-                else if (s.equals("--target-bytes")) { String v = a.get(++i); opt.targetBytes = v.equals("max") ? Long.MAX_VALUE : Long.parseLong(v); }
+                else if (s.equals("--target-bytes")) { opt.targetBytes = PlanJson.parseTarget(a.get(++i)); assess = true; graph = true; }
+                else if (s.equals("--sdk")) PlanJson.sdk = Integer.parseInt(a.get(++i));
+                else if (s.equals("--installed-apps-ext")) PlanJson.extApps = a.get(++i);
+                else if (s.equals("--check-plan")) { PlanJson.checkPlan = a.get(++i); assess = true; graph = true; }
+                else if (s.equals("--max-plan-tier")) PlanJson.maxTier = com.storageplanner.v2.model.Tier.valueOf(a.get(++i));
+                else if (s.equals("--hash-budget-bytes")) PlanJson.hashBudget = Long.parseLong(a.get(++i));
                 else if (s.equals("--installed-apps")) installedApps = a.get(++i);
                 else if (s.equals("--workers")) { if (Integer.parseInt(a.get(++i)) != 0) err.println("note: --workers ignored, single-threaded until Phase 10 (A11)"); }
                 else if (s.equals("--budget-ms")) budgetMs = Long.parseLong(a.get(++i));
@@ -167,6 +172,14 @@ public final class V2Cli {
                 for (FileRecord f : store.files().all()) fm.put(f.fileId, f);
                 AssessJson.verdicts = vm;
                 AssessJson.recs = com.storageplanner.v2.plan.ProvisionalRecommendations.of(vs, fm, res.session.scanId);
+                PlanJson.plan = null; PlanJson.staleness = null;
+                if (opt.targetBytes != null || PlanJson.checkPlan != null) {
+                    long tp = System.nanoTime();
+                    AssessJson.mode = opt.mode;
+                    String perr = PlanJson.make(store, apps, installedApps, r.path, fm, opt.targetBytes, clock.nowMillis(), res.session.scanId, err);
+                    if (perr != null) { err.println(perr); return 3; }
+                    StageTimer.ms.put("PLAN", (System.nanoTime() - tp) / 1000000L);
+                }
             } catch (StoreException e) { err.println("assess: " + e.getMessage()); return 3; }
             StageTimer.ms.put("ASSESS", (System.nanoTime() - ta) / 1000000L);
         }

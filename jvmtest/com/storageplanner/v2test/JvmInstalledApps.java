@@ -17,7 +17,7 @@ import java.util.*;
  * and the optional size/usage keys codeBytes, dataBytes, cacheBytes, lastUsed. FULL when a file is given, else UNAVAILABLE.
  */
 public final class JvmInstalledApps implements InstalledApps {
-    private final Availability availability;
+    private Availability availability;
     private final Map<String, InstalledApp> apps = new TreeMap<String, InstalledApp>();
 
     public JvmInstalledApps(String jsonPathOrNull) {
@@ -57,10 +57,40 @@ public final class JvmInstalledApps implements InstalledApps {
             a.codeBytes = Json.lng(m, "codeBytes", -1); a.dataBytes = Json.lng(m, "dataBytes", -1); a.cacheBytes = Json.lng(m, "cacheBytes", -1);
             a.lastUsed = Json.lng(m, "lastUsed", Long.MIN_VALUE);
             Object sys = m.get("system"); if (sys instanceof Boolean) a.system = Tri.of((Boolean) sys);
+            fields(a, m);
             apps.put(a.packageName, a);
         }
     }
 
+    static Tri tri(Object o) { return o instanceof Boolean ? Tri.of((Boolean) o) : Tri.UNKNOWN; }
+    static void fields(InstalledApp a, Map<String, Object> m) {
+        if (m.containsKey("hasLauncher")) a.hasLauncher = tri(m.get("hasLauncher"));
+        if (m.containsKey("game")) a.game = tri(m.get("game"));
+        if (m.containsKey("essential")) a.essential = tri(m.get("essential"));
+    }
+    /** PHASE_5 8 --installed-apps-ext: merges app storage/usage fields into known packages; unknown packages are added. */
+    @SuppressWarnings("unchecked")
+    public void mergeExt(String path) {
+        Object root;
+        try { root = Json.parse(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8)); }
+        catch (Exception e) { throw new IllegalArgumentException("installed apps ext " + path + ": " + e, e); }
+        List<Object> l = root instanceof Map ? Json.list((Map<String, Object>) root, "apps") : (List<Object>) root;
+        if (l == null) return;
+        if (availability == Availability.UNAVAILABLE) availability = Availability.FULL;
+        for (Object o : l) {
+            Map<String, Object> m = (Map<String, Object>) o;
+            String pkg = Json.str(m, "package"); if (pkg == null) continue;
+            InstalledApp a = apps.get(pkg);
+            if (a == null) { a = new InstalledApp(); a.packageName = pkg; apps.put(pkg, a); }
+            if (Json.str(m, "label") != null) a.label = Json.str(m, "label");
+            if (m.containsKey("codeBytes")) a.codeBytes = Json.lng(m, "codeBytes", -1);
+            if (m.containsKey("dataBytes")) a.dataBytes = Json.lng(m, "dataBytes", -1);
+            if (m.containsKey("cacheBytes")) a.cacheBytes = Json.lng(m, "cacheBytes", -1);
+            if (m.containsKey("lastUsed")) a.lastUsed = Json.lng(m, "lastUsed", Long.MIN_VALUE);
+            if (m.containsKey("system")) a.system = tri(m.get("system"));
+            fields(a, m);
+        }
+    }
     public Availability availability() { return availability; }
     public List<InstalledApp> list() { return availability == Availability.UNAVAILABLE ? Collections.<InstalledApp>emptyList() : new ArrayList<InstalledApp>(apps.values()); }
     public InstalledApp get(String pkg) { return pkg == null ? null : apps.get(pkg); }

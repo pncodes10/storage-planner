@@ -71,7 +71,7 @@ public final class V2Json {
             w.name("graphCoverage").any(graphCoverage);
         }
         w.name("recommendations"); AssessJson.recommendations(w);
-        w.name("plan").nullValue();
+        w.name("plan"); PlanJson.write(w);
         w.name("coverage");
         if (cov == null) w.nullValue(); else CoverageBuilder.write(w, cov);
         w.name("execution").nullValue();

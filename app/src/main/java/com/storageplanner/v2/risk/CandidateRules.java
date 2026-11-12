@@ -27,6 +27,11 @@ public final class CandidateRules {
         c.structural = true; c.evidenceRefs.add("area:" + ctx.f.area);
         return c;
     }
+    /** A25: the copy's mtime is more than a day before its claimed original's (both known): derivation direction contradicted. */
+    public static boolean copyPredatesOriginal(FileRecord copy, FileRecord orig) {
+        if (copy == null || orig == null || copy.modifiedAt == Unknown.TIME || orig.modifiedAt == Unknown.TIME) return false;
+        return copy.modifiedAt < orig.modifiedAt - RiskConfig.DAY;
+    }
     static boolean oldEnough(FileContext ctx) { return ctx.mtimeAgeMs >= RiskConfig.MIN_STRUCT_AGE_MS; }
 
     public static List<Candidate> generate(FileContext ctx, Assessment a, PresentationPolicy pol) {
@@ -82,17 +87,26 @@ public final class CandidateRules {
             Relationship e = ctx.copyEdge;
             boolean chat = UsageClassifier.CHAT.contains(f.area) || NameStem.WA.matcher(NameStem.of(f.name)).matches();
             String code = e.type == RelType.VERSION_OF ? "Y_CONVERTED_COPY" : chat ? "Y_CHAT_COPY" : "Y_SMALLER_COPY";
+            FileRecord kr = ctx.g.file(ctx.copyKeeper);
+            if (copyPredatesOriginal(f, kr)) {     // A25 slice 0: a derived copy cannot be older than its original (chronology contradiction)
+                Candidate c = new Candidate("R_UNCERTAIN_COPY", Tier.REVIEW, Action.REVIEW, EvidenceFamily.GRAPH);
+                c.p("other", pathOf(ctx, ctx.copyKeeper)); c.cites.add(e.type); c.evidenceRefs.add(e.edgeId); c.evidenceRefs.add("time:copy-older");
+                out.add(c);
+            } else {
             Candidate c = new Candidate(code, Tier.YOUR_CALL, Action.DELETE, EvidenceFamily.GRAPH);
             if (chat) c.families.add(EvidenceFamily.PROV);
             c.cites.add(e.type); String kp = pathOf(ctx, ctx.copyKeeper);
             c.p("original", kp).p("other", kp).p("format", f.type == null ? "other" : f.type.toUpperCase(Locale.ROOT));
             c.evidenceRefs.add(e.edgeId); c.dependencyIds.add(ctx.copyKeeper);
             out.add(c);
+            }
         }
         for (DuplicateGroup d : ctx.memberOf) {
             if (d.kind == NearGroupKind.BURST && d.keeperId != null && !d.keeperId.equals(f.fileId)) {
                 String kp = pathOf(ctx, d.keeperId);
-                Candidate c = pol.burstsAsYourCall ? new Candidate("Y_SIMILAR_SHOT", Tier.YOUR_CALL, Action.DELETE, EvidenceFamily.GRAPH, EvidenceFamily.CAPTURE)
+                FileRecord kr = ctx.g.file(d.keeperId);
+                boolean captures = u == UsageClass.CAMERA_PHOTO && kr != null && f.area != null && f.area.equals(kr.area);  // A25: edits are not shots
+                Candidate c = pol.burstsAsYourCall && captures ? new Candidate("Y_SIMILAR_SHOT", Tier.YOUR_CALL, Action.DELETE, EvidenceFamily.GRAPH, EvidenceFamily.CAPTURE)
                         : new Candidate("R_SIMILAR_SHOT", Tier.REVIEW, Action.REVIEW, EvidenceFamily.GRAPH, EvidenceFamily.CAPTURE);
                 c.cites.add(RelType.VISUALLY_SIMILAR);
                 c.p("keeper", kp).p("n", d.members.size()).p("why", "was taken within seconds of it").p("other", kp);

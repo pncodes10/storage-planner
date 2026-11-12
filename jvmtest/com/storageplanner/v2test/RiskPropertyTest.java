@@ -160,8 +160,12 @@ public final class RiskPropertyTest {
         T.eq("row 8", 8, x.v(cc2).row);
         FileRecord co3 = x.add("DCIM/Camera/sm.jpg", "camera", "jpeg", 3000002), cc3 = x.add("WhatsApp/Media/WhatsApp Images/IMG-20200101-WA0011.jpg", "wa_image", "jpeg", 100000);
         x.ce(co3, cc3, RelType.COMPRESSED_FROM, 0.95);
-        T.eq("row 9 (aggressive: failed Y_ shown as REVIEW)", 9, x.v(cc3, PresentationPolicy.AGGRESSIVE).row);
-        T.eq("row 11 (standard: failed Y_ dropped)", 11, x.v(cc3).row);
+        T.eq("row 8 (A25: a small chat copy is YOUR_CALL; size no longer hides it)", 8, x.v(cc3).row);
+        FileRecord co4 = x.add("DCIM/Camera/sm4.jpg", "camera", "jpeg", 3000003), cc4 = x.file("WhatsApp/Media/WhatsApp Images/IMG-20200101-WA0012.jpg", "wa_image", "jpeg", 100001);
+        cc4.extractionConfidence = 0.3; x.add(cc4);       // weak extraction: fails cYourCall in both modes (a non-size reason)
+        x.ce(co4, cc4, RelType.COMPRESSED_FROM, 0.95);
+        T.eq("row 9 (aggressive: failed Y_ shown as REVIEW)", 9, x.v(cc4, PresentationPolicy.AGGRESSIVE).row);
+        T.eq("row 11 (standard: failed Y_ dropped)", 11, x.v(cc4).row);
         FileRecord u1 = x.add("DCIM/Camera/u1.jpg", "camera", "jpeg", 3000003), u2 = x.add("Pictures/u1.jpg", "pictures", "jpeg", 3000003); x.exact(u1, u2, false);
         T.eq("row 10", 10, x.v(u2).row);
         FileRecord gone = x.file("Pictures/g.jpg", "pictures", "jpeg", 5003); gone.presence = Presence.REMOVED; x.add(gone);

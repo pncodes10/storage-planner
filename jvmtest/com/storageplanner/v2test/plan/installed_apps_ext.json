@@ -1,0 +1,13 @@
+{
+ "note": "PHASE_5 6.3 fixture: app storage/usage fields the dataset sidecar lacks (5 dataset packages + 3 cache-only packages). lastUsed in ms; --now 1794500000000 = 2026-11-13.",
+ "apps": [
+  {"package": "com.specimen.messenger", "system": false, "hasLauncher": true, "game": false, "codeBytes": 120000000, "dataBytes": 900000000, "cacheBytes": 85000000, "lastUsed": 1794400000000},
+  {"package": "com.specimen.bank", "system": false, "hasLauncher": true, "game": false, "essential": true, "codeBytes": 60000000, "dataBytes": 20000000, "cacheBytes": 4000000, "lastUsed": 1790000000000},
+  {"package": "com.specimen.game.racer", "system": false, "hasLauncher": true, "game": true, "codeBytes": 450000000, "dataBytes": 300000000, "cacheBytes": 25000000, "lastUsed": 1778000000000},
+  {"package": "com.specimen.player", "system": false, "hasLauncher": true, "game": false, "codeBytes": 40000000, "dataBytes": 15000000, "cacheBytes": 12000000, "lastUsed": 1786000000000},
+  {"package": "com.specimen.maps", "system": false, "hasLauncher": true, "game": false, "codeBytes": 90000000, "dataBytes": 200000000, "cacheBytes": 60000000, "lastUsed": 1794000000000},
+  {"package": "com.specimen.browser", "label": "Browser", "system": false, "hasLauncher": true, "game": false, "codeBytes": 150000000, "dataBytes": 50000000, "cacheBytes": 140000000, "lastUsed": 1794450000000},
+  {"package": "com.android.systemui", "label": "System UI", "system": true, "hasLauncher": false, "codeBytes": 30000000, "dataBytes": 1000000, "cacheBytes": 2000000, "lastUsed": 1794499000000},
+  {"package": "com.specimen.unknownstats", "label": "Stats unknown", "system": false, "hasLauncher": true, "codeBytes": -1, "dataBytes": -1, "cacheBytes": -1}
+ ]
+}
