@@ -73,6 +73,9 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A30 | Lead failure recorded: the GitHub build has failed on every push since v2 code landed, and it was not checked until 12:35 UTC. The APK compile step reports 10 errors in v2 code (desktop-only Java APIs). Fix assigned; a local compile check against Android framework classes is being added so this is caught before pushing. | The local tests compile against the desktop JDK only, so "all tests pass" never covered "compiles for Android". Phase A depends on this. |
 | A31 | v2 on the phone is limited by a guard: about 15,000 files on a 256 MB heap and about 42,000 on 512 MB. Above that it stops after discovery with a message pointing to Classic. Moving the store to SQLite (spec section 13, planned for Phase 10) is now the next engineering priority, ahead of Phase 6. | Measured peak is 6.4 KB of heap per file; the record shrink does not reduce it. The owner's phone has tens of thousands of files, so v2 will most likely hit the guard there. A clean stop with an explanation is acceptable for a first test; a crash is not. |
 | A32 | The memory fix is a pure-Java disk-backed store behind the existing store interface, not Android SQLite, for now. An architect profiles the heap first and may overturn this. | Spec section 13 says SQLite, but an Android-SQLite store cannot be compiled-and-run or tested anywhere in this environment, while a pure-Java store is fully testable on the desktop and runs unchanged on the phone. Untested persistence code under a tool that advises on deleting files is the larger risk. SQLite can implement the same interface later, once a device is available. |
+| A33 | User decisions (feedback, preferences, later the operation journal) are kept outside the resettable store log, in their own durable file. Until that exists, a test blocks production writes to those tables. | The store resets itself after unrecoverable damage; scan data can be rebuilt by rescanning, a user's "keep this" cannot. |
+| A34 | The 20,000-decode cap in the duplicate stage becomes a per-run budget: a capped run finishes with a result, marks unchecked photos "unknown" (never "unique") and says to run again; finished pair checks carry over. Decoded signatures are not stored. | Storing signatures would cost about 195 KB per photo, roughly 6 GB for 30,000 photos - on a phone that is short of space. |
+| A35 | Store design accepted as reviewed: one shared append-only log, capacity about 133,000 files at 256 MB (about 177,000 if the store is closed before results are shown), with a 1.25 safety factor because Android's memory overhead is unmeasured. | Reviewer recomputed the architect's 150,000 figure; the scale test runs under a hard 148 MB cap. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -82,28 +85,22 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (16:50 UTC, 12 Nov)
+## State (17:45 UTC, 12 Nov)
 
-- Phases 1-5 and Phase A built, reviewed and committed; 33 suites green; the
-  Android compile check passes; classic `core/` and the manifest untouched.
-- Phase A review (`REVIEW_A.md`): 1 blocker, 2 major, 12 minor; blocker, both
-  majors and 5 minors fixed. Verdict: read-only holds, Classic unchanged, fit
-  for a phone test, but v2 cannot yet handle a library the size of the
-  owner's (A31).
-- **Build to test on the phone: CI run 60** (commit 5a0dbaa, succeeded 16:50
-  UTC): https://github.com/pncodes10/storage-planner/actions/runs/43262858635
-- Store architect running (`PHASE_S_STORE.md`, A32).
-- Never run on a device. Unverified there: memory use on Android vs desktop,
-  the guard firing, HEIC and EXIF decoding, file access, timing, restore speed.
-- Open: SQLite store (A31), dataset label fix (A27), ClassicParityTest and
-  five other tests, 7 minor review findings.
+- Phases 1-5 and Phase A built, reviewed, committed; CI run 60 is the build to
+  test on the phone (v2 stops at the memory guard above ~15,000-42,000 files).
+- Store design (`PHASE_S_STORE.md`) written and reviewed (`REVIEW_S.md`:
+  3 blockers, 10 major, 5 minor, all fixed in the document). Seven slices.
+- Store implementer: running.
+- Open: dataset label fix (A27), ClassicParityTest and five other tests, 7 minor
+  Phase A review findings.
 
 ## Next steps
 
-1. Check the CI run for the review fixes; APK artifact = the build to test.
-2. SQLite-backed store behind the existing store interface (design -> review
-   -> implement), so v2 can scan a full phone.
-3. Dataset label fix (A27) and missing tests.
-4. Phase 6 (content signals, A28), then 7-10.
-5. If an agent stops with a usage-limit error: wait for the reset time in the
+1. Store slices S1-S7; after each stop: lead runs both scripts, commits,
+   checks CI. Exit: 150k-file scale test under -Xmx148m, byte-identical JSON
+   between the two stores, dataset results unchanged.
+2. Dataset label fix (A27) and missing tests.
+3. Phase 6 (content signals, A28), then 7-10.
+4. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.
