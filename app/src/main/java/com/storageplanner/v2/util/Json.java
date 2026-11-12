@@ -57,6 +57,7 @@ public final class Json {
     }
 
     private Map<String, Object> object(int depth) throws JsonException {
+        if (depth > MAX_DEPTH) throw new JsonException("nesting deeper than " + MAX_DEPTH, i);
         Map<String, Object> m = new LinkedHashMap<String, Object>();
         i++; ws();
         if (i < s.length() && s.charAt(i) == '}') { i++; return m; }
@@ -77,6 +78,7 @@ public final class Json {
     }
 
     private List<Object> array(int depth) throws JsonException {
+        if (depth > MAX_DEPTH) throw new JsonException("nesting deeper than " + MAX_DEPTH, i);
         List<Object> l = new ArrayList<Object>();
         i++; ws();
         if (i < s.length() && s.charAt(i) == ']') { i++; return l; }

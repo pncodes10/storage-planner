@@ -62,6 +62,9 @@ jobs:
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.ZipTest
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.MotionPhotoTest
 
+      - name: v2 tests (storage-analysis algorithm v2, JVM)
+        run: bash tools/v2eval/run_tests.sh
+
       - name: Android SDK parts
         run: |
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
