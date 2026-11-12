@@ -57,6 +57,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A15 | A14 amended: v2 need not match classic's safe bytes where classic's call is unsafe (WhatsApp "sent" copies matched on look alone, Telegram media assumed cloud-backed, older APKs, encrypted chat backups). Parity is checked per item against a documented exemption list. | Architect showed strict parity would force v2 to copy calls the spec forbids (6.2: similarity alone never makes files interchangeable; 8.3: a backup must be verified). Safety outranks matching the old number. |
 | A16 | The spec's tier definitions are the authority, not the dataset's labels; the evaluator translates dataset tiers to spec tiers. A delete at SAFE/NO-LOSS on a must-never-delete file fails under any translation. | The dataset marked exact and WhatsApp copies SAFE; the spec reserves NO-LOSS for verified identical copies and caps look-alike copies at YOUR CALL. |
 | A17 | A duplicate group's keeper is a label with no recommendation, not a PROTECTED item. | Otherwise about 300 ordinary originals would show as "protected", which reads as over-caution. |
+| A18 | `Android/data` and `Android/obb` stay restricted by default; the scoring gate expects them reported as inaccessible, not scanned. | Android 11+ blocks them on real phones. The dataset's one file under `Android/obb` made the Phase 1 gate fail by a single file; the algorithm was right and the gate was wrong. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -66,23 +67,21 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (06:30 UTC, 12 Nov)
+## State (07:00 UTC, 12 Nov)
 
-- Usage limit hit a second time (~02:45 UTC, reset 06:20 UTC; 3.5 h lost).
-  Pattern: Opus agents exhaust the 5-hour allowance in roughly one hour of
-  work. Agents are now told to stop adding scope at half budget and report.
-- Dataset: done and verified (2,409 files, 0 problems). Builder committed.
-- Phase 1: 128 Java files so far; `tools/v2eval/run_tests.sh` passes
-  (14 suites, 0 failures, incl. kill-and-resume) when run by the lead at
-  06:25 UTC. Implementer resumed to finish, run the CLI on both corpora and
-  write `PHASE_1_NOTES.md`.
-- Phases 3-5 design finished; reviewer agent running (`REVIEW_2.md`), with
-  rulings A15-A17 to check.
+- **Phase 1 done and committed.** 98 classes / 3,680 lines in `v2/`, 30 test
+  classes; `bash tools/v2eval/run_tests.sh` -> 14 suites, 0 failures, kill and
+  resume test passes (re-run by the lead). CLI on the 268 Drive photos: 268/268
+  found in under 0.2 s; on the dataset: 2,406/2,406 with `Android/obb` allowed.
+  24 small deviations listed in `PHASE_1_NOTES.md`. CI now runs the v2 tests.
+- Phase 2 implementer: running (slices: types, hashes, image basics, zip/apk,
+  pdf, mp4/audio, app data, incremental).
+- Phases 3-5 design: reviewer running (`REVIEW_2.md`).
 
 ## Next steps
 
-1. Phase 1 report -> lead re-runs tests -> commit -> Phase 2 implementer.
-2. Phases 3-5 design -> reviewer -> implement after Phase 2.
+1. Phase 2 report -> lead re-runs tests and the phase2 gate -> commit.
+2. REVIEW_2 -> lead answers open questions -> implement phases 3, 4, 5.
 3. First scored run on both datasets -> Phase A (app switch) -> phases 6-10 as
    far as the session allows.
 4. If an agent stops with a usage-limit error: wait for the reset time in the
