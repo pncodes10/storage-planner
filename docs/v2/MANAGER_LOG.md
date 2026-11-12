@@ -81,7 +81,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (17:05 UTC, 12 Nov)
+## State (16:50 UTC, 12 Nov)
 
 - Phases 1-5 and Phase A built, reviewed and committed; 33 suites green; the
   Android compile check passes; classic `core/` and the manifest untouched.
