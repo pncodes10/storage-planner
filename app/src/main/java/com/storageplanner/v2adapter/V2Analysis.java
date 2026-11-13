@@ -56,6 +56,21 @@ public final class V2Analysis {
         public UnitBuilder2.Input in;
         public Plans.Made made;
         public V2Adapter.Adapted adapted;     // null when Params.adapt is false
+        /**
+         * PHASE_S_STORE S7: photos whose comparison the scan left for a later run (GRAPH's decode budget ran out). The result is
+         * complete and safe — those photos are "relationships unknown", never unique, never grouped or removed on their
+         * comparisons — but another run continues the comparison from the saved checks. 0 = finished.
+         */
+        public long pendingPhotos;
+        /** The line the app shows when {@link #pendingPhotos} &gt; 0, else null. */
+        public String continueNote() { return continueMessage(pendingPhotos); }
+    }
+
+    /** "N photos have not been compared yet; run the analysis again to continue." (null for 0). */
+    public static String continueMessage(long pendingPhotos) {
+        if (pendingPhotos <= 0) return null;
+        return (pendingPhotos == 1 ? "1 photo has" : pendingPhotos + " photos have") + " not been compared with similar photos yet,"
+                + " so v2 suggests nothing for them; run the analysis again to continue the comparison.";
     }
 
     /** null if cancelled (only when a progress callback is given). */
@@ -87,6 +102,7 @@ public final class V2Analysis {
         r.made = Plans.make(in, ActionPlan.MAX_SAFE, null, false);
         Plans.version(store, r.made.plan, p.now, scanId);
         ScanSession ss = store.scanSessions().get(ScanSession.keyOf(scanId));   // F-07: damage found by ASSESS/PLAN is counted too
+        r.pendingPhotos = com.storageplanner.v2.graph.GraphStage.pendingImages(ss);
         if (ss != null && Pipeline.noteDamaged(store, ss, p.now)) store.scanSessions().put(ss);
         store.flush();
         if (mk != null) mk.mark("plan_made");

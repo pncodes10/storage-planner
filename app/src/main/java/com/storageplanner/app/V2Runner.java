@@ -215,6 +215,7 @@ final class V2Runner {
         o.ok = true;
         o.saved = saved[0];
         o.message = "Done (v2): " + b.adapted.result.files.size() + " files and " + b.adapted.result.apps.size() + " apps analysed.";
+        if (b.continueNote != null) o.message += " " + b.continueNote;    // PHASE_S_STORE S7: decode budget used up, run again
     }
 
     /**
@@ -266,7 +267,7 @@ final class V2Runner {
         }
     }
 
-    private static final class Built { V2Adapter.Adapted adapted; int sdk; boolean appStats; }
+    private static final class Built { V2Adapter.Adapted adapted; int sdk; boolean appStats; String continueNote; }
 
     /** Free bytes of the shared root (same /data partition as getFilesDir()), for the DiskStore reserve checks (3.12). */
     private static SpaceProbe space(final AndroidV2Device dev) {
@@ -306,6 +307,7 @@ final class V2Runner {
         Built b = new Built();
         b.sdk = lastSdk; b.appStats = lastStats;
         b.adapted = r.adapted;
+        b.continueNote = r.continueNote();
         return b;
     }
 
