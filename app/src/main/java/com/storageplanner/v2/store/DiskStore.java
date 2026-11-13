@@ -224,7 +224,8 @@ public final class DiskStore implements V2Store {
             String t = readManifestText(blobs);
             if (t != null) {
                 Manifest old = Manifest.parseLenient(t);
-                if (old != null) { gen = old.gen + 1; hwA = old.hwA; hwB = old.hwB; }
+                // REVIEW_S6 R-06: an unchecked (CRC-less) manifest must not make the reset loop for billions of names
+                if (old != null) { gen = old.gen + 1; hwA = Math.min(old.hwA, 0xFFFF); hwB = Math.min(old.hwB, 0xFFFF); }
             }
         } catch (StoreException ignored) { /* unreadable: fall back to probing */ }
         hwA = Math.max(hwA, probe(blobs, "a"));
