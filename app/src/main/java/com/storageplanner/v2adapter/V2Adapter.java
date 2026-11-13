@@ -141,19 +141,40 @@ public final class V2Adapter {
 
     public static Adapted adapt(UnitBuilder2.Input in, UnitBuilder2.Built built, List<InstalledApp> apps, Map<String, String> duplicateOf,
                                 String root, int sdk, long now, long total, long free, boolean allowYourCall) {
+        final Iterable<Map.Entry<String, FileRecord>> es = sortedFiles(in.files);
+        return adapt(in, new Iterable<FileRecord>() {
+            public Iterator<FileRecord> iterator() {
+                final Iterator<Map.Entry<String, FileRecord>> it = es.iterator();
+                return new Iterator<FileRecord>() {
+                    public boolean hasNext() { return it.hasNext(); }
+                    public FileRecord next() { return it.next().getValue(); }
+                    public void remove() { throw new UnsupportedOperationException(); }
+                };
+            }
+        }, built, apps, duplicateOf, root, sdk, now, total, free, allowYourCall);
+    }
+
+    /**
+     * REVIEW_S F-09: the same over the files in ascending fileId given directly (e.g. {@code DiskStore.releaseIndexes()}'s
+     * projection, decoded one at a time); {@code in.files} is not read.
+     */
+    public static Adapted adapt(UnitBuilder2.Input in, Iterable<FileRecord> filesById, UnitBuilder2.Built built, List<InstalledApp> apps,
+                                Map<String, String> duplicateOf, String root, int sdk, long now, long total, long free, boolean allowYourCall) {
         Adapted a = new Adapted();
         Scanner.Result r = new Scanner.Result();
         r.now = now; r.total = total; r.free = free;
-        Map<String, FileItem> byId = new HashMap<String, FileItem>();
+        ById byId = new ById();
+        HashMap<String, String> words = new HashMap<String, String>();
         String base = root == null || root.isEmpty() ? "" : (root.endsWith("/") ? root : root + "/");
-        for (Map.Entry<String, FileRecord> e : sortedFiles(in.files)) {
-            String id = e.getKey();
-            FileRecord f = e.getValue();
+        for (FileRecord f : filesById) {
+            if (f == null) continue;
+            String id = f.fileId;
             if (f == null || f.presence != Presence.PRESENT || f.path == null) continue;
             FileItem fi = new FileItem(f.path, base + f.path, Math.max(0, f.sizeBytes), Unknown.knownTime(f.modifiedAt) ? f.modifiedAt : 0);
-            fi.area = f.area == null ? "other" : f.area;
-            fi.pkg = f.ownerPackage;
-            fi.type = f.type;
+            // the few distinct area/package/type values are shared instead of one decoded String per file (slimmer result)
+            fi.area = shared(words, f.area == null ? "other" : f.area);
+            fi.pkg = shared(words, f.ownerPackage);
+            fi.type = shared(words, f.type);
             fi.sha256 = f.sha256;
             fi.hasPhash = f.hasPhash; fi.phash = f.phash;
             r.files.add(fi);
@@ -211,6 +232,45 @@ public final class V2Adapter {
         return a;
     }
 
+    private static String shared(HashMap<String, String> words, String w) {
+        if (w == null) return null;
+        String c = words.get(w);
+        if (c == null) { words.put(w, w); c = w; }
+        return c;
+    }
+
+    /**
+     * fileId → FileItem of the adapted files (PHASE_S F-09 follow-up, slimmer result): the files arrive in ascending id, so the
+     * ids are kept as a {@link com.storageplanner.v2.util.FileIdList} (16 B per hex id) next to the items and found by binary
+     * search, instead of a HashMap holding every id String (≈ 140 B per file). Falls back to a HashMap if the order is broken.
+     */
+    static final class ById {
+        private final com.storageplanner.v2.util.FileIdList ids = new com.storageplanner.v2.util.FileIdList();
+        private final ArrayList<FileItem> items = new ArrayList<FileItem>();
+        private String last;
+        private HashMap<String, FileItem> map;
+        void put(String id, FileItem fi) {
+            if (map == null && last != null && id.compareTo(last) <= 0) {
+                map = new HashMap<String, FileItem>();
+                for (int i = 0; i < ids.size(); i++) map.put(ids.get(i), items.get(i));
+            }
+            if (map != null) { map.put(id, fi); return; }
+            ids.add(id); items.add(fi); last = id;
+        }
+        FileItem get(String id) {
+            if (id == null) return null;
+            if (map != null) return map.get(id);
+            int lo = 0, hi = ids.size() - 1;
+            while (lo <= hi) {
+                int mid = (lo + hi) >>> 1;
+                int c = ids.get(mid).compareTo(id);
+                if (c == 0) return items.get(mid);
+                if (c < 0) lo = mid + 1; else hi = mid - 1;
+            }
+            return null;
+        }
+    }
+
     private static void display(Adapted a, UnitBuilder ub, Set<String> used, Unit u, Tier t, Action act, String code, Recommendation rec, long bytes) {
         String why = why(t, rec);
         if (bytes > 0) why += " It would free " + com.storageplanner.v2.plan.Fmt.bytes(bytes) + " if you chose it.";
@@ -219,7 +279,7 @@ public final class V2Adapter {
         ub.units.add(u); used.add(u.id); a.notPlannable.add(u.id); a.displayOnly++;
     }
 
-    private static Unit unitFor(PlanUnit pu, Map<String, FileItem> byId, Map<String, AppItem> apps, Scanner.Result r) {
+    private static Unit unitFor(PlanUnit pu, ById byId, Map<String, AppItem> apps, Scanner.Result r) {
         if (pu.id.startsWith("cache:") || pu.id.startsWith("app:")) {
             String pkg = pu.id.substring(pu.id.indexOf(':') + 1);
             AppItem ai = apps.get(pkg);

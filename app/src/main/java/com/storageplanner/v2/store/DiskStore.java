@@ -128,6 +128,7 @@ public final class DiskStore implements V2Store {
     private long lowSpaceUsed;
     private long baseGarbage;                // garbage right after the last compaction (segment headers): never a trigger
     private int compactions, compactionsSkipped;
+    private boolean released;                // F-09: in-memory indexes dropped; only a FileProjection still reads
 
     private static final class Undo {
         final DTable<?> t; final String key; final boolean existed; final long loc, hash; final int flen;
@@ -719,6 +720,7 @@ public final class DiskStore implements V2Store {
 
     public synchronized void commit() throws StoreException {
         if (broken) throw new StoreException("store write failed earlier");
+        if (released) throw new StoreException("v2 store: indexes released for the adapter (F-09)");
         commitSeq++;
         if (txnFrames > 0) {
             // a COMMIT that cannot be written leaves the txn open (undo kept), so the caller's rollback undoes it
@@ -737,6 +739,7 @@ public final class DiskStore implements V2Store {
     }
 
     public synchronized void flush() throws StoreException {
+        if (released) return;   // nothing can have changed since releaseIndexes flushed
         commit();
         if (dirty) checkpoint(false);
     }
@@ -770,8 +773,10 @@ public final class DiskStore implements V2Store {
             // REVIEW_S6 R-01: handles are released on every path (also StoreLowSpace / StoreCorruption, which are unchecked);
             // no index file is written once the free space fell below the reserve (3.12: never write below it)
             try {
-                flush();
-                if (opt.indexAtClose && !lowSpace && !broken && uncoveredTail() > 0) checkpoint(true);
+                if (!released) {        // F-09: releaseIndexes already flushed and wrote the index file
+                    flush();
+                    if (opt.indexAtClose && !lowSpace && !broken && uncoveredTail() > 0) checkpoint(true);
+                }
             } catch (StoreException e) {
                 throw new IOException(e.getMessage(), e);
             } finally {
@@ -1089,6 +1094,64 @@ public final class DiskStore implements V2Store {
         return r;
     }
 
+    // ================================================================ F-09: release the indexes before the adapter
+
+    /**
+     * REVIEW_S F-09 (the S6 option): flush, write the index file as {@link #close} would, record the locator, value hash and
+     * frame length of every {@code files} record in ascending fileId (16 B per file), then drop every in-memory index, the
+     * slot pages and the record cache. From then on every table operation throws IllegalStateException and commit throws;
+     * only the returned projection reads (each frame verified as in 3.6: type, table, length, hash, and the decoded record's key
+     * equal to the frame's key, keys strictly ascending), and {@link #close} releases the file handles. Results are unchanged:
+     * the projection yields exactly {@code files().all()}.
+     */
+    public synchronized Iterable<FileRecord> releaseIndexes() throws StoreException {
+        if (released) throw new StoreException("v2 store: indexes already released");
+        flush();
+        if (opt.indexAtClose && !lowSpace && !broken && uncoveredTail() > 0) checkpoint(true);
+        KeyIndex p = files.idx();
+        final int n = p.size();
+        final long[] loc = new long[n];
+        final int[] hash = new int[n], len = new int[n];
+        int i = 0;
+        for (String k : p.keys()) {
+            int slot = p.get(k);
+            if (slot < 0 || i >= n) throw new StoreCorruption("files index changed while it was projected");
+            loc[i] = sLoc(slot); hash[i] = (int) sHash(slot); len[i] = sLen(slot); i++;
+        }
+        if (i != n) throw new StoreCorruption("files index size " + n + " but " + i + " keys");
+        released = true;
+        for (int t = 1; t <= TableIds.COUNT; t++) { byId[t].prim = null; byId[t].releaseSecondary(); }
+        locP = new long[0][]; hashP = new int[0][]; lenP = new int[0][]; slotTop = 0; free = new int[1]; freeN = 0;
+        lru.clear(); lruBytes = 0;
+        return new Iterable<FileRecord>() {
+            public Iterator<FileRecord> iterator() {
+                return new Iterator<FileRecord>() {
+                    int j; String prev;
+                    public boolean hasNext() { return j < n; }
+                    public FileRecord next() {
+                        if (j >= n) throw new NoSuchElementException();
+                        synchronized (lock) { FileRecord r = projected(loc[j], hash[j] & 0xffffffffL, len[j], prev); prev = r.fileId; j++; return r; }
+                    }
+                    public void remove() { throw new UnsupportedOperationException(); }
+                };
+            }
+        };
+    }
+
+    public synchronized boolean indexesReleased() { return released; }
+
+    private FileRecord projected(long l, long h, int flen, String prev) {
+        Frame f;
+        try { f = frameAt(l); }
+        catch (FrameException e) { throw corrupt("damaged files record in the adapter projection: " + e.getMessage()); }
+        catch (IOException e) { throw new StoreCorruption("store read failed (files): " + e, e); }
+        if (f.type != Frame.PUT || f.table != files.id || f.length != flen || fnv(f.val) != h)
+            throw corrupt("files locator of the adapter projection reached another frame (type " + f.type + ", table " + f.table + ")");
+        String key = KeyCmp.decode(f.key);
+        if (prev != null && key.compareTo(prev) <= 0) throw corrupt("files projection out of key order at " + key);
+        return (FileRecord) decode(files, key, f.val);
+    }
+
     // ================================================================ slots
 
     private int allocSlot() {
@@ -1143,6 +1206,11 @@ public final class DiskStore implements V2Store {
     }
 
     public synchronized StoreStats stats() {
+        if (released) {
+            long disk = 0;
+            for (Seg sg : segs.values()) disk += sg.seq == writerSeq ? writer.length() : sg.limit;
+            return new StoreStats(0, 0, liveBytes, disk - liveBytes, disk, damagedKeys.size());
+        }
         long records = 0, idx = 0;
         for (int i = 1; i <= TableIds.COUNT; i++) {
             DTable<?> t = byId[i];
@@ -1219,6 +1287,8 @@ public final class DiskStore implements V2Store {
 
         void reset() { prim = new KeyIndex(opt.mergeMin); resetSecondary(); }
         void resetSecondary() {}
+        /** F-09: drops the secondary indexes (any later use fails). */
+        void releaseSecondary() {}
         boolean hasSecondary() { return false; }
         KeyIndex[] secondaries() { return NO_SECONDARY; }
         void index(R r) {}
@@ -1227,10 +1297,16 @@ public final class DiskStore implements V2Store {
         @SuppressWarnings("unchecked")
         R cp(Record r) { return r == null ? null : (R) r.copy(); }
 
+        /** The primary index; after {@link DiskStore#releaseIndexes} every table operation fails (F-09). */
+        KeyIndex idx() {
+            if (released) throw new IllegalStateException("v2 store: indexes released for the adapter (F-09); table " + TableIds.name(id) + " is closed");
+            return prim;
+        }
+
         /** The stored record (not a copy) or null; caller holds the lock. */
         @SuppressWarnings("unchecked")
         R raw(String key) {
-            int slot = prim.get(key);
+            int slot = idx().get(key);
             return slot < 0 ? null : (R) readRecord(this, key, slot);
         }
 
@@ -1243,7 +1319,7 @@ public final class DiskStore implements V2Store {
             String k = record.key();
             byte[] val = Codecs.json(codec, record).getBytes(StandardCharsets.UTF_8);
             long h = fnv(val);
-            int slot = prim.get(k);
+            int slot = idx().get(k);
             R old = null;
             if (slot >= 0) {
                 if (sHash(slot) == h) {
@@ -1275,7 +1351,7 @@ public final class DiskStore implements V2Store {
         @SuppressWarnings("unchecked")
         public boolean remove(String key) {
             synchronized (lock) {
-                int slot = prim.get(key);
+                int slot = idx().get(key);
                 if (slot < 0) return false;
                 R old = hasSecondary() ? (R) readRecord(this, key, slot) : null;
                 byte[] fr = Frame.encode(Frame.DEL, id, txn, KeyCmp.encode(key), new byte[0]);
@@ -1291,11 +1367,11 @@ public final class DiskStore implements V2Store {
             }
         }
 
-        public int size() { synchronized (lock) { return prim.size(); } }
+        public int size() { synchronized (lock) { return idx().size(); } }
 
-        public Iterable<R> all() { synchronized (lock) { return records(prim.keys()); } }
+        public Iterable<R> all() { synchronized (lock) { return records(idx().keys()); } }
 
-        public Iterable<String> keys() { synchronized (lock) { return prim.keys(); } }
+        public Iterable<String> keys() { synchronized (lock) { return idx().keys(); } }
 
         /** Copies of the records under a key snapshot, each read when reached; keys gone meanwhile are skipped. */
         Iterable<R> records(final Iterable<String> keys) {
@@ -1349,6 +1425,7 @@ public final class DiskStore implements V2Store {
         FilesT() { super(TableIds.FILES); }
 
         @Override void resetSecondary() { byPathKey = new KeyIndex(opt.mergeMin); bySize = null; bySha = null; }
+        @Override void releaseSecondary() { byPathKey = null; bySize = null; bySha = null; }
         @Override boolean hasSecondary() { return true; }
         @Override KeyIndex[] secondaries() { return new KeyIndex[]{byPathKey}; }
         String ok(FileRecord r) { return r.volumeId + "\u0000" + r.path + "\u0000" + r.fileId; }
@@ -1503,6 +1580,7 @@ public final class DiskStore implements V2Store {
         KeyIndex byNode = new KeyIndex(opt.mergeMin);                  // nodeRef \0 edgeId
         RelsT() { super(TableIds.RELATIONSHIPS); }
         @Override void resetSecondary() { byNode = new KeyIndex(opt.mergeMin); }
+        @Override void releaseSecondary() { byNode = null; }
         @Override boolean hasSecondary() { return true; }
         @Override KeyIndex[] secondaries() { return new KeyIndex[]{byNode}; }
         @Override void index(Relationship r) { if (r.src != null) byNode.put(r.src + "\u0000" + r.key(), 0); if (r.dst != null) byNode.put(r.dst + "\u0000" + r.key(), 0); }
@@ -1520,6 +1598,7 @@ public final class DiskStore implements V2Store {
         KeyIndex byFile = new KeyIndex(opt.mergeMin);                  // fileId \0 recommendationId
         RecsT() { super(TableIds.RECOMMENDATIONS); }
         @Override void resetSecondary() { byFile = new KeyIndex(opt.mergeMin); }
+        @Override void releaseSecondary() { byFile = null; }
         @Override boolean hasSecondary() { return true; }
         @Override KeyIndex[] secondaries() { return new KeyIndex[]{byFile}; }
         @Override void index(Recommendation r) { if (r.fileId != null) byFile.put(r.fileId + "\u0000" + r.key(), 0); }
@@ -1537,6 +1616,7 @@ public final class DiskStore implements V2Store {
         KeyIndex byOp = new KeyIndex(opt.mergeMin);                    // opId \0 key
         OpsT() { super(TableIds.OPERATIONS); }
         @Override void resetSecondary() { byOp = new KeyIndex(opt.mergeMin); }
+        @Override void releaseSecondary() { byOp = null; }
         @Override boolean hasSecondary() { return true; }
         @Override KeyIndex[] secondaries() { return new KeyIndex[]{byOp}; }
         @Override void index(OperationEntry r) { byOp.put(r.opId + "\u0000" + r.key(), 0); }

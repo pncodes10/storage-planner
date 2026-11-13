@@ -28,6 +28,7 @@ check-in reads this file first. Spec: `Storage_Planner_Technical_Specification_v
 | D7 | Relaunched the survey and dataset agents at 22:25 UTC. | Both had been silently stopped at 20:25/20:33 by the owner's interrupts (made to reconnect Drive), and could not be resumed. Two hours lost. Lesson: after any interrupt, check that background agents are still alive. |
 | D8 | At most two Opus agents at a time; work committed as soon as it exists. | Both running agents hit the account's 5-hour usage limit at ~22:50 UTC and were stopped until 01:20 UTC (2.5 h lost). Resumed 01:27 UTC from their saved state. |
 | D9 | One Opus agent at a time from here on. | At ~08:20 UTC the account hit its *weekly* usage limit (reset 09:00 UTC); the session was idle until 11:24 UTC. Total lost to stoppages so far: about 11 of 15 hours. |
+| D10 | Hourly check-in disabled at 07:27 UTC on 13 Nov at the owner's request. No new agents are started without the owner from this point. | Owner instruction. |
 
 ## Architecture decisions (after the codebase survey, 22:30 UTC)
 
@@ -87,31 +88,28 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (03:50 UTC, 13 Nov)
+## State (08:31 UTC, 13 Nov)
 
-- Phases 1-5 and Phase A done. Store slices S0-S6 done; the app's v2 mode
-  uses the disk store. 41 suites green (re-run by the lead).
-- Switch-over review (`REVIEW_S6.md`): 0 blockers, 3 major, 5 minor; 6 fixed.
-  Read-only confirmed: every store write and truncate stays inside the app's
-  private `files/v2` folder. Majors fixed: the app never closed the store
-  (leaked handles on every run, slow restore); a stopped run left v2 data on
-  disk; a Classic run now clears v2 data. Verdict: fit for a phone test, not
-  ready to release.
-- **Build to test on the phone: CI run 68** (commit 968a69d, succeeded 03:53
-  UTC, 13 Nov): https://github.com/pncodes10/storage-planner/actions/runs/43361741084
-  It replaces run 60.
-- Limits: 84,973 files at 256 MB heap, 188,069 at 512 MB; free space A37.
-- Nothing has run on a device. Unverified there: heap margin on Android,
-  free-space reading, restore time.
-- Open: S7 decode budget (A34), store follow-up (A36), dataset label fix
-  (A27), ClassicParityTest and five other tests, minor review findings.
+- Phases 1-5 and Phase A done. Store slices S0-S7 done; the app's v2 mode
+  uses the disk store. 42 suites green (re-run by the lead); classic `core/`
+  and the manifest untouched.
+- S7 decode budget: a run that exhausts the budget still finishes; unchecked
+  photos are "unknown" (never "unique") and get no look-alike-based removal;
+  the app says how many photos are not yet compared and to run again. On the
+  dataset with a budget of 200, three runs converge to the same result as one
+  unbudgeted run; a kill mid-budget resumes and converges.
+- Capacity now about 130,000 files at 256 MB and 288,000 at 512 MB (130k full
+  run passes under a 148 MB cap; 135k and above run out of memory). The
+  150,000 target needs changes in classic `core/` or slimmer recommendations.
+- **Build to test on the phone:** still CI run 68 until the run for this
+  commit is confirmed green.
+- Nothing has run on a device.
+- Open: dataset label fix (A27), ClassicParityTest and five other tests, minor
+  review findings, free-space requirement (A37).
+- No agents running. Hourly check-in disabled (D10).
 
-## Next steps
+## Next steps (wait for the owner)
 
-1. Check CI for the review-fix commit -> that APK is the build to test.
-2. S7 decode budget (without it more than 20,000 photos ends "stopped
-   early") and the store follow-up.
-3. Dataset label fix (A27) and missing tests.
-4. Phase 6 (content signals, A28), then 7-10.
-5. If an agent stops with a usage-limit error: wait for the reset time in the
-   error, then resume it with a message rather than starting over.
+1. Owner's phone test of the checklist in `PHASE_A_NOTES.md` (items 3, 3a, 4a, 8).
+2. Dataset label fix (A27) and missing tests.
+3. Phase 6 (content signals, A28), then 7-10.

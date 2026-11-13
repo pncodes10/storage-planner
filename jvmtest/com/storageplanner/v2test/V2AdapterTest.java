@@ -163,12 +163,12 @@ public final class V2AdapterTest {
     static void capacity() {
         T.section("memory guard (V2Capacity)");
         long MiB = 1024L * 1024;
-        // disk store (PHASE_S_STORE S6): min((0.8 h - used - 16 - 64) MiB / 643 B, (0.8 h - used - 16) MiB / 2,083 B)
-        // 256 MB heap, 20 MB used: min(109.9e6 / 643 = 170,887, 177.0e6 / 2,083 = 84,973) = 84,973 (end of run binds; the
-        // scale test s6-cap runs 85,000 files through the full V2Analysis at -Xmx148m = (0.8 × 256 − 20) / 1.25)
-        T.eq("256 MB heap", 84973L, V2Capacity.maxFiles(256 * MiB, 20 * MiB));
-        // 512 MB heap, 20 MB used: min(324.6e6 / 643, 391.7e6 / 2,083 = 188,069) = 188,069
-        T.eq("512 MB heap", 188069L, V2Capacity.maxFiles(512 * MiB, 20 * MiB));
+        // disk store (PHASE_S_STORE S6, END from the F-09 follow-up): min((0.8 h - used - 16 - 64) MiB / 643 B, (0.8 h - used - 16) MiB / 1,362 B)
+        // 256 MB heap, 20 MB used: min(109.9e6 / 643 = 170,903, 177.0e6 / 1,362 = 129,955) = 129,955 (end of run binds; the
+        // scale test s6-cap runs 130,000 files through the full V2Analysis at -Xmx148m = (0.8 × 256 − 20) / 1.25)
+        T.eq("256 MB heap", 129955L, V2Capacity.maxFiles(256 * MiB, 20 * MiB));
+        // 512 MB heap, 20 MB used: min(324.6e6 / 643 = 504,882, 391.7e6 / 1,362 = 287,627) = 287,627
+        T.eq("512 MB heap", 287627L, V2Capacity.maxFiles(512 * MiB, 20 * MiB));
         // a small heap where GRAPH's fixed reserve binds: 128 MB, 20 MB used: (102.4 - 100) MiB / 643 = 3,913
         T.eq("128 MB heap: GRAPH reserve binds", 3913L, V2Capacity.maxFiles(128 * MiB, 20 * MiB));
         // memory store (still selectable): (0.8 * 256 - 20 - 64) MiB / 8 KiB = 15,462; 512 MB: 41,676

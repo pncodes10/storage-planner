@@ -17,6 +17,7 @@ import com.storageplanner.v2.plan.StoreFileMap;
 import com.storageplanner.v2.plan.UnitBuilder2;
 import com.storageplanner.v2.risk.Assessor;
 import com.storageplanner.v2.risk.RiskConfig;
+import com.storageplanner.v2.store.DiskStore;
 import com.storageplanner.v2.store.StoreException;
 import com.storageplanner.v2.store.V2Store;
 
@@ -49,6 +50,11 @@ public final class V2Analysis {
         public Scanner.Progress progress;
         public Cancel cancel;
         public boolean adapt = true;
+        /**
+         * REVIEW_S F-09: on a DiskStore, drop the store's in-memory indexes before {@code V2Adapter.adapt} (the store is then
+         * only closable, and {@code Result.in.files} is null). Default true; tests that read the store afterwards set false.
+         */
+        public boolean releaseIndexes = true;
         public Marks marks;
     }
 
@@ -107,8 +113,16 @@ public final class V2Analysis {
         store.flush();
         if (mk != null) mk.mark("plan_made");
         if (p.adapt) {
-            r.adapted = V2Adapter.adapt(in, r.made.built, p.apps.list(), V2Adapter.duplicateOf(store.duplicateGroups().all()), p.root,
-                    p.sdk, p.now, p.total, p.free, false);
+            java.util.Map<String, String> dupOf = V2Adapter.duplicateOf(store.duplicateGroups().all());
+            if (store instanceof DiskStore && p.releaseIndexes) {
+                // REVIEW_S F-09: the store's in-memory indexes go before the classic result grows; the adapter reads the files
+                // through the 16 B/file projection. The store stays open only for that and is closed by the caller.
+                Iterable<FileRecord> files = ((DiskStore) store).releaseIndexes();
+                in.files = null;              // StoreFileMap cannot be read any more
+                if (mk != null) mk.mark("indexes_released");
+                r.adapted = V2Adapter.adapt(in, files, r.made.built, p.apps.list(), dupOf, p.root, p.sdk, p.now, p.total, p.free, false);
+            } else
+                r.adapted = V2Adapter.adapt(in, r.made.built, p.apps.list(), dupOf, p.root, p.sdk, p.now, p.total, p.free, false);
             if (mk != null) mk.mark("adapted");
         }
         return r;

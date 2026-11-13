@@ -17,6 +17,7 @@ public final class StreamingTest {
         pairSort();
         viewScores();
         storeFileMap();
+        releaseIndexes();
         analysisPath();
         return T.finish("StreamingTest");
     }
@@ -106,6 +107,65 @@ public final class StreamingTest {
     }
 
     /** F-10: StoreFileMap answers get/containsKey/size/keySet/entrySet from the store in ascending id; everything else throws. */
+    /**
+     * REVIEW_S F-09: DiskStore.releaseIndexes — the projection yields exactly files().all() (also after puts, removes and
+     * overwrites spread over several segments and an index file), every table operation and commit refuse afterwards, close
+     * works, and the next open uses the index file written by the release and equals the store before it. A frame moved under
+     * another file's locator is refused by the projection (fail closed).
+     */
+    static void releaseIndexes() throws Exception {
+        T.section("F-09 releaseIndexes");
+        com.storageplanner.v2.store.DiskStore.Options o = new com.storageplanner.v2.store.DiskStore.Options();
+        o.maxSegmentBytes = 4096;
+        PowerLossBlobStore b = new PowerLossBlobStore();
+        com.storageplanner.v2.store.DiskStore st = com.storageplanner.v2.store.DiskStore.create(b, 0, new FixedClock(NOW), o);
+        java.util.Random r = new java.util.Random(9);
+        java.util.TreeMap<String, String> ref = new java.util.TreeMap<String, String>();
+        for (int i = 0; i < 600; i++) {
+            String id = i % 7 == 0 ? "id-é" + i : i % 11 == 0 ? "a😀" + i : String.format(java.util.Locale.ROOT, "%032x", r.nextLong() & 0xffffffffffffL);
+            com.storageplanner.v2.model.FileRecord f = StoreContractTest.file(id, "d/f" + i, 10 + i,
+                    i % 13 == 0 ? com.storageplanner.v2.model.Presence.REMOVED : com.storageplanner.v2.model.Presence.PRESENT, 1);
+            st.files().put(f);
+            if (i % 50 == 49) st.commit();
+        }
+        st.commit();
+        int k = 0;
+        for (String id : st.files().keys()) { if (k++ % 9 == 0) st.files().remove(id); }
+        st.commit();
+        for (com.storageplanner.v2.model.FileRecord f : st.files().all()) if (f.sizeBytes % 5 == 0) { f.sizeBytes += 1000; st.files().put(f); }
+        st.commit();
+        for (com.storageplanner.v2.model.FileRecord f : st.files().all())
+            ref.put(f.fileId, com.storageplanner.v2.store.Codecs.json(com.storageplanner.v2.store.Codecs.FILE, f));
+        Iterable<com.storageplanner.v2.model.FileRecord> proj = st.releaseIndexes();
+        java.util.TreeMap<String, String> got = new java.util.TreeMap<String, String>();
+        List<String> order = new ArrayList<String>();
+        for (com.storageplanner.v2.model.FileRecord f : proj) { got.put(f.fileId, com.storageplanner.v2.store.Codecs.json(com.storageplanner.v2.store.Codecs.FILE, f)); order.add(f.fileId); }
+        T.check("projection = files().all() (" + ref.size() + " records, ascending id)", got.equals(ref) && order.equals(new ArrayList<String>(ref.keySet())));
+        int refused = 0;
+        try { st.files().get(order.get(0)); } catch (IllegalStateException e) { refused++; }
+        try { st.features().size(); } catch (IllegalStateException e) { refused++; }
+        try { st.files().all(); } catch (IllegalStateException e) { refused++; }
+        try { st.files().put(StoreContractTest.file("x", "x", 1, com.storageplanner.v2.model.Presence.PRESENT, 1)); } catch (IllegalStateException e) { refused++; }
+        try { st.commit(); } catch (com.storageplanner.v2.store.StoreException e) { refused++; }
+        try { st.releaseIndexes(); } catch (com.storageplanner.v2.store.StoreException e) { refused++; }
+        T.eq("after release: get/size/all/put/commit/release refused", 6, refused);
+        T.check("stats after release", st.stats().liveBytes > 0);
+        st.close();
+        com.storageplanner.v2.store.DiskStore re = com.storageplanner.v2.store.DiskStore.open(b, 0, new FixedClock(NOW), o);
+        java.util.TreeMap<String, String> again = new java.util.TreeMap<String, String>();
+        for (com.storageplanner.v2.model.FileRecord f : re.files().all()) again.put(f.fileId, com.storageplanner.v2.store.Codecs.json(com.storageplanner.v2.store.Codecs.FILE, f));
+        T.check("reopen uses the index file written by the release and equals the store", re.loadedFromIndex() && again.equals(ref));
+        // fail closed: a locator pointing at another file's frame (hash and length copied) is refused by the projection
+        String a0 = order.get(1), a1 = order.get(2);
+        long[] la = re.debugLocator(1, a0), lb = re.debugLocator(1, a1);
+        re.debugSetLocator(1, a1, la[0], la[1], (int) la[2]);
+        boolean caught = false;
+        try { for (com.storageplanner.v2.model.FileRecord f : re.releaseIndexes()) { if (f == null) break; } }
+        catch (com.storageplanner.v2.store.StoreCorruption e) { caught = true; }
+        T.check("projection refuses a locator that reaches another file's frame", caught);
+        re.close();
+    }
+
     static void storeFileMap() throws Exception {
         T.section("StoreFileMap");
         for (int kind = 0; kind < 2; kind++) {
@@ -211,7 +271,12 @@ public final class StreamingTest {
         p.apps = new JvmInstalledApps((String) null); p.now = NOW; p.scanId = scanId; p.sdk = 34; p.root = root;
         p.hasher = hasher(root); p.hashBudget = 2000000000L;
         com.storageplanner.v2adapter.V2Analysis.Result r = com.storageplanner.v2adapter.V2Analysis.run(store, p);
-        T.check("files map is a StoreFileMap", r.in.files instanceof com.storageplanner.v2.plan.StoreFileMap);
+        if (store instanceof com.storageplanner.v2.store.DiskStore) {     // F-09: indexes released, adapter read the projection
+            boolean released = ((com.storageplanner.v2.store.DiskStore) store).indexesReleased();
+            boolean refused = false;
+            try { store.files().size(); } catch (IllegalStateException e) { refused = true; }
+            T.check("disk: indexes released before the adapter, files map dropped, tables refuse use", released && r.in.files == null && refused);
+        } else T.check("files map is a StoreFileMap", r.in.files instanceof com.storageplanner.v2.plan.StoreFileMap);
         return dump(r.in.recs, r.made, r.adapted);
     }
 

@@ -136,7 +136,7 @@ public final class PerceptualBudgetTest {
         }
         for (Object x : list(r, "recommendations")) {
             String id = str(x, "fileId");
-            if (!unknown.contains(id)) continue;
+            if (!unchecked.contains(id)) continue;      // images UNKNOWN for other reasons (not decodable, low contrast) are as before
             boolean risky = REMOVALS.contains(str(x, "action")) || "SAFE".equals(str(x, "tier")) || "NO_LOSS".equals(str(x, "tier"));
             Object a = ((Map<?, ?>) fileById.get(id)).get("assessment");
             if (risky && (a == null || !STRUCTURAL_RECOVERY.contains(str(a, "recoveryKind")))) badRec++;
@@ -145,7 +145,7 @@ public final class PerceptualBudgetTest {
         T.eq(label + ": perceptual edges touching an unknown image", 0, onEdge);
         T.eq(label + ": unknown images rated NO_VERIFIED_BACKUP", 0, unique);
         T.eq(label + ": unknown images recoverable through a near copy", 0, superset);
-        T.eq(label + ": removal / SAFE / NO_LOSS recommendations of unknown images without structural recovery", 0, badRec);
+        T.eq(label + ": removal / SAFE / NO_LOSS recommendations of unchecked images without structural recovery", 0, badRec);
         Set<String> rem = removals(r), fullRem = removals(full);
         Set<String> extra = new TreeSet<String>(rem); extra.removeAll(fullRem);
         T.check(label + ": removals (" + rem.size() + ") ⊆ the complete result's (" + fullRem.size() + ")" + (extra.isEmpty() ? "" : " extra " + extra), extra.isEmpty());
@@ -217,7 +217,7 @@ public final class PerceptualBudgetTest {
             T.check("budget larger than the work = unbudgeted, byte for byte (timings aside)", norm(big, false).equals(norm(full, false)));
             int k = converge(tr, w, "disk", "standard", 12, "disk b12");
             converge(tr, w, "memory", "standard", 25, "memory b25");
-            System.out.println("  fixture: budget 12 converged in " + k + " runs");
+            System.out.println("  fixture: " + gated + " gated pairs, " + images + " eligible images, " + dec + " decodes unbudgeted; budget 12 converged in " + k + " runs");
             killed(tr, w);
         } finally { t.close(); w.close(); }
         return T.finish("PerceptualBudgetTest");
@@ -242,7 +242,10 @@ public final class PerceptualBudgetTest {
         try { run(tr, w.path("kp.json"), w.dir("kp"), "disk", "standard", false, probe, budget); }
         finally { V2Cli.afterStage = null; }
         T.check("probe: GRAPH appends bytes (" + at[0] + " .. " + at[1] + ")", at[0] > 0 && at[1] > at[0]);
-        List<Map<String, Object>> ref = reference(tr, w, "disk", "standard", 8, "kref");
+        // unbudgeted reference chain, grown on demand to the scan number a killed chain needs (file ids, hence the
+        // order of the checks and the number of runs, differ between fixture trees)
+        Path refState = w.dir("kref-state");
+        List<Map<String, Object>> ref = new ArrayList<Map<String, Object>>();
         Random r = new Random(17);
         int trials = 4, ok = 0;
         for (int i = 0; i < trials; i++) {
@@ -258,10 +261,11 @@ public final class PerceptualBudgetTest {
             T.check("trial " + i + ": resumed scan 1 completes", "1".equals(str(map(res, "scan"), "scanId")) && "COMPLETED".equals(str(map(res, "scan"), "state")));
             List<Map<String, Object>> rest = new ArrayList<Map<String, Object>>();
             Map<String, Object> last = res;
-            for (int n = 2; pending(last) > 0 && n <= 8; n++) { last = run(tr, w.path("kc" + i + "-" + n + ".json"), st, "disk", "standard", false, inner, budget); rest.add(last); }
+            for (int n = 2; pending(last) > 0 && n <= 30; n++) { last = run(tr, w.path("kc" + i + "-" + n + ".json"), st, "disk", "standard", false, inner, budget); rest.add(last); }
             int scans = (int) num(map(last, "scan"), "scanId");
             T.check("trial " + i + ": converged after " + scans + " scans", pending(last) == 0);
             if (pending(res) > 0) safety("trial " + i + " resumed", res, last);
+            while (ref.size() < scans) ref.add(run(tr, w.path("kref" + ref.size() + ".json"), refState, "disk", "standard", false, null, -1));
             Object a = norm(last, true), b = norm(ref.get(scans - 1), true);
             if (a.equals(b)) ok++;
             else System.out.println("  trial " + i + ": converged result differs: " + DiskKillTest.firstDiff("", b, a));
@@ -278,7 +282,7 @@ public final class PerceptualBudgetTest {
         TempTree w = out == null ? TempTree.create() : null;
         try {
             TempTree ww = w != null ? w : TempTree.at(java.nio.file.Paths.get(out));
-            int k = converge(tree, ww, store, mode, budget, "tree " + store + " " + mode + " b" + budget);
+            int k = converge(tree, ww, store, mode, budget, "ds-" + store + "-" + mode);
             System.out.println("BUDGET_CONVERGE runs=" + k);
         } finally { if (w != null) w.close(); }
         System.exit(T.finish("PerceptualBudgetTest(" + tree + ")") == 0 ? 0 : 1);

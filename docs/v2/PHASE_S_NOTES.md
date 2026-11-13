@@ -608,3 +608,121 @@ Deviations (S5/S6):
 Next: F-09 option (DiskStore `releaseIndexes()` + locator array, `adapt` over `Iterable<FileRecord>`) and a slimmer adapter
 result to approach 150k at 256 MB, re-running s5-b and s6-cap with a larger N; then S7 (decode budget: the 150k / 30k-image
 tree pauses GRAPH).
+
+## S7 — decode budget resumes across runs (done; REVIEW_S F-13, ruling A34)
+
+Baseline retaken at HEAD 968a69d before any S7 edit: `<scratchpad>/v2out/s7-base/{mem,disk}/` (dataset, both modes, `gate.sh`;
+identical to `head-mem`, memory = disk, gates exit 1 on the known `IMG-20240122-WA0001.jpg` exposure FAIL). Compare script
+`<scratchpad>/v2out/s7gate.sh TAG` (compiles, gates both stores into `v2out/TAG`, `cmp.sh` against `s7-base/mem`).
+
+Exists:
+* `Perceptual.orderForCache` (design S7 item 1): union-find over the pending pairs (node index), components in order of their
+  smallest pair key, inside a component by (smaller node id, pair key). Replaces the old order by size.
+* **The cap is a per-run budget** (`GraphStage.decodeBudget`, default `GraphConfig.MAX_DECODES_PER_RUN` = 20,000; CLI
+  `--graph-decode-budget N`). Reaching it ends the checks of this run only; GRAPH returns `DONE`, the scan COMPLETES and ASSESS/PLAN
+  run. The pipeline's own work budget (`PipelineConfig.budget`: time/bytes) still pauses GRAPH with `BUDGET_EXHAUSTED` as before.
+* **Partial result rule.** `Perceptual.pendingNode[idx]` = the image still has a gated pair without a finished check. Such an
+  image is perceptual `UNKNOWN` (as before), and in `assemble` **every check that touches it is held back** (counter
+  `checksHeldBack`): it gets no perceptual edge and is in no CONTENT_EQUIVALENT / EDIT_FAMILY / BURST group, so it is never a
+  redundant member, never `SUPERSET_COPY`, never `NO_VERIFIED_BACKUP` (Recoverability `UNKNOWN`, rvMid/rvPess 0, lower confidence
+  — the same treatment as any image whose relationships are unknown today). TRUE/FALSE are only given to images whose gated
+  pairs are all checked, so "unique" (FALSE) is final. Exact-copy (SHA) groups, archive backups and companions are not
+  perceptual and are unchanged. The finished checks stay saved (`pair_checks`) and are used once the image is complete.
+* Coverage keys `pendingImages` and `checksHeldBack` exist only in a run that left work (an unbudgeted result has no new key).
+  Session event **`G_COMPARISON_INCOMPLETE`** (detail = pending images), one per session, refreshed by every GRAPH run of it
+  (a resumed scan replaces or drops it). `GraphStage.pendingImages(ScanSession)` reads it.
+* App: `V2Analysis.Result.pendingPhotos` (from the session event) and `continueNote()` / `V2Analysis.continueMessage(n)`:
+  "N photos have not been compared with similar photos yet, so v2 suggests nothing for them; run the analysis again to continue
+  the comparison." `V2Runner` appends it to "Done (v2): …" and sets `Session.v2Note`; `OverviewScreen` shows it under
+  "Recommendations" (also after restore, which reads the same session event). Android part compiled by check_android_compile.
+* Decoded signatures are not persisted (≈ 195 KB each, design S7).
+
+Tests:
+* `PerceptualBudgetTest` (AllV2Tests, ≈ 50 s alone): fixture of 10 photo families (original, WhatsApp copy, thumbnail, rotated
+  edit, look-alike, two burst frames, some exact copies) + 6 unique photos, CLI in process. Unbudgeted vs budget 100,000:
+  identical incl. decodes; decodes ≤ eligible images. Budget 12 on DiskStore: converges in 8–9 runs (file ids, hence the check order, differ per generated tree); budget 25 on MemoryStore. Each
+  budget-stopped run: COMPLETED with a result, unchecked images > 0, TRUE/FALSE equal the converged ones, event = pendingImages,
+  0 unknown images in near groups or on perceptual edges, 0 NO_VERIFIED_BACKUP / SUPERSET_COPY among them, 0 removal / SAFE /
+  NO_LOSS recommendations of unchecked images without structural recovery (exact copy kept, verified backup, regenerable),
+  removals ⊆ the converged run's, plan removal items only with such a recommendation. Converged run k equals unbudgeted run k
+  (same store history: k scans) with evaluate.py's IGNORED + `graphCoverage.decodes` + `createdScanId` of relationships/groups
+  removed; run k+1 equals unbudgeted run k+1 **including decodes** (both 0); edges, groups and backups equal the single
+  unbudgeted run's. **Kill mid-budget**: 4 trials killed after random appended bytes inside the first budgeted GRAPH (2 with
+  power loss), `--resume` completes scan 1 and is safe (checks above), the chain converges and equals the unbudgeted run of the
+  same scan number (4/4). Mutation check: without the held-back rule 22 checks fail (unknown images in groups/on edges).
+* `tools/v2eval/budget_converge.sh OUT [TREE] [BUDGET] [STORE] [MODE]` (not in run_tests: ≈ 9 min on the dataset): the same chain on
+  a real tree + phase-4/5 gates of the first budgeted run and of the unbudgeted reference.
+
+Numbers (dataset, `--target-bytes max`, standard, DiskStore, budget 200 of the 559 decodes one run needs):
+* runs 1/2/3: decodes 200/201/160, pending pairs 326/109/0, pending images 359/160/0, checks held back 0/1/0, DELETE recs
+  258/282/312 (unbudgeted 312), plan achievable bytes equal every run. **Converged in 3 runs**; run 3 = unbudgeted run 3 (aside
+  decodes and creation stamps), run 4 = unbudgeted run 4 incl. decodes; edges/groups/backups = the single unbudgeted run.
+* Aggressive mode on MemoryStore, budget 150: converged in 4 runs, all 35 checks pass, first budgeted run's gates exit 0.
+* First budgeted run, gates: DDRR 0/178 PASS; exposure 0 PASS (the mislabelled `IMG-20240122-WA0001.jpg` is unchecked in that run,
+  so its YOUR_CALL delete is absent) ⇒ phase-4/phase-5 exit 0; the unbudgeted reference exits 1 as the baseline.
+* **Budget larger than the work** (default 20,000; `s7gate.sh s7-a`): dataset memory and disk, both modes: phase-4/phase-5
+  outputs identical to the baseline (exit 1, same lines); CLI JSON identical except **`graphCoverage.decodes` 670 → 559** (the cache
+  order, design S7 "golden files updated for that counter only").
+
+Deviations:
+* "Byte-identical to today's baseline" holds except the `decodes` work counter (670 → 559 on the dataset): the order is the point
+  of item 1; keeping the old order when under budget would cost 20 % more decodes.
+* Convergence equality removes `createdScanId` of relationships and groups (an edge first formed in run 3 is stamped 3) and
+  compares with the unbudgeted run of the same scan number (scan ids, change stamps and plan versions depend on it).
+* Unchecked images take part in no perceptual edge or group even with their finished checks (stricter than the design's "pending
+  nodes UNKNOWN exactly as today", which still grouped them on finished checks and could make them redundant members).
+* A killed-and-resumed scan gets a fresh decode budget (F-18), so its partial state may differ from an unkilled run's; only the
+  converged result is compared.
+
+## Store follow-up (ruling A36): F-09 option, slimmer adapter result, capacity (done; s5-b still fails)
+
+Exists:
+* **`DiskStore.releaseIndexes()`** (REVIEW_S F-09): flush, the index file as `close` would write it, then the locator / value
+  hash / frame length of every `files` record in ascending fileId (16 B per file; design said 8 — the hash and length keep the
+  3.6 read checks), then every primary and secondary index, the slot pages and the record cache are dropped. Afterwards every
+  table operation throws `IllegalStateException` (secondary lookups fail with a NullPointerException), `commit` throws, `flush`
+  is a no-op, `stats()` reports bytes only, `close()` only releases the handles. The returned `Iterable<FileRecord>` decodes one
+  frame at a time: type PUT, table, frame length, value hash, keys strictly ascending, decoded record key = frame key; any
+  mismatch is a `StoreCorruption` (fail closed, manifest damaged). `indexesReleased()`.
+* `V2Adapter.adapt(in, Iterable<FileRecord> filesById, …)` (the old signature wraps it); `V2Analysis` computes `duplicateOf`,
+  then on a DiskStore (`Params.releaseIndexes`, default true) releases the indexes (mark `indexes_released`), sets `in.files =
+  null` and adapts over the projection. V2Runner/restore close the store afterwards as before.
+* Slimmer adapter result: `V2Adapter.ById` replaces the `HashMap<fileId, FileItem>` by a `FileIdList` (16 B per hex id) +
+  item list, binary search (falls back to a HashMap if the ids do not arrive ascending); area/package/type Strings shared per
+  distinct value. `FileItem` (core/, two path Strings) is unchanged, so this is the floor without touching Classic.
+* Tests: `StreamingTest.releaseIndexes` (600 files with non-hex ids over 4 KiB segments, removes and overwrites: projection =
+  `files().all()`, six refused operations, reopen loads the index written by the release and equals; a locator moved onto
+  another file's frame is refused); `StreamingTest.analysisPath` now runs V2Analysis with the release on the DiskStore and the
+  adapted result (files, units, options, duplicateOf, counters) still equals the pre-S5 body on both stores.
+* `V2Capacity.END_BYTES_PER_FILE` 2,083 → **1,362** = (0.8 × 256 MiB − 20 − 16 MiB) / 130,000, the largest N passing the cap test
+  (1.25 safety factor unchanged, GRAPH 643 unchanged). **256 MB, 20 MB used: 129,955 files (was 84,973); 512 MB: 287,627 (was
+  188,069)**; 128 MB still 3,913 (GRAPH reserve binds). `V2AdapterTest` expectations, `run_scale_tests.sh` s6-cap (130,000) and the
+  PHASE_A checklist/limitations updated.
+
+Heap per file at 100k (DiskStore, 20 % images, `ScaleRun --profile`, after full GC): plan made 660, **indexes released 380**,
+**adapted 1,083** (S6: adapter result held 1,460). Class histogram at `adapted`: 100,000 FileItems 14.4 MB, ≈ 380k extra byte[]/
+String (the two paths per file, sha256 where known), 39k Units/Options; recommendations + plan ≈ 280 B/file.
+
+Scale tests at -Xmx148m (full V2Analysis incl. adapter, 20 % images; GRAPH now completes within the decode budget, e.g. 12,846
+decodes for 30,000 images at 150k instead of stopping at 20,001):
+
+| N | result |
+|---:|---|
+| 120,000 | PASSED (147 s) |
+| 130,000 | **PASSED** (145 s; again via `run_scale_tests.sh s6-cap`: 146 s) — s6-cap now |
+| 135,000 | OOM |
+| 140,000 | OOM |
+| 150,000 (s5-b) | **OOM** — still fails (s5-a, 100k DISCOVER…PLAN at -Xmx128m: PASSED, 106 s) |
+
+Results unchanged: dataset both stores both modes, CLI JSON identical to the S7 run (only the S7 `decodes` line differs from the
+HEAD baseline), phase-4/5 identical; adapted classic result equal (StreamingTest); run_tests 42 suites green; android compile OK.
+
+Deviations:
+* The projection keeps 16 B per file (locator + hash + length), not 8.
+* The design target (≥ 150,000 at 256 MB) is still not met: the classic `FileItem` (≈ 700 B per file with its relative and
+  absolute path Strings) plus recommendations and plan bind. Next levers need Classic/core changes (one path String per item) or
+  slimmer recommendations kept until the adapter (≈ 280 B per file).
+
+Next: the phone checklist items 3/3a/4a/8 on a device (heap margin on ART, restore time, the S7 "run again" line). If 150k at
+256 MB is still wanted: a `FileItem` without the absolute path (core) or recommendations reduced to what `adapt` reads, then
+re-run s5-b and the cap search (`run_scale.sh N --images 0.2 --xmx 148m --store disk`).

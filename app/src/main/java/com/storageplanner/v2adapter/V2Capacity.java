@@ -13,8 +13,8 @@ import java.util.Locale;
  * <ul>
  * <li>GRAPH: store index + lite nodes, candidates and edges ≈ 514 B per file, plus the fixed signature cache and decode
  *     buffers ({@link #GRAPH_RESERVE});</li>
- * <li>the end of the run: store index + recommendations + plan + the adapted classic result ≈ 1,415 B per file after GC,
- *     but bounded by the F-08 cap test, see {@link #END_BYTES_PER_FILE}.</li>
+ * <li>the end of the run: recommendations + plan + the adapted classic result (store indexes released first, F-09) ≈ 1,083 B
+ *     per file after GC, but bounded by the F-08 cap test, see {@link #END_BYTES_PER_FILE}.</li>
  * </ul>
  * <p>Both are multiplied by {@link #SAFETY} (REVIEW_S F-08: a safety factor for ART's GC headroom, large-object fragmentation
  * and unmeasured transients, not an object-size correction). {@link #STORE_FIXED} covers the store's caches and buffers.
@@ -28,12 +28,13 @@ public final class V2Capacity {
     /** GRAPH phase, measured 514 B per file (disk store), times {@link #SAFETY}. */
     public static final long GRAPH_BYTES_PER_FILE = 643;
     /**
-     * End of the run (store index + recommendations + plan + adapted result). Measured 1,415 B per file after a full GC; × 1.25
-     * would be 1,769, but the F-08 cap test (100,000 files, full V2Analysis at -Xmx148m) ran out of memory: building the classic
-     * result has transients (list and map growth) the after-GC marks do not see. Set instead from the cap test: 85,000 files
-     * pass at -Xmx148m, so the 256 MB claim may not exceed that: (0.8 × 256 MiB − 20 MiB − 16 MiB) / 85,000 = 2,083 B.
+     * End of the run (recommendations + plan + the adapted classic result; since the PHASE_S follow-up the store's indexes are
+     * released before the adapter, REVIEW_S F-09, and the adapter keeps ids compactly and shares area/type strings). Measured
+     * 1,083 B per file after a full GC at 100,000 files (was 1,460); after-GC marks miss the adapter's transients, so the figure
+     * is set from the F-08 cap test instead: 130,000 files pass the full V2Analysis at -Xmx148m (135,000 and 140,000 do not), so
+     * the 256 MB claim may not exceed that: (0.8 × 256 MiB − 20 MiB − 16 MiB) / 130,000 = 1,362 B (was 2,083 from 85,000).
      */
-    public static final long END_BYTES_PER_FILE = 2083;
+    public static final long END_BYTES_PER_FILE = 1362;
     /** The disk store's fixed heap: record cache (8 MiB), write buffers, delta overlays. */
     public static final long STORE_FIXED = 16L * 1024 * 1024;
     /** Fixed heap of GRAPH besides the records: signature cache (~50 MB at its cap) and image decode buffers. */

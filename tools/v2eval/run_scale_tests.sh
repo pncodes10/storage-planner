@@ -9,8 +9,8 @@
 #             ((0.8 × 256 − 20) / 1.25, REVIEW_S F-08): completes.
 #   s5-c      design 6 (c): s5-a with MemoryStore at -Xmx128m must fail with OutOfMemoryError (the test bites).
 #   s5-d      design 6 (d): the s5-a tree through the CLI, memory vs disk (store_equal.sh): byte-identical without timings.
-#   s6-cap    V2Capacity's claim at 256 MB (84,973 files, slice S6): synth 85,000 files (20 % images), full V2Analysis incl.
-#             V2Adapter, DiskStore, -Xmx148m (the F-08 cap): completes.
+#   s6-cap    V2Capacity's claim at 256 MB (129,955 files since the F-09 follow-up; 84,973 in S6): synth 130,000 files (20 %
+#             images), full V2Analysis incl. V2Adapter (store indexes released first), DiskStore, -Xmx148m (the F-08 cap): completes.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TESTS=("$@"); [ ${#TESTS[@]} -eq 0 ] && TESTS=(s4-disk s5-a s5-b s5-c s5-d s6-cap)
@@ -27,7 +27,7 @@ for t in "${TESTS[@]}"; do
       else echo "scale test s4-disk: FAILED (rc=$rc files=$FILES live=$LIVE)"; FAIL=1; fi;;
     s5-a|s5-b|s5-c|s6-cap)
       case "$t" in
-        s6-cap) ARGS=(85000 --images 0.2 --xmx 148m --store disk);;
+        s6-cap) ARGS=(130000 --images 0.2 --xmx 148m --store disk);;
         s5-a) ARGS=(100000 --images 0.2 --xmx 128m --store disk --no-adapter);;
         s5-b) ARGS=(150000 --images 0.2 --xmx 148m --store disk);;
         s5-c) ARGS=(100000 --images 0.2 --xmx 128m --store memory --no-adapter);;
