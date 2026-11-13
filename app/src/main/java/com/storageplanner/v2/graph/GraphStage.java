@@ -18,6 +18,16 @@ public final class GraphStage implements Stage {
     /** Coverage counters of the last run (GraphCoverage). */
     public final Map<String, Long> coverage = new TreeMap<String, Long>();
     Perceptual last;
+    /**
+     * PHASE_S_STORE S7: image decodes one run may spend on pair checks. When it is reached the remaining checks wait for the
+     * next run (finished checks are saved), GRAPH still completes, the unchecked images are perceptual UNKNOWN and take part in
+     * no perceptual edge or group, and the session gets event {@link #INCOMPLETE} (detail = number of such images).
+     */
+    public int decodeBudget = GraphConfig.MAX_DECODES_PER_RUN;
+    /** Session event: the photo comparison is not finished; another run continues it. Detail: images not compared yet. */
+    public static final String INCOMPLETE = "G_COMPARISON_INCOMPLETE";
+    /** Images left with unfinished checks by the last run (0 = the comparison is complete). */
+    public long pendingImages;
     /** StructSig cache size used by probe() (calibration runs only). */
     public int probeCache = 3000;
 
@@ -85,8 +95,11 @@ public final class GraphStage implements Stage {
         StageOutcome outcome = StageOutcome.DONE;
         // C-D. perceptual
         Perceptual p = new Perceptual(ctx, nodes, groups, coverage);
+        p.decodeBudget = decodeBudget;
         last = p;
         outcome = p.run();
+        pendingImages = p.pendingImages;
+        noteIncomplete(ctx, pendingImages);
         // E. assemble
         p.assemble(edges, groups, scanId);
         ArchiveMatcher.run(ctx, nodes, edges, coverage);
@@ -94,6 +107,26 @@ public final class GraphStage implements Stage {
         write(st, nodes, edges, groups);
         st.commit();
         return outcome;
+    }
+
+    /** One {@link #INCOMPLETE} event per session, refreshed by each GRAPH run of it (a resumed run replaces it or drops it). */
+    static void noteIncomplete(StageContext ctx, long pendingImages) {
+        if (ctx.session == null) return;
+        List<ScanEvent> ev = ctx.session.events;
+        for (int i = ev.size() - 1; i >= 0; i--) if (INCOMPLETE.equals(ev.get(i).code)) ev.remove(i);
+        if (pendingImages > 0) {
+            long now = ctx.device == null ? Unknown.TIME : ctx.device.clock().nowMillis();
+            ctx.session.event(now, INCOMPLETE, null, null, Long.toString(pendingImages));
+        }
+    }
+
+    /** Images whose comparison a session left for the next run (its {@link #INCOMPLETE} event), 0 if none. */
+    public static long pendingImages(ScanSession s) {
+        if (s == null) return 0;
+        for (ScanEvent e : s.events) if (INCOMPLETE.equals(e.code)) {
+            try { return Long.parseLong(e.detail); } catch (RuntimeException x) { return 1; }
+        }
+        return 0;
     }
 
     /** FNV-1a 64 over the chars (bucketing only; equal hashes are confirmed on the strings). */

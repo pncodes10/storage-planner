@@ -23,6 +23,12 @@ final class Perceptual {
     final Map<String, PairCheck> byIds = new HashMap<String, PairCheck>();     // a\0b -> current check
     final Map<String, Tri> status = new HashMap<String, Tri>();
     int decodes;
+    /** PHASE_S_STORE S7: decodes this run may spend on pending pair checks; reaching it ends the checks, not the stage. */
+    int decodeBudget = GraphConfig.MAX_DECODES_PER_RUN;
+    /** S7: by node index (Node.idx), true = the node still has a gated pair without a finished check after this run. */
+    boolean[] pendingNode;
+    /** S7: eligible images with an unfinished check (their perceptual relationships are unknown until a later run). */
+    long pendingImages;
     int cacheSize = GraphConfig.SIG_CACHE;
     final LinkedHashMap<String, StructSig> cache = new LinkedHashMap<String, StructSig>(64, 0.75f, true) {
         protected boolean removeEldestEntry(Map.Entry<String, StructSig> e) { return size() > cacheSize; }
@@ -91,17 +97,15 @@ final class Perceptual {
             PairCheck pc = st.pairChecks().get(p.key);
             if (pc != null && pc.matcherVersion == GraphConfig.MATCHER_VERSION) put(pc); else pending.add(p);
         }
-        Collections.sort(pending, new Comparator<Pair>() {
-            public int compare(Pair x, Pair y) {
-                long mx = Math.min(x.a.size, x.b.size), my = Math.min(y.a.size, y.b.size);
-                return mx != my ? Long.compare(my, mx) : x.key.compareTo(y.key);
-            }
-        });
+        orderForCache(pending, nodes.size());
         Clock clock = ctx.device == null ? null : ctx.device.clock();
         StageOutcome out = StageOutcome.DONE;
         int sinceCommit = 0;
         for (Pair p : pending) {
-            if (decodes >= GraphConfig.MAX_DECODES_PER_RUN || (ctx.budget != null && clock != null && ctx.budget.exhausted(clock))) { out = StageOutcome.BUDGET_EXHAUSTED; break; }
+            // the run's work budget (time/bytes, PipelineConfig.budget) pauses the stage; the decode budget only ends the checks
+            // of this run (S7): GRAPH completes with the unchecked images marked UNKNOWN and the next run continues
+            if (ctx.budget != null && clock != null && ctx.budget.exhausted(clock)) { out = StageOutcome.BUDGET_EXHAUSTED; break; }
+            if (decodes >= decodeBudget) break;
             PairCheck pc = check(p.a, p.b, p.sources, p.ham, (p.sources & CandidateSource.NAME_STEM.bit()) != 0);
             pc.pairKey = p.key;
             st.pairChecks().put(pc);
@@ -122,8 +126,13 @@ final class Perceptual {
             for (Node x : new Node[]{p.a, p.b}) { hasPair.put(x.id(), true); if (pend) hasPending.put(x.id(), true); }
         }
         long pend = 0;
-        for (Pair p : gated) if (!checks.containsKey(p.key)) pend++;
+        pendingNode = new boolean[nodes.size()];
+        for (Pair p : gated) if (!checks.containsKey(p.key)) { pend++; pendingNode[p.a.idx] = true; pendingNode[p.b.idx] = true; }
         inc("pending", pend);
+        if (pend > 0) {     // keys only in a run that left checks for the next one (an unbudgeted result is unchanged)
+            for (boolean b : pendingNode) if (b) pendingImages++;
+            inc("pendingImages", pendingImages);
+        }
         for (int i = 0; i < n; i++) {
             Node x = el.get(i);
             Tri v = cg.truncated[i] || hasPending.containsKey(x.id()) ? Tri.UNKNOWN : hasPair.containsKey(x.id()) ? Tri.TRUE : Tri.FALSE;
@@ -132,6 +141,40 @@ final class Perceptual {
         }
         return out;
     }
+
+    /**
+     * S7 (REVIEW_S F-13 item 1): pending checks ordered for signature-cache reuse. Components of the pending-pair graph in order
+     * of their smallest pair key; inside a component by (smaller node id, pair key), so each node's pairs come together and a
+     * small component (a burst) is decoded about once per node. Deterministic; the order changes only how often the cache misses.
+     */
+    static void orderForCache(List<Pair> pending, int nNodes) {
+        if (pending.size() < 2) return;
+        final int[] parent = new int[nNodes];
+        for (int i = 0; i < nNodes; i++) parent[i] = i;
+        for (Pair p : pending) {
+            int x = root(parent, p.a.idx), y = root(parent, p.b.idx);
+            if (x != y) parent[Math.max(x, y)] = Math.min(x, y);
+        }
+        final Map<Integer, String> minKey = new HashMap<Integer, String>();
+        for (Pair p : pending) {
+            Integer r = root(parent, p.a.idx);
+            String k = minKey.get(r);
+            if (k == null || p.key.compareTo(k) < 0) minKey.put(r, p.key);
+        }
+        Collections.sort(pending, new Comparator<Pair>() {
+            public int compare(Pair x, Pair y) {
+                int c = minKey.get(root(parent, x.a.idx)).compareTo(minKey.get(root(parent, y.a.idx)));
+                if (c != 0) return c;
+                c = smallerId(x).compareTo(smallerId(y));
+                return c != 0 ? c : x.key.compareTo(y.key);
+            }
+        });
+    }
+    static int root(int[] parent, int x) {
+        while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; }
+        return x;
+    }
+    static String smallerId(Pair p) { return p.a.id().compareTo(p.b.id()) < 0 ? p.a.id() : p.b.id(); }
 
     void put(PairCheck pc) { checks.put(pc.pairKey, pc); byIds.put(pc.a + "\u0000" + pc.b, pc); }
     PairCheck between(String x, String y) { return x.compareTo(y) < 0 ? byIds.get(x + "\u0000" + y) : byIds.get(y + "\u0000" + x); }
@@ -275,6 +318,9 @@ final class Perceptual {
         for (PairCheck pc : checks.values()) {
             Node a = byId(pc.a), b = byId(pc.b);
             if (a == null || b == null) continue;
+            // S7: an image with an unfinished check takes part in no perceptual edge or group yet, so a partial result never
+            // groups, types or removes it on half its comparisons; its finished checks stay saved and are used once it is complete
+            if (pendingNode != null && (pendingNode[a.idx] || pendingNode[b.idx])) { inc("checksHeldBack"); continue; }
             inc("verdict" + pc.verdict);
             if (pc.note != null && pc.note.startsWith("ERROR:")) inc("comparatorErrors");
             switch (pc.verdict) {

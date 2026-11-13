@@ -32,7 +32,7 @@ public final class V2Cli {
     private V2Cli() {}
 
     static final String USAGE = "usage: V2Cli scan <root> --out <result.json> [--state-dir D] [--volume-id primary] [--kind full|incremental]"
-            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--pretty]";
+            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--graph-decode-budget N] [--pretty]";
 
     /** In-process tests (DiskKillTest): replaces the state dir's BlobStore (e.g. by a killing or power-loss fake). */
     static java.util.function.Function<BlobStore, BlobStore> blobsHook;
@@ -96,6 +96,7 @@ public final class V2Cli {
         String installedApps = null; long budgetMs = -1, budgetBytes = -1; boolean measureMemory = false;
         V2Json.Options opt = new V2Json.Options();
         boolean graph = false, assess = false; String pairsOut = null, manifest = null; int randomPairs = 600;
+        int decodeBudget = com.storageplanner.v2.graph.GraphConfig.MAX_DECODES_PER_RUN;
         try {
             for (int i = 0; i < a.size(); i++) {
                 String s = a.get(i);
@@ -131,6 +132,7 @@ public final class V2Cli {
                 else if (s.equals("--pairs-out")) pairsOut = a.get(++i);
                 else if (s.equals("--manifest")) manifest = a.get(++i);
                 else if (s.equals("--random")) randomPairs = Integer.parseInt(a.get(++i));
+                else if (s.equals("--graph-decode-budget")) decodeBudget = Integer.parseInt(a.get(++i));   // PHASE_S_STORE S7
                 else if (s.startsWith("--")) { err.println("unknown option " + s); err.println(USAGE); return 2; }
                 else if (root == null) root = s;
                 else if (outFile == null) outFile = s;
@@ -195,6 +197,7 @@ public final class V2Cli {
         if (cfg.maxTier >= 2) stages.add(StageTimer.wrap(new T2HashStructStage(opt.hash.equals("all"))));
         if (cfg.maxTier >= 3) stages.add(StageTimer.wrap(new T3ImageStage()));
         com.storageplanner.v2.graph.GraphStage gs = new com.storageplanner.v2.graph.GraphStage();
+        gs.decodeBudget = decodeBudget;
         if (graph || pairsOut != null) stages.add(StageTimer.wrap(gs));
         long heapBefore = measureMemory ? usedHeapAfterGc() : 0;
         PipelineResult res;
