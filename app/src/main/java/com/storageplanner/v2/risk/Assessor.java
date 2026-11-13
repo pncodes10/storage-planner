@@ -55,27 +55,38 @@ public final class Assessor {
         return v;
     }
 
+    /** Receives each verdict as it is made, with the file's post-ASSESS record (the written copy when U/L/R/C changed). */
+    public interface VerdictSink { void accept(Verdict v, FileRecord f) throws StoreException; }
+
     /** Assesses every PRESENT file of the store; copies U/L/R/C into FileRecord on change (commit every 500). */
     public static List<Verdict> run(V2Store store, InstalledApps apps, long now, PresentationPolicy pol, RiskConfig cfg) throws StoreException {
+        final List<Verdict> out = new ArrayList<Verdict>();
+        run(store, apps, now, pol, cfg, new VerdictSink() { public void accept(Verdict v, FileRecord f) { out.add(v); } });
+        return out;
+    }
+
+    /** Streaming form (PHASE_S_STORE 4 item 4): no verdict list is kept; {@code sink} sees every PRESENT file in fileId order. */
+    public static void run(V2Store store, InstalledApps apps, long now, PresentationPolicy pol, RiskConfig cfg, VerdictSink sink) throws StoreException {
         ContextBuilder b = new ContextBuilder(store, apps, now, cfg);
-        List<Verdict> out = new ArrayList<Verdict>();
         int dirty = 0;
         for (FileRecord f : store.files().all()) {
             if (f.presence != Presence.PRESENT) continue;
             FileContext ctx = b.build(f);
             Verdict v = assess(ctx, pol);
-            out.add(v);
             Assessment a = v.assessment;
-            if (v.row == 1) continue;
-            double u = a.u90.mid, l = a.lossRange.mid, c = a.confidence;
-            if (!same(f.utility, u) || !same(f.lossSeverity, l) || f.recoverability != a.recoverability || !same(f.confidence, c)) {
-                FileRecord w = f.copy(); w.utility = u; w.lossSeverity = l; w.recoverability = a.recoverability; w.confidence = c;
-                store.files().put(w);
-                if (++dirty % 500 == 0) store.commit();
+            FileRecord post = f;
+            if (v.row != 1) {
+                double u = a.u90.mid, l = a.lossRange.mid, c = a.confidence;
+                if (!same(f.utility, u) || !same(f.lossSeverity, l) || f.recoverability != a.recoverability || !same(f.confidence, c)) {
+                    FileRecord w = f.copy(); w.utility = u; w.lossSeverity = l; w.recoverability = a.recoverability; w.confidence = c;
+                    store.files().put(w);
+                    post = w;
+                    if (++dirty % 500 == 0) store.commit();
+                }
             }
+            sink.accept(v, post);
         }
         store.commit();
-        return out;
     }
     static boolean same(double x, double y) { return Double.isNaN(x) ? Double.isNaN(y) : x == y; }
 }

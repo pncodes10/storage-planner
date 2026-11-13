@@ -47,7 +47,9 @@ public final class ArchiveMatcherTest {
             for (BackupRecord r : fx.store.backups().all()) { if (r.state == BackupState.CORRUPT) corrupt++; if (r.state == BackupState.VERIFIED) verified++; }
             T.eq("records: 1 VERIFIED", 1, verified); T.eq("records: 1 CORRUPT", 1, corrupt);
             T.eq("absent member c: no record", 2, fx.store.backups().size());
+            long am = fx.tree.mtime("DCIM/Camera/a.jpg");
             fx.tree.file("DCIM/Camera/a.jpg", rnd(5000, 9));
+            fx.tree.mtime("DCIM/Camera/a.jpg", am + 2000);   // same size: without a new mtime the change is invisible (coarse FS clock)
             fx.scan(ScanKind.INCREMENTAL, false);
             boolean still = false;
             for (Relationship r : fx.store.relationships().all()) if (r.type == RelType.BACKED_UP_BY && r.verification == Verification.VERIFIED) still = true;

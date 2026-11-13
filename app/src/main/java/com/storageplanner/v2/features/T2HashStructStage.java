@@ -6,7 +6,9 @@ import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
 import com.storageplanner.v2.stage.StageOutcome;
 import com.storageplanner.v2.store.StoreException;
+import com.storageplanner.v2.util.FileIdList;
 import com.storageplanner.v2.util.Io;
+import com.storageplanner.v2.util.PairSort;
 import com.storageplanner.v2.util.Text;
 
 import java.io.IOException;
@@ -39,14 +41,14 @@ public final class T2HashStructStage implements Stage {
     StageOutcome partA(final StageContext ctx) throws StoreException {
         final long scanId = ctx.session.scanId;
         final boolean full = ctx.session.kind == ScanKind.FULL;
-        List<FileRecord> jobs = new ArrayList<FileRecord>();
+        FileIdList jobs = new FileIdList();
         for (FileRecord f : ExtractionLoop.present(ctx)) {
             if (!archiveType(f.type) || f.readable == Tri.FALSE || f.sizeBytes <= 0) continue;
             FeatureRecord fr = ctx.store.features().get(f.fileId);
             if (fr == null || fr.fp == null || !fr.fp.sameAs(f.fingerprint())) continue;   // T1 first
             int id = f.type.equals("tar") ? Extractors.TAR : Extractors.ZIP;
             if (fr.versions[id] != Extractors.version(id) || (f.type.equals("apk") && fr.versions[Extractors.APK] != Extractors.version(Extractors.APK))
-                    || (full && fr.archive != null && !Long.toString(scanId).equals(fr.extra.get("t2scan")))) jobs.add(f);
+                    || (full && fr.archive != null && !Long.toString(scanId).equals(fr.extra.get("t2scan")))) jobs.add(f.fileId);
         }
         return ExtractionLoop.run(ctx, ID, jobs, Tiers.T2, new ExtractionLoop.Job() {
             public void run(FileRecord f) throws StoreException { structure(ctx, f, scanId); }
@@ -86,14 +88,18 @@ public final class T2HashStructStage implements Stage {
     StageOutcome partB(StageContext ctx) throws StoreException {
         if (all) ctx.session.counters.put("hash.policyAll", 1L);
         long now = ctx.device.clock().nowMillis();
-        List<FileRecord> present = ExtractionLoop.present(ctx);
-        Map<Long, List<FileRecord>> groups = new TreeMap<Long, List<FileRecord>>();
+        // Size groups as one long[] of (size, ordinal) pairs sorted by (size, ordinal); ordinals index a FileIdList of the
+        // eligible ids in ascending fileId, so each group's members come out in fileId order as the old TreeMap<size, List>
+        // gave them. Records are loaded one group at a time (PHASE_S_STORE 4 item 2).
+        final FileIdList ids = new FileIdList();
+        long[] pairs = new long[64];
+        int np = 0;
         Set<Long> entrySizes = new HashSet<Long>();
-        for (FileRecord f : present) {
+        for (FileRecord f : ExtractionLoop.present(ctx)) {
             if (f.sizeBytes >= 1 && f.readable != Tri.FALSE) {
-                List<FileRecord> g = groups.get(f.sizeBytes);
-                if (g == null) groups.put(f.sizeBytes, g = new ArrayList<FileRecord>());
-                g.add(f);
+                if (2 * np + 2 > pairs.length) pairs = Arrays.copyOf(pairs, Math.max(64, pairs.length + (pairs.length >> 1)) & ~1);
+                pairs[2 * np] = f.sizeBytes; pairs[2 * np + 1] = ids.size(); np++;
+                ids.add(f.fileId);
             }
             if (archiveType(f.type)) {
                 FeatureRecord fr = ctx.store.features().get(f.fileId);
@@ -101,37 +107,52 @@ public final class T2HashStructStage implements Stage {
                     for (ArchiveEntry e : fr.archive.entries) if (!e.dir && e.size >= 1) entrySizes.add(e.size);
             }
         }
-        List<List<FileRecord>> work = new ArrayList<List<FileRecord>>();
-        for (List<FileRecord> g : groups.values()) {
-            boolean need = all || g.size() >= 2 || entrySizes.contains(g.get(0).sizeBytes);
-            if (need) { work.add(g); continue; }
-            FileRecord f = ctx.store.files().get(g.get(0).fileId);   // size-unique: provisional "done", sha256 only if still current
-            HashRecord hr = ctx.store.hashes().get(f.fileId);
-            f.sha256 = current(hr, f) ? hr.sha256 : null;
-            finishBit(ctx, f);
+        PairSort.pairs(pairs, np);
+        final long[] gp = pairs;
+        // work groups that need hashing: wStart/wLen (pair index, members); work = their ordinals, sorted below
+        int[] wStart = new int[16], wLen = new int[16];
+        int nWork = 0;
+        for (int i = 0; i < np; ) {
+            int j = i + 1;
+            while (j < np && gp[2 * j] == gp[2 * i]) j++;
+            boolean need = all || j - i >= 2 || entrySizes.contains(gp[2 * i]);
+            if (need) {
+                if (nWork == wStart.length) { wStart = Arrays.copyOf(wStart, nWork * 2); wLen = Arrays.copyOf(wLen, nWork * 2); }
+                wStart[nWork] = i; wLen[nWork] = j - i; nWork++;
+            } else {
+                FileRecord f = ctx.store.files().get(ids.get((int) gp[2 * i + 1]));   // size-unique: provisional "done", sha256 only if still current
+                HashRecord hr = ctx.store.hashes().get(f.fileId);
+                f.sha256 = current(hr, f) ? hr.sha256 : null;
+                finishBit(ctx, f);
+            }
+            i = j;
         }
-        ctx.session.counters.put("hash.sizeGroups", (long) work.size());
-        Collections.sort(work, new Comparator<List<FileRecord>>() {
-            public int compare(List<FileRecord> a, List<FileRecord> b) {
-                long sa = a.get(0).sizeBytes, sb = b.get(0).sizeBytes;
-                int c = Long.compare(sb * (b.size() - 1), sa * (a.size() - 1));
+        ctx.session.counters.put("hash.sizeGroups", (long) nWork);
+        final int[] ws = wStart, wl = wLen;
+        int[] work = new int[nWork];
+        for (int k = 0; k < nWork; k++) work[k] = k;
+        PairSort.ints(work, nWork, new PairSort.IntOrder() {
+            public int compare(int x, int y) {   // descending (size × (members − 1), size), as before; sizes are distinct
+                long sa = gp[2 * ws[x]], sb = gp[2 * ws[y]];
+                int c = Long.compare(sb * (wl[y] - 1), sa * (wl[x] - 1));
                 return c != 0 ? c : Long.compare(sb, sa);
             }
         });
         int sinceCommit = 0;
-        for (int gi = 0; gi < work.size(); gi++) {
+        for (int gi = 0; gi < nWork; gi++) {
             StageOutcome stop = ExtractionLoop.stopReason(ctx);
             if (stop != null) {
                 long pend = 0;
-                for (int k = gi; k < work.size(); k++) for (FileRecord m : work.get(k)) {
-                    FileRecord f = ctx.store.files().get(m.fileId); Tiers.pending(f, Tiers.T2); Confidence.apply(f, ctx.store.features().get(f.fileId)); ctx.store.files().put(f); pend++;
+                for (int k = gi; k < nWork; k++) for (int q = ws[work[k]], end = q + wl[work[k]]; q < end; q++) {
+                    FileRecord f = ctx.store.files().get(ids.get((int) gp[2 * q + 1])); Tiers.pending(f, Tiers.T2); Confidence.apply(f, ctx.store.features().get(f.fileId)); ctx.store.files().put(f); pend++;
                 }
                 if (stop == StageOutcome.BUDGET_EXHAUSTED) ctx.session.count("budget.pendingFiles", pend);
                 ctx.store.scanSessions().put(ctx.session);
                 ctx.store.commit();
                 return stop;
             }
-            List<FileRecord> g = new ArrayList<FileRecord>(work.get(gi));
+            List<FileRecord> g = new ArrayList<FileRecord>();
+            for (int q = ws[work[gi]], end = q + wl[work[gi]]; q < end; q++) g.add(ctx.store.files().get(ids.get((int) gp[2 * q + 1])));
             Collections.sort(g, new Comparator<FileRecord>() { public int compare(FileRecord a, FileRecord b) { return a.path.compareTo(b.path); } });
             long size = g.get(0).sizeBytes;
             boolean fullAll = all || size <= SMALL || entrySizes.contains(size);
@@ -215,14 +236,38 @@ public final class T2HashStructStage implements Stage {
 
     /** Exact-duplicate group ids over PRESENT files with a SHA-256 (A10: only hashed files can be grouped). */
     static void assignGroups(StageContext ctx) {
+        // PHASE_S_STORE 4 item 2: a sorted long[] of 64-bit hashes of the SHA-256 strings; only a file whose hash occurs at
+        // least twice can be in a group, and only those SHA-256s are counted exactly (a map bounded by duplicate candidates).
+        long[] h = new long[64];
+        int n = 0;
+        for (FileRecord f : ExtractionLoop.present(ctx)) if (f.sha256 != null && f.sizeBytes > 0) {
+            if (n == h.length) h = Arrays.copyOf(h, n + (n >> 1));
+            h[n++] = hash64(f.sha256);
+        }
+        PairSort.longs(h, n);
         Map<String, Integer> count = new HashMap<String, Integer>();
-        List<FileRecord> present = ExtractionLoop.present(ctx);
-        for (FileRecord f : present) if (f.sha256 != null && f.sizeBytes > 0) { Integer c = count.get(f.sha256); count.put(f.sha256, c == null ? 1 : c + 1); }
-        for (FileRecord f : present) {
-            String id = f.sha256 != null && f.sizeBytes > 0 && count.get(f.sha256) >= 2 ? "x:" + f.sha256 : null;
+        if (n > 1) for (FileRecord f : ExtractionLoop.present(ctx))
+            if (f.sha256 != null && f.sizeBytes > 0 && occurs(h, n, hash64(f.sha256)) >= 2) { Integer c = count.get(f.sha256); count.put(f.sha256, c == null ? 1 : c + 1); }
+        for (FileRecord f : ExtractionLoop.present(ctx)) {
+            Integer c = f.sha256 != null && f.sizeBytes > 0 ? count.get(f.sha256) : null;
+            String id = c != null && c >= 2 ? "x:" + f.sha256 : null;
             if (id == null ? f.duplicateGroupId != null : !id.equals(f.duplicateGroupId)) {
-                FileRecord c = ctx.store.files().get(f.fileId); c.duplicateGroupId = id; ctx.store.files().put(c);
+                FileRecord r = ctx.store.files().get(f.fileId); r.duplicateGroupId = id; ctx.store.files().put(r);
             }
         }
+    }
+
+    /** FNV-1a 64 over the chars. */
+    static long hash64(String s) {
+        long x = 0xcbf29ce484222325L;
+        for (int i = 0; i < s.length(); i++) { x ^= s.charAt(i); x *= 0x100000001b3L; }
+        return x;
+    }
+
+    /** Occurrences (capped at 2) of {@code v} in the sorted first {@code n} entries of {@code a}. */
+    static int occurs(long[] a, int n, long v) {   // 0, 1 or 2 (= two or more)
+        int lo = 0, hi = n;
+        while (lo < hi) { int m = (lo + hi) >>> 1; if (a[m] < v) lo = m + 1; else hi = m; }
+        return lo >= n || a[lo] != v ? 0 : lo + 1 < n && a[lo + 1] == v ? 2 : 1;
     }
 }

@@ -7,6 +7,7 @@ import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
 import com.storageplanner.v2.stage.StageOutcome;
 import com.storageplanner.v2.store.StoreException;
+import com.storageplanner.v2.util.FileIdList;
 
 import java.util.*;
 
@@ -20,26 +21,35 @@ public final class T3ImageStage implements Stage {
     public T3ImageStage(Limits lim) { this.lim = lim; }
     public String id() { return ID; }
 
+    private static final class Sel {
+        final int rank; final String path, id;
+        Sel(int rank, String path, String id) { this.rank = rank; this.path = path; this.id = id; }
+    }
+
     static int rank(String area) { int i = area == null ? -1 : AREAS.indexOf(area); return i < 0 ? AREAS.size() : i; }
 
     public StageOutcome run(final StageContext ctx) throws StoreException {
         final long scanId = ctx.session.scanId;
         final boolean full = ctx.session.kind == ScanKind.FULL;
-        List<FileRecord> jobs = new ArrayList<FileRecord>();
+        // Only (rank, path, id) of the selected images are held while sorting; the loop gets just the ids (PHASE_S 4 item 1).
+        List<Sel> sel = new ArrayList<Sel>();
         for (FileRecord f : ExtractionLoop.present(ctx)) {
             if (!FileType.isImage(f.type) || (f.tiersDone & Tiers.T1) == 0) continue;
             FeatureRecord fr = ctx.store.features().get(f.fileId);
             if (fr == null || fr.fp == null || !fr.fp.sameAs(f.fingerprint())) continue;
             boolean cur = fr.versions[Extractors.IMAGE_BASICS] == Extractors.version(Extractors.IMAGE_BASICS)
                     && !(full && !Long.toString(scanId).equals(fr.extra.get("t3scan")));
-            if (!cur) jobs.add(f);
+            if (!cur) sel.add(new Sel(rank(f.area), f.path, f.fileId));
         }
-        Collections.sort(jobs, new Comparator<FileRecord>() {
-            public int compare(FileRecord a, FileRecord b) {
-                int c = Integer.compare(rank(a.area), rank(b.area));
+        Collections.sort(sel, new Comparator<Sel>() {   // stable: ties keep ascending fileId, as before
+            public int compare(Sel a, Sel b) {
+                int c = Integer.compare(a.rank, b.rank);
                 return c != 0 ? c : a.path.compareTo(b.path);
             }
         });
+        FileIdList jobs = new FileIdList();
+        for (Sel s : sel) jobs.add(s.id);
+        sel = null;
         return ExtractionLoop.run(ctx, ID, jobs, Tiers.T3, new ExtractionLoop.Job() {
             public void run(FileRecord f) throws StoreException { image(ctx, f, scanId); }
         });

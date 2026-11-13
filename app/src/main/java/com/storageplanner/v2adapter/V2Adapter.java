@@ -125,17 +125,30 @@ public final class V2Adapter {
      * @param root      absolute shared-storage root ("" if paths are absolute already)
      * @param allowYourCall the user's opt-in to YOUR_CALL (A29); false = YOUR_CALL is display-only
      */
+    /**
+     * The files in ascending id. A {@code SortedMap} (natural order) or a {@code StoreFileMap} is iterated directly (PHASE_S_STORE
+     * 4 item 5: no copy of every id); any other map is copied and sorted as before.
+     */
+    public static Iterable<Map.Entry<String, FileRecord>> sortedFiles(Map<String, FileRecord> files) {
+        if (files instanceof com.storageplanner.v2.plan.StoreFileMap
+                || (files instanceof SortedMap && ((SortedMap<String, FileRecord>) files).comparator() == null)) return files.entrySet();
+        List<String> ids = new ArrayList<String>(files.keySet());
+        Collections.sort(ids);
+        List<Map.Entry<String, FileRecord>> out = new ArrayList<Map.Entry<String, FileRecord>>(ids.size());
+        for (String id : ids) out.add(new AbstractMap.SimpleImmutableEntry<String, FileRecord>(id, files.get(id)));
+        return out;
+    }
+
     public static Adapted adapt(UnitBuilder2.Input in, UnitBuilder2.Built built, List<InstalledApp> apps, Map<String, String> duplicateOf,
                                 String root, int sdk, long now, long total, long free, boolean allowYourCall) {
         Adapted a = new Adapted();
         Scanner.Result r = new Scanner.Result();
         r.now = now; r.total = total; r.free = free;
         Map<String, FileItem> byId = new HashMap<String, FileItem>();
-        List<String> ids = new ArrayList<String>(in.files.keySet());
-        Collections.sort(ids);
         String base = root == null || root.isEmpty() ? "" : (root.endsWith("/") ? root : root + "/");
-        for (String id : ids) {
-            FileRecord f = in.files.get(id);
+        for (Map.Entry<String, FileRecord> e : sortedFiles(in.files)) {
+            String id = e.getKey();
+            FileRecord f = e.getValue();
             if (f == null || f.presence != Presence.PRESENT || f.path == null) continue;
             FileItem fi = new FileItem(f.path, base + f.path, Math.max(0, f.sizeBytes), Unknown.knownTime(f.modifiedAt) ? f.modifiedAt : 0);
             fi.area = f.area == null ? "other" : f.area;

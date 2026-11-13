@@ -8,8 +8,10 @@ import com.storageplanner.v2.stage.StageOutcome;
 import com.storageplanner.v2.stage.Throttle;
 import com.storageplanner.v2.store.StoreException;
 
-import java.util.ArrayList;
-import java.util.List;
+import com.storageplanner.v2.util.FileIdList;
+
+import java.util.Iterator;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 /**
@@ -23,16 +25,31 @@ public final class ExtractionLoop {
 
     public interface Job { void run(FileRecord f) throws StoreException; }
 
-    /** PRESENT files of the scanned volumes, ascending fileId. */
-    public static List<FileRecord> present(StageContext ctx) {
-        Set<String> vols = ctx.config.volumeIds;
-        List<FileRecord> out = new ArrayList<FileRecord>();
-        for (FileRecord f : ctx.store.files().all())
-            if (f.presence == Presence.PRESENT && (vols == null || vols.contains(f.volumeId))) out.add(f);
-        return out;
+    /**
+     * PRESENT files of the scanned volumes, ascending fileId, streamed from {@code files().all()} (PHASE_S_STORE 4 item 1:
+     * no list of records is held). Each iteration starts a new pass over the store.
+     */
+    public static Iterable<FileRecord> present(final StageContext ctx) {
+        final Set<String> vols = ctx.config.volumeIds;
+        return new Iterable<FileRecord>() {
+            public Iterator<FileRecord> iterator() {
+                final Iterator<FileRecord> it = ctx.store.files().all().iterator();
+                return new Iterator<FileRecord>() {
+                    FileRecord next = advance();
+                    FileRecord advance() {
+                        while (it.hasNext()) { FileRecord f = it.next(); if (f.presence == Presence.PRESENT && (vols == null || vols.contains(f.volumeId))) return f; }
+                        return null;
+                    }
+                    public boolean hasNext() { return next != null; }
+                    public FileRecord next() { if (next == null) throw new NoSuchElementException(); FileRecord f = next; next = advance(); return f; }
+                    public void remove() { throw new UnsupportedOperationException(); }
+                };
+            }
+        };
     }
 
-    public static StageOutcome run(StageContext ctx, String stageId, List<FileRecord> jobs, int pendingBit, Job job) throws StoreException {
+    /** Runs {@code job} on each id of {@code jobs} in list order; the record is loaded from the store when its turn comes. */
+    public static StageOutcome run(StageContext ctx, String stageId, FileIdList jobs, int pendingBit, Job job) throws StoreException {
         Clock clock = ctx.device.clock();
         long lastCommit = clock.monotonicNanos();
         int sinceCommit = 0;
@@ -40,7 +57,7 @@ public final class ExtractionLoop {
             StageOutcome stop = stopReason(ctx);
             if (stop != null) {
                 for (int k = i; k < jobs.size(); k++) {
-                    FileRecord f = ctx.store.files().get(jobs.get(k).fileId);
+                    FileRecord f = ctx.store.files().get(jobs.get(k));
                     if (f != null && pendingBit != 0 && (f.tiersPending & pendingBit) == 0) { Tiers.pending(f, pendingBit); Confidence.apply(f, ctx.store.features().get(f.fileId)); ctx.store.files().put(f); }
                 }
                 if (stop == StageOutcome.BUDGET_EXHAUSTED) ctx.session.count("budget.pendingFiles", jobs.size() - i);
@@ -48,7 +65,8 @@ public final class ExtractionLoop {
                 ctx.store.commit();
                 return stop;
             }
-            job.run(jobs.get(i));
+            FileRecord f = ctx.store.files().get(jobs.get(i));
+            if (f != null) job.run(f);
             sinceCommit++;
             if (ctx.control != null && (i & 63) == 0) ctx.control.progress(stageId, i, jobs.size());
             if (sinceCommit >= COMMIT_EVERY || (clock.monotonicNanos() - lastCommit) / 1000000L >= COMMIT_EVERY_MS) {

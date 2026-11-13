@@ -12,15 +12,20 @@ public final class ProvisionalRecommendations {
 
     public static List<Recommendation> of(List<Verdict> verdicts, Map<String, FileRecord> files, long scanId) {
         List<Recommendation> out = new ArrayList<Recommendation>();
-        for (Verdict v : verdicts) {
-            FileRecord f = files.get(v.fileId);
-            if (v.tier != null) out.add(rec(v, f, v.tier, v.action, v.reasonCodes, v.params, v.evidenceRefs, v.dependencyIds, scanId));
-            if (v.transform != null) {
-                Candidate t = v.transform;
-                out.add(rec(v, f, t.proposed, t.action, Collections.singletonList(t.reasonCode), t.params, t.evidenceRefs, t.dependencyIds, scanId));
-            }
-        }
+        for (Verdict v : verdicts) ofOne(v, files.get(v.fileId), scanId, out);
         return out;
+    }
+
+    /**
+     * The recommendations of one verdict, appended to {@code out} (PHASE_S_STORE 4 item 5: called per verdict by the streaming
+     * ASSESS sink, which then drops the verdict). {@code f} is the file's post-ASSESS record (REVIEW_S F-10).
+     */
+    public static void ofOne(Verdict v, FileRecord f, long scanId, List<Recommendation> out) {
+        if (v.tier != null) out.add(rec(v, f, v.tier, v.action, v.reasonCodes, v.params, v.evidenceRefs, v.dependencyIds, scanId));
+        if (v.transform != null) {
+            Candidate t = v.transform;
+            out.add(rec(v, f, t.proposed, t.action, Collections.singletonList(t.reasonCode), t.params, t.evidenceRefs, t.dependencyIds, scanId));
+        }
     }
     static Recommendation rec(Verdict v, FileRecord f, Tier tier, Action act, List<String> codes, Map<String, String> params, List<String> ev,
                               List<String> deps, long scanId) {

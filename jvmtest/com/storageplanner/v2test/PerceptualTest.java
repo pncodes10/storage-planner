@@ -55,10 +55,10 @@ public final class PerceptualTest {
         for (int i = 0; i < n; i++) { h[i] = r.nextLong() & 0x7fffffffffffffffL; t[i] = Unknown.TIME; }
         for (int d = 0; d <= 7; d++) { long x = h[10 * d]; for (int k = 0; k < d; k++) x ^= 1L << (k * 9); h[10 * d + 1] = x; }
         CandidateGenerator cg = new CandidateGenerator(h, t, s).run();
-        for (int d = 0; d <= 7; d++) T.check("planted pair at distance " + d + " found", cg.pairs.containsKey(((long) (10 * d)) << 32 | (10 * d + 1)));
-        T.check("candidate pairs <= 64 n", cg.pairs.size() <= 64L * n);
+        for (int d = 0; d <= 7; d++) T.check("planted pair at distance " + d + " found", cg.pairMap().containsKey(((long) (10 * d)) << 32 | (10 * d + 1)));
+        T.check("candidate pairs <= 64 n", cg.pairCount() <= 64L * n);
         CandidateGenerator cg2 = new CandidateGenerator(h, t, s).run();
-        T.eq("deterministic", cg.pairs, cg2.pairs);
+        T.eq("deterministic", cg.pairMap(), cg2.pairMap());
         long[] same = new long[1000]; Arrays.fill(same, 12345L); long[] tt = new long[1000]; Arrays.fill(tt, Unknown.TIME);
         CandidateGenerator deg = new CandidateGenerator(same, tt, new String[1000]).run();
         boolean all = true; for (boolean b : deg.truncated) all &= b;
@@ -68,8 +68,8 @@ public final class PerceptualTest {
         CandidateGenerator tw = new CandidateGenerator(new long[]{1L << 40, 3L << 40, 7L << 50}, t3, new String[3]);
         tw.hash[0] = 5; tw.hash[1] = 5 ^ (0x3fffL << 20); tw.hash[2] = 5 ^ (0x3fffL << 40);
         tw.run();
-        T.check("time window: 119 s pair found (Hamming 14)", tw.pairs.containsKey(1L));
-        T.check("time window: 121 s apart not found", !tw.pairs.containsKey((1L << 32) | 2));
+        T.check("time window: 119 s pair found (Hamming 14)", tw.pairMap().containsKey(1L));
+        T.check("time window: 121 s apart not found", !tw.pairMap().containsKey((1L << 32) | 2));
 
         T.section("VerdictRules");
         PairMetrics m = new PairMetrics(); m.gridW = 64; m.gridH = 48; m.band = 1;

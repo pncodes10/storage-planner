@@ -21,15 +21,15 @@ final class ArchiveMatcher {
         long scanId = ctx.session == null ? 0 : ctx.session.scanId;
         Map<String, List<Object[]>> bySizeCrc = new HashMap<String, List<Object[]>>();   // size:crc -> {archive node, entry}
         Set<String> archives = new HashSet<String>();
+        Set<Long> entrySizes = new HashSet<Long>();
         for (Node a : nodes) {
-            ArchiveInfo ai = a.fr == null ? null : a.fr.archive;
-            if (ai == null || ai.entries == null || !"OK".equals(ai.listingStatus) || a.alias()) continue;
-            if (a.fr.fp != null && !a.fr.fp.sameAs(a.fp)) continue;
+            if (!a.is(Node.ARCHIVE) || a.alias()) continue;     // PHASE_S 4 item 3: the listing tests ran in the snapshot pass
+            ArchiveInfo ai = a.fr().archive;
             archives.add(a.id());
             for (ArchiveEntry e : ai.entries) {
                 if (e.dir || e.size < 1 || e.depth > 0) continue;
                 String ref = a.id() + "!" + e.path;
-                Relationship r = Edges.make(ref, a.id(), RelType.CONTAINED_IN, 1.0, Verification.VERIFIED, null, a.fp, scanId);
+                Relationship r = Edges.make(ref, a.id(), RelType.CONTAINED_IN, 1.0, Verification.VERIFIED, null, a.fp(), scanId);
                 Edges.ev(r, "ARCHIVE_LISTING", null);
                 edges.add(r);
                 if (e.crc32 >= 0) {
@@ -37,14 +37,15 @@ final class ArchiveMatcher {
                     List<Object[]> l = bySizeCrc.get(k);
                     if (l == null) bySizeCrc.put(k, l = new ArrayList<Object[]>());
                     l.add(new Object[]{a, e});
+                    entrySizes.add(e.size);
                 }
             }
         }
         Map<String, BackupRecord> want = new TreeMap<String, BackupRecord>();
         List<Object[]> todo = new ArrayList<Object[]>();
         for (Node f : nodes) {
-            if (f.alias() || archives.contains(f.id()) || f.sha() == null || f.hr.crc32 < 0) continue;
-            List<Object[]> m = bySizeCrc.get(f.f.sizeBytes + ":" + f.hr.crc32);
+            if (f.alias() || !f.is(Node.SHA) || !entrySizes.contains(f.size) || archives.contains(f.id()) || f.hr().crc32 < 0) continue;
+            List<Object[]> m = bySizeCrc.get(f.size + ":" + f.hr().crc32);
             if (m == null) continue;
             int c = 0;
             for (Object[] x : m) {
@@ -54,10 +55,10 @@ final class ArchiveMatcher {
                 String id = Edges.make(f.id(), ref, RelType.BACKED_UP_BY, 0, Verification.UNVERIFIED, null, null, 0).edgeId;
                 BackupRecord old = ctx.store.backups().get(id);
                 BackupRecord b;
-                if (old != null && f.fp.equals(old.subjectFp) && a.fp.equals(old.copyFp) && old.state != BackupState.UNKNOWN && old.state != BackupState.POSSIBLE) b = old;
+                if (old != null && f.fp().equals(old.subjectFp) && a.fp().equals(old.copyFp) && old.state != BackupState.UNKNOWN && old.state != BackupState.POSSIBLE) b = old;
                 else {
                     b = new BackupRecord(); b.backupId = id; b.subjectId = f.id(); b.copyRef = ref; b.kind = BackupKind.ARCHIVE_ENTRY;
-                    b.level = BackupLevel.CRC32_MATCH; b.state = BackupState.POSSIBLE; b.subjectFp = f.fp; b.copyFp = a.fp;
+                    b.level = BackupLevel.CRC32_MATCH; b.state = BackupState.POSSIBLE; b.subjectFp = f.fp(); b.copyFp = a.fp();
                     todo.add(new Object[]{f, a, e, b});
                 }
                 want.put(id, b);
@@ -66,7 +67,7 @@ final class ArchiveMatcher {
         // BackupVerifier: priority = subject size desc, then id
         Collections.sort(todo, new Comparator<Object[]>() {
             public int compare(Object[] x, Object[] y) {
-                long sx = ((Node) x[0]).f.sizeBytes, sy = ((Node) y[0]).f.sizeBytes;
+                long sx = ((Node) x[0]).size, sy = ((Node) y[0]).size;
                 return sx != sy ? Long.compare(sy, sx) : ((BackupRecord) x[3]).backupId.compareTo(((BackupRecord) y[3]).backupId);
             }
         });
@@ -76,13 +77,11 @@ final class ArchiveMatcher {
             verify(ctx, (Node) t[0], (Node) t[1], (ArchiveEntry) t[2], (BackupRecord) t[3]);
         }
         for (BackupRecord b : want.values()) {
-            Node f = null;
-            for (Node n : nodes) if (n.id().equals(b.subjectId)) { f = n; break; }
-            Node a = null; String aid = b.copyRef.substring(0, b.copyRef.indexOf('!'));
-            for (Node n : nodes) if (n.id().equals(aid)) { a = n; break; }
+            Node f = find(nodes, b.subjectId);
+            Node a = find(nodes, b.copyRef.substring(0, b.copyRef.indexOf('!')));
             if (b.state == BackupState.CORRUPT || b.state == BackupState.MISSING) { inc(cov, "backup" + b.state); continue; }
             boolean v = b.state == BackupState.VERIFIED;
-            Relationship r = Edges.make(f.id(), b.copyRef, RelType.BACKED_UP_BY, v ? 1.0 : 0.6, v ? Verification.VERIFIED : Verification.UNVERIFIED, f.fp, a.fp, scanId);
+            Relationship r = Edges.make(f.id(), b.copyRef, RelType.BACKED_UP_BY, v ? 1.0 : 0.6, v ? Verification.VERIFIED : Verification.UNVERIFIED, f.fp(), a.fp(), scanId);
             r.verifiedAt = v ? b.verifiedAt : Unknown.TIME;
             Edges.ev(r, v ? "ENTRY_SHA256_EQUAL" : "ZIP_SIZE_CRC_EQUAL", null);
             edges.add(r);
@@ -91,16 +90,28 @@ final class ArchiveMatcher {
         GraphStage.diff(ctx.store.backups(), Codecs.BACKUP, want, 0);
     }
 
+    /** The node with this id in {@code nodes} (ascending id), or null. */
+    static Node find(List<Node> nodes, String id) {
+        int lo = 0, hi = nodes.size() - 1;
+        while (lo <= hi) {
+            int m = (lo + hi) >>> 1;
+            int c = nodes.get(m).id().compareTo(id);
+            if (c == 0) return nodes.get(m);
+            if (c < 0) lo = m + 1; else hi = m - 1;
+        }
+        return null;
+    }
+
     static void inc(Map<String, Long> cov, String k) { Long o = cov.get(k); cov.put(k, (o == null ? 0 : o) + 1); }
 
     static void verify(StageContext ctx, Node f, Node a, ArchiveEntry e, BackupRecord b) {
-        Integrity ai = a.f.integrity;
+        Integrity ai = a.f().integrity;
         if (ai == Integrity.CORRUPT || ai == Integrity.TRUNCATED || ai == Integrity.ENCRYPTED || e.encrypted == Tri.TRUE
                 || !(e.method == 0 || e.method == 8) || e.size > GraphConfig.VERIFY_MAX_ENTRY || e.localOffset < 0 || e.compressedSize < 0
                 || e.size / Math.max(1, e.compressedSize) > 100) {
             b.state = BackupState.UNKNOWN; b.note = "PRECONDITION"; return;
         }
-        try (ReadableFile rf = ctx.device.storage().open(a.f.volumeId, a.f.accessPath())) {
+        try (ReadableFile rf = ctx.device.storage().open(a.f().volumeId, a.f().accessPath())) {
             byte[] lh = new byte[30];
             if (read(rf, e.localOffset, lh) != 30 || (lh[0] & 255) != 0x50 || (lh[1] & 255) != 0x4b || lh[2] != 3 || lh[3] != 4) { b.state = BackupState.UNKNOWN; b.note = "LOCAL_HEADER"; return; }
             int nl = (lh[26] & 255) | (lh[27] & 255) << 8, xl = (lh[28] & 255) | (lh[29] & 255) << 8;

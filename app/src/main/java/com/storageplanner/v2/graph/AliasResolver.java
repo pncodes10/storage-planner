@@ -21,31 +21,44 @@ public final class AliasResolver {
         switch (m) { case B_ALL_FILES: return 0; case D_APP_PRIVATE: return 1; case A_MEDIASTORE: return 2; default: return 3; }
     }
 
-    /** Sets n.canonical for every node; returns canonical fileId -> alias fileIds (non-canonical). */
-    static Map<String, List<String>> resolve(List<Node> nodes) {
-        Map<String, List<Node>> byKey = new TreeMap<String, List<Node>>();
-        for (Node n : nodes) {
-            n.canonical = n.id();
-            if (n.f.physicalKey != null) {
-                List<Node> l = byKey.get(n.f.physicalKey);
-                if (l == null) byKey.put(n.f.physicalKey, l = new ArrayList<Node>());
-                l.add(n);
-            }
-        }
+    /**
+     * Sets n.canonical for every node in an alias set (null = itself). {@code pk} = [hash64(physicalKey), node index] pairs of
+     * the nodes that have a physicalKey (PHASE_S_STORE 4 item 3: no per-file key strings are held); equal hashes are confirmed
+     * by loading the records and grouping by the real key. Returns canonical fileId -> alias fileIds (non-canonical).
+     */
+    static Map<String, List<String>> resolve(List<Node> nodes, long[] pk, int npk) {
+        com.storageplanner.v2.util.PairSort.pairs(pk, npk);
         Map<String, List<String>> out = new TreeMap<String, List<String>>();
-        for (List<Node> l : byKey.values()) {
-            if (l.size() < 2) continue;
-            Node best = null;
-            for (Node n : l) {
-                if (best == null) { best = n; continue; }
-                int c = Integer.compare(modeRank(n.f.accessMode), modeRank(best.f.accessMode));
-                if (c < 0 || (c == 0 && n.id().compareTo(best.id()) < 0)) best = n;
+        for (int i = 0; i < npk; ) {
+            int j = i + 1;
+            while (j < npk && pk[2 * j] == pk[2 * i]) j++;
+            if (j - i >= 2) {
+                Map<String, List<Node>> byKey = new TreeMap<String, List<Node>>();
+                for (int q = i; q < j; q++) {      // ascending node index = ascending fileId, as the old pass added them
+                    Node n = nodes.get((int) pk[2 * q + 1]);
+                    String k = n.f().physicalKey;
+                    List<Node> l = byKey.get(k);
+                    if (l == null) byKey.put(k, l = new ArrayList<Node>());
+                    l.add(n);
+                }
+                for (List<Node> l : byKey.values()) group(l, out);
             }
-            List<String> al = new ArrayList<String>();
-            for (Node n : l) { n.canonical = best.id(); if (n != best) al.add(n.id()); }
-            Collections.sort(al);
-            out.put(best.id(), al);
+            i = j;
         }
         return out;
+    }
+
+    private static void group(List<Node> l, Map<String, List<String>> out) {
+        if (l.size() < 2) return;
+        Node best = null;
+        for (Node n : l) {
+            if (best == null) { best = n; continue; }
+            int c = Integer.compare(modeRank(n.f().accessMode), modeRank(best.f().accessMode));
+            if (c < 0 || (c == 0 && n.id().compareTo(best.id()) < 0)) best = n;
+        }
+        List<String> al = new ArrayList<String>();
+        for (Node n : l) { n.canonical = best.id().equals(n.id()) ? null : best.id(); if (n != best) al.add(n.id()); }
+        Collections.sort(al);
+        out.put(best.id(), al);
     }
 }

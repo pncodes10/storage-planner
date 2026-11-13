@@ -15,7 +15,15 @@ import static com.storageplanner.v2.graph.GraphConfig.*;
 public final class CandidateGenerator {
     public final long[] hash; public final long[] time; public final String[] stem;
     public final int n;
-    public final TreeMap<Long, Integer> pairs = new TreeMap<Long, Integer>();   // (i << 32 | j) -> sources
+    /**
+     * Candidate pairs after {@link #run}: ascending keys (i << 32 | j, i < j) and their source bitmasks, {@link #pairCount}
+     * entries (PHASE_S_STORE 4 item 3: primitive arrays instead of a TreeMap; same keys, same ascending order).
+     */
+    public long[] keys = new long[0];
+    public int[] sources = new int[0];
+    private int npairs;
+    private long[] acc = new long[64];     // (key, source bit) appended by add(), merged by finish()
+    private int nacc;
     public final boolean[] truncated;
     public long bucketOverflow, work;
 
@@ -28,14 +36,43 @@ public final class CandidateGenerator {
     static int band(long h, int k) { return (int) ((h >>> BAND_SHIFT[k]) & ((1L << BAND_BITS[k]) - 1)); }
 
     public CandidateGenerator run() {
-        mih(); timeWindow(); stems();
+        mih(); timeWindow(); stems(); finish();
         return this;
+    }
+
+    public int pairCount() { return npairs; }
+
+    /** Sources of the pair with this key, or -1 when it is not a candidate. */
+    public int sourcesOf(long key) {
+        int i = Arrays.binarySearch(keys, 0, npairs, key);
+        return i < 0 ? -1 : sources[i];
+    }
+
+    /** The pairs as a map (tests and calibration only). */
+    public TreeMap<Long, Integer> pairMap() {
+        TreeMap<Long, Integer> m = new TreeMap<Long, Integer>();
+        for (int i = 0; i < npairs; i++) m.put(keys[i], sources[i]);
+        return m;
     }
 
     void add(int i, int j, CandidateSource s) {
         long k = i < j ? ((long) i << 32) | j : ((long) j << 32) | i;
-        Integer o = pairs.get(k);
-        pairs.put(k, (o == null ? 0 : o) | s.bit());
+        if (2 * nacc + 2 > acc.length) acc = Arrays.copyOf(acc, acc.length * 2);
+        acc[2 * nacc] = k; acc[2 * nacc + 1] = s.bit(); nacc++;
+    }
+
+    private void finish() {
+        com.storageplanner.v2.util.PairSort.pairs(acc, nacc);
+        int distinct = 0;
+        for (int q = 0; q < nacc; q++) if (q == 0 || acc[2 * q] != acc[2 * q - 2]) distinct++;
+        keys = new long[distinct]; sources = new int[distinct];
+        int w = -1;
+        for (int q = 0; q < nacc; q++) {
+            if (q == 0 || acc[2 * q] != acc[2 * q - 2]) { w++; keys[w] = acc[2 * q]; }
+            sources[w] |= (int) acc[2 * q + 1];
+        }
+        npairs = distinct;
+        acc = null; nacc = 0;
     }
 
     /** Keeps the cap nearest of cand (by key, then index) and marks truncation. */
@@ -46,23 +83,16 @@ public final class CandidateGenerator {
     }
 
     void mih() {
-        List<Map<Integer, int[]>> idx = new ArrayList<Map<Integer, int[]>>();
+        // per band one sorted long[] of (band value << 32 | index): a bucket is the run with one value, in ascending index
+        long[][] idx = new long[4][];
         for (int k = 0; k < 4; k++) {
-            Map<Integer, List<Integer>> m = new HashMap<Integer, List<Integer>>();
-            for (int i = 0; i < n; i++) {
-                if (hash[i] == Long.MIN_VALUE) continue;
-                Integer b = band(hash[i], k);
-                List<Integer> l = m.get(b);
-                if (l == null) m.put(b, l = new ArrayList<Integer>());
-                l.add(i);
-            }
-            Map<Integer, int[]> mm = new HashMap<Integer, int[]>();
-            for (Map.Entry<Integer, List<Integer>> e : m.entrySet()) {
-                int[] a = new int[e.getValue().size()];
-                for (int x = 0; x < a.length; x++) a[x] = e.getValue().get(x);
-                mm.put(e.getKey(), a);
-            }
-            idx.add(mm);
+            int m = 0;
+            for (int i = 0; i < n; i++) if (hash[i] != Long.MIN_VALUE) m++;
+            long[] a = new long[m];
+            m = 0;
+            for (int i = 0; i < n; i++) if (hash[i] != Long.MIN_VALUE) a[m++] = ((long) band(hash[i], k) << 32) | i;
+            Arrays.sort(a);
+            idx[k] = a;
         }
         for (int i = 0; i < n; i++) {
             if (hash[i] == Long.MIN_VALUE) continue;
@@ -71,12 +101,14 @@ public final class CandidateGenerator {
             for (int k = 0; k < 4; k++) {
                 int v = band(hash[i], k);
                 for (int f = -1; f < BAND_BITS[k]; f++) {
-                    int[] bucket = idx.get(k).get(f < 0 ? v : v ^ (1 << f));
-                    if (bucket == null) continue;
-                    int lim = bucket.length;
+                    long[] a = idx[k];
+                    long bv = (long) (f < 0 ? v : v ^ (1 << f));
+                    int from = lowerBound(a, bv << 32), to = lowerBound(a, (bv + 1) << 32);
+                    if (from == to) continue;
+                    int lim = to - from;
                     if (lim > MIH_BUCKET_CAP) { lim = MIH_BUCKET_CAP; truncated[i] = true; bucketOverflow++; }
                     for (int x = 0; x < lim; x++) {
-                        int j = bucket[x];
+                        int j = (int) a[from + x];
                         work++;
                         if (j == i || !seen.add(j)) continue;
                         int d = ham(hash[i], hash[j]);
@@ -88,12 +120,21 @@ public final class CandidateGenerator {
         }
     }
 
+    static int lowerBound(long[] a, long key) {
+        int lo = 0, hi = a.length;
+        while (lo < hi) { int mid = (lo + hi) >>> 1; if (a[mid] < key) lo = mid + 1; else hi = mid; }
+        return lo;
+    }
+
     void timeWindow() {
-        Integer[] ord = new Integer[n];
         int m = 0;
-        for (int i = 0; i < n; i++) if (Unknown.knownTime(time[i]) && hash[i] != Long.MIN_VALUE) ord[m++] = i;
-        final Integer[] o = Arrays.copyOf(ord, m);
-        Arrays.sort(o, new Comparator<Integer>() { public int compare(Integer a, Integer b) { return time[a] != time[b] ? Long.compare(time[a], time[b]) : a - b; } });
+        for (int i = 0; i < n; i++) if (Unknown.knownTime(time[i]) && hash[i] != Long.MIN_VALUE) m++;
+        final int[] o = new int[m];
+        m = 0;
+        for (int i = 0; i < n; i++) if (Unknown.knownTime(time[i]) && hash[i] != Long.MIN_VALUE) o[m++] = i;
+        com.storageplanner.v2.util.PairSort.ints(o, m, new com.storageplanner.v2.util.PairSort.IntOrder() {
+            public int compare(int a, int b) { return time[a] != time[b] ? Long.compare(time[a], time[b]) : a - b; }
+        });
         for (int p = 0; p < m; p++) {
             int i = o[p];
             List<long[]> cand = new ArrayList<long[]>();

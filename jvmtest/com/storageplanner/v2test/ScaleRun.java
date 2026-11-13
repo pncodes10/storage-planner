@@ -49,8 +49,8 @@ import java.util.Map;
 
 /**
  * Scale harness (PHASE_S_STORE slice S0): DISCOVER, T1-T3, GRAPH through the pipeline, then the app's analysis path
- * (today the body of {@code V2Runner.analyse}: ASSESS, recommendations, hash-on-demand, app subjects, PLAN, adapter; S5 moves
- * it to {@code V2Analysis} and this class then calls that). Prints used heap per phase.
+ * ({@code V2Analysis}, the code V2Runner runs: ASSESS, recommendations, hash-on-demand, app subjects, PLAN, adapter). Prints used
+ * heap per phase.
  *
  * <pre>ScaleRun ROOT [--store memory|disk] [--profile] [--histograms DIR] [--tables] [--no-adapter]</pre>
  * {@code --store disk}: a DiskStore over a fresh directory under $TMPDIR (removed at the end); {@code --tables} is memory only.
@@ -121,10 +121,12 @@ public final class ScaleRun {
         stages.add(new T3ImageStage());
         GraphStage gs = new GraphStage();
         stages.add(gs);
+        final ProfControl control = hp == null ? null : new ProfControl(hp, store);
         List<Stage> wrapped = new ArrayList<Stage>();
         for (final Stage s : stages) wrapped.add(new Stage() {
             public String id() { return s.id(); }
             public StageOutcome run(StageContext c) throws StoreException {
+                if (control != null) control.stage = s.id();
                 long ts = System.nanoTime();
                 StageOutcome o = s.run(c);
                 out.println(s.id() + " ms=" + (System.nanoTime() - ts) / 1000000 + " outcome=" + o);
@@ -132,7 +134,7 @@ public final class ScaleRun {
                 return o;
             }
         });
-        PipelineResult res = new Pipeline(dev, store, cfg, wrapped).run(null);
+        PipelineResult res = new Pipeline(dev, store, cfg, wrapped).run(control);
         out.println("session " + res.session.state + " graph coverage " + gs.coverage);
         wrapped = null; stages = null; gs = null;            // drop GraphStage.last (Perceptual, signature cache)
         int n = store.files().size();
@@ -140,43 +142,49 @@ public final class ScaleRun {
                 + " groups=" + store.duplicateGroups().size() + " pairChecks=" + store.pairChecks().size() + " dirs=" + store.directories().size());
         if (hp != null) hp.mark("store_after_graph", n);
 
-        // ---- the V2Runner.analyse path (keep in step with it until S5 moves it to V2Analysis) ----
+        // ---- the app's analysis path: V2Analysis, exactly as V2Runner calls it (PHASE_S_STORE 4 item 6) ----
         long ta = System.nanoTime();
-        long now = clock.nowMillis();
-        long scanId = res.session.scanId;
-        List<Verdict> vs = Assessor.run(store, apps, now, PresentationPolicy.STANDARD, new RiskConfig());
-        if (hp != null) hp.mark("assess_verdicts", n);
-        Map<String, FileRecord> fm = new HashMap<String, FileRecord>();
-        for (FileRecord f : store.files().all()) fm.put(f.fileId, f);
-        List<Recommendation> recs = ProvisionalRecommendations.of(vs, fm, scanId);
-        vs = null;
-        if (hp != null) hp.mark("fm_recs", n);
-        HashOnDemand.run(recs, fm, new HashOnDemand.Hasher() {
-            public String sha256(FileRecord f) { return sha256Of(sa.localPath(f.volumeId, f.path)); }
-        }, 2000000000L);
-        recs.addAll(AppSubjects.recs(apps, now, 34, scanId, ProvisionalRecommendations.PLAN_VERSION));
-        UnitBuilder2.Input in = new UnitBuilder2.Input();
-        in.recs = recs; in.files = fm; in.keepers = Plans.keepers(store);
-        Plans.Made m = Plans.make(in, ActionPlan.MAX_SAFE, null, false);
-        Plans.version(store, m.plan, now, scanId);
-        store.flush();
-        if (hp != null) hp.mark("plan_made", n);
-        int items = -1;
-        if (adapter) {
-            V2Adapter.Adapted ad = V2Adapter.adapt(in, m.built, apps.list(), V2Adapter.duplicateOf(store.duplicateGroups().all()), r.path,
-                    34, now, 0L, 0L, false);
-            items = ad.result.files.size();
-            if (hp != null) hp.mark("adapted", n);
-            ad = null;
-        }
-        out.println("analyse ms=" + (System.nanoTime() - ta) / 1000000 + " recs=" + recs.size() + " adapterFiles=" + items);
-        m = null; in = null; recs = null; fm = null;
+        com.storageplanner.v2adapter.V2Analysis.Params p = new com.storageplanner.v2adapter.V2Analysis.Params();
+        p.apps = apps; p.now = clock.nowMillis(); p.scanId = res.session.scanId; p.sdk = 34; p.root = r.path; p.total = 0; p.free = 0;
+        p.hasher = new HashOnDemand.Hasher() { public String sha256(FileRecord f) { return sha256Of(sa.localPath(f.volumeId, f.path)); } };
+        p.hashBudget = 2000000000L;
+        p.adapt = adapter;
+        final int nFiles = n;
+        if (hp != null) p.marks = new com.storageplanner.v2adapter.V2Analysis.Marks() { public void mark(String phase) { hp.mark(phase, nFiles); } };
+        com.storageplanner.v2adapter.V2Analysis.Result ar = com.storageplanner.v2adapter.V2Analysis.run(store, p);
+        int items = ar.adapted == null ? -1 : ar.adapted.result.files.size();
+        out.println("analyse ms=" + (System.nanoTime() - ta) / 1000000 + " recs=" + ar.in.recs.size() + " adapterFiles=" + items);
+        ar = null; p = null;
         if (hp != null) {
             long st = hp.mark("store_only_end", n);
             out.println("peak marked used=" + hp.peakMarked + " perFile=" + (n == 0 ? 0 : (hp.peakMarked - hp.base) / n));
             if (tables) hp.perTable(store, n, st);
         }
         out.println("SCALE_RUN OK files=" + n + " totalMs=" + (System.nanoTime() - t0) / 1000000 + " maxHeap=" + Runtime.getRuntime().maxMemory());
+    }
+
+    /**
+     * With a profile: one heap mark at the first progress call (done == 0) of each job loop, i.e. inside the stage while its
+     * working set (job list) is referenced, and one at T2 part B's first size group (its stopReason check follows the part A
+     * jobs' checks). These "in_" marks are the stage peaks of PHASE_S S5.
+     */
+    static final class ProfControl implements com.storageplanner.v2.device.ScanControl {
+        final HeapProfile hp; final V2Store store;
+        final Map<String, Integer> seen = new HashMap<String, Integer>();
+        String stage;
+        long t2a, checks;
+        ProfControl(HeapProfile hp, V2Store store) { this.hp = hp; this.store = store; }
+        public boolean cancelRequested() { return false; }
+        public boolean pauseRequested() {
+            if ("T2_HASH_STRUCT".equals(stage) && ++checks == t2a + 1) hp.mark("in_T2_HASH_STRUCT_groups", store.files().size());
+            return false;
+        }
+        public void progress(String st, long done, long total) {
+            if (done != 0 || st.equals("DISCOVER")) return;
+            if (st.equals("T2_HASH_STRUCT") && !seen.containsKey(st)) t2a = total;
+            Integer k = seen.get(st); seen.put(st, k == null ? 1 : k + 1);
+            hp.mark("in_" + st + (k == null ? "" : "#" + (k + 1)) + " n=" + total, store.files().size());
+        }
     }
 
     static String sha256Of(String path) {

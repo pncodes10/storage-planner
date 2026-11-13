@@ -3,33 +3,59 @@ package com.storageplanner.v2adapter;
 import java.util.Locale;
 
 /**
- * Phase A memory guard (REVIEW_A M-1). The v2 store lives in the heap, so before extraction starts V2Runner compares the number of
- * file records with what the heap can hold and stops cleanly with {@link #tooManyMessage} instead of running into an
- * OutOfMemoryError. Android-free so the arithmetic is tested on the JVM (V2AdapterTest).
+ * v2's memory guard (REVIEW_A M-1, recalculated in PHASE_S_STORE slice S6 for the disk store). Before extraction starts
+ * V2Runner compares the number of file records with what the heap can hold and stops cleanly with {@link #tooManyMessage}
+ * instead of running into an OutOfMemoryError. Android-free so the arithmetic is tested on the JVM (V2AdapterTest).
  *
- * <p>Calibration (docs/v2/REVIEW_A.md, dataset of 2,414 files, JVM, after a full GC): store after T1-T3 + GRAPH about 3.1 KB per
- * file; the highest point is inside ASSESS, where every verdict and the store are held together, about 6.4 KB per file
- * (V2Runner frees the verdicts right after, so hash-on-demand and PLAN run at about 3.8 KB per file); while the adapted
- * result is shown about 0.5 KB per file. The GRAPH stage also holds a bounded picture-signature cache (about 50 MB at its cap)
- * plus decode buffers, which is the fixed reserve. {@link #BYTES_PER_FILE} adds 25 % to the measured peak for ART and for
- * libraries larger than the dataset (longer paths, more groups).</p>
+ * <p>With the disk store (S6) the records live on disk; the heap holds the store's indexes and the stages' working sets
+ * (PHASE_S_STORE S5). Two phases bound the run, measured with the scale harness on synthetic trees of 10,000 and 100,000
+ * files (DiskStore, JVM, after full GCs; linear fit, docs/v2/PHASE_S_NOTES.md "S6"):</p>
+ * <ul>
+ * <li>GRAPH: store index + lite nodes, candidates and edges ≈ 514 B per file, plus the fixed signature cache and decode
+ *     buffers ({@link #GRAPH_RESERVE});</li>
+ * <li>the end of the run: store index + recommendations + plan + the adapted classic result ≈ 1,415 B per file.</li>
+ * </ul>
+ * <p>Both are multiplied by {@link #SAFETY} (REVIEW_S F-08: a safety factor for ART's GC headroom, large-object fragmentation
+ * and unmeasured transients, not an object-size correction). {@link #STORE_FIXED} covers the store's caches and buffers.
+ * With the memory store ({@link #maxFilesMemoryStore}) the old single per-file figure applies.</p>
  */
 public final class V2Capacity {
     private V2Capacity() {}
 
-    /** Peak heap per file record (measured 6.4 KB, plus 25 %). */
+    /** REVIEW_S F-08 safety factor on every measured per-file figure. */
+    public static final double SAFETY = 1.25;
+    /** GRAPH phase, measured 514 B per file (disk store), times {@link #SAFETY}. */
+    public static final long GRAPH_BYTES_PER_FILE = 643;
+    /** End of the run (store index + recommendations + plan + adapted result), measured 1,415 B per file, times {@link #SAFETY} (1,769), rounded up. */
+    public static final long END_BYTES_PER_FILE = 1770;
+    /** The disk store's fixed heap: record cache (8 MiB), write buffers, delta overlays. */
+    public static final long STORE_FIXED = 16L * 1024 * 1024;
+    /** Fixed heap of GRAPH besides the records: signature cache (~50 MB at its cap) and image decode buffers. */
+    public static final long GRAPH_RESERVE = 64L * 1024 * 1024;
+
+    /** Memory store (selectable, not the default): peak heap per file record (measured 6.4 KB, plus 25 %). */
     public static final long BYTES_PER_FILE = 8L * 1024;
-    /** Fixed heap the run needs besides the records: GRAPH signature cache (~50 MB at its cap) and image decode buffers. */
+    /** Memory store: fixed heap the run needs besides the records. */
     public static final long FIXED_RESERVE = 64L * 1024 * 1024;
     /** Share of the app's heap limit v2 may plan to use; the rest is head room for the UI and the garbage collector. */
     public static final double HEAP_FRACTION = 0.80;
 
     /**
-     * Largest number of file records v2 can analyse with this heap.
+     * Largest number of file records v2 can analyse with this heap on the disk store:
+     * min((0.8·max − used − STORE_FIXED − GRAPH_RESERVE) / GRAPH_BYTES, (0.8·max − used − STORE_FIXED) / END_BYTES).
      * @param maxHeap  Runtime.maxMemory()
      * @param usedHeap heap in use before the v2 records are counted (other screens, a result still shown)
      */
     public static long maxFiles(long maxHeap, long usedHeap) {
+        if (maxHeap <= 0) return 0;
+        double base = maxHeap * HEAP_FRACTION - Math.max(0, usedHeap) - STORE_FIXED;
+        double graph = (base - GRAPH_RESERVE) / GRAPH_BYTES_PER_FILE, end = base / END_BYTES_PER_FILE;
+        double m = Math.min(graph, end);
+        return m <= 0 ? 0 : (long) m;
+    }
+
+    /** The same guard for the memory store (every record in the heap). */
+    public static long maxFilesMemoryStore(long maxHeap, long usedHeap) {
         if (maxHeap <= 0) return 0;
         double budget = maxHeap * HEAP_FRACTION - Math.max(0, usedHeap) - FIXED_RESERVE;
         if (budget <= 0) return 0;

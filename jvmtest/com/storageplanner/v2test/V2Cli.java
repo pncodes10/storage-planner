@@ -213,14 +213,21 @@ public final class V2Cli {
         if (assess) {
             long ta = System.nanoTime();
             try {
-                List<com.storageplanner.v2.model.Verdict> vs = com.storageplanner.v2.risk.Assessor.run(store, apps, clock.nowMillis(),
-                        com.storageplanner.v2.plan.PresentationPolicy.of(opt.mode), new com.storageplanner.v2.risk.RiskConfig());
-                Map<String, com.storageplanner.v2.model.Verdict> vm = new HashMap<String, com.storageplanner.v2.model.Verdict>();
-                for (com.storageplanner.v2.model.Verdict v : vs) vm.put(v.fileId, v);
-                Map<String, FileRecord> fm = new HashMap<String, FileRecord>();
-                for (FileRecord f : store.files().all()) fm.put(f.fileId, f);
+                // the app's streaming path (PHASE_S_STORE 4 items 4-5): recommendations per verdict from the post-ASSESS record,
+                // PLAN reads files through StoreFileMap; the verdict map is kept only for the CLI JSON
+                final Map<String, com.storageplanner.v2.model.Verdict> vm = new HashMap<String, com.storageplanner.v2.model.Verdict>();
+                final List<com.storageplanner.v2.model.Recommendation> recs = new ArrayList<com.storageplanner.v2.model.Recommendation>();
+                final long scanId = res.session.scanId;
+                com.storageplanner.v2.risk.Assessor.run(store, apps, clock.nowMillis(), com.storageplanner.v2.plan.PresentationPolicy.of(opt.mode),
+                        new com.storageplanner.v2.risk.RiskConfig(), new com.storageplanner.v2.risk.Assessor.VerdictSink() {
+                            public void accept(com.storageplanner.v2.model.Verdict v, FileRecord f) {
+                                vm.put(v.fileId, v);
+                                com.storageplanner.v2.plan.ProvisionalRecommendations.ofOne(v, f, scanId, recs);
+                            }
+                        });
+                Map<String, FileRecord> fm = new com.storageplanner.v2.plan.StoreFileMap(store);
                 AssessJson.verdicts = vm;
-                AssessJson.recs = com.storageplanner.v2.plan.ProvisionalRecommendations.of(vs, fm, res.session.scanId);
+                AssessJson.recs = recs;
                 PlanJson.plan = null; PlanJson.staleness = null;
                 if (opt.targetBytes != null || PlanJson.checkPlan != null) {
                     long tp = System.nanoTime();

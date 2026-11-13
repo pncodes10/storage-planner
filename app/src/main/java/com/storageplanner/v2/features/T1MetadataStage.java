@@ -9,12 +9,11 @@ import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
 import com.storageplanner.v2.stage.StageOutcome;
 import com.storageplanner.v2.store.StoreException;
+import com.storageplanner.v2.util.FileIdList;
 import com.storageplanner.v2.util.Io;
 import com.storageplanner.v2.util.Text;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 /** Tier 1: type, MIME, mismatch, format probe, integrity, name date, createdAt (PHASE_2 3.2). */
 public final class T1MetadataStage implements Stage {
@@ -40,10 +39,10 @@ public final class T1MetadataStage implements Stage {
     public StageOutcome run(final StageContext ctx) throws StoreException {
         final long scanId = ctx.session.scanId;
         final boolean full = ctx.session.kind == ScanKind.FULL;
-        List<FileRecord> jobs = new ArrayList<FileRecord>();
+        FileIdList jobs = new FileIdList();
         long reused = 0;
         for (FileRecord f : ExtractionLoop.present(ctx)) {
-            if (selected(f, ctx.store.features().get(f.fileId), scanId, full)) jobs.add(f); else reused++;
+            if (selected(f, ctx.store.features().get(f.fileId), scanId, full)) jobs.add(f.fileId); else reused++;
         }
         ctx.session.counters.put("T1.reused", reused);
         return ExtractionLoop.run(ctx, ID, jobs, Tiers.T1, new ExtractionLoop.Job() {

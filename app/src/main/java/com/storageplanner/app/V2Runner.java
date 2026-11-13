@@ -10,22 +10,12 @@ import com.storageplanner.core.Scanner;
 import com.storageplanner.v2.device.Availability;
 import com.storageplanner.v2.device.InstalledApp;
 import com.storageplanner.v2.device.ScanControl;
-import com.storageplanner.v2.model.ActionPlan;
 import com.storageplanner.v2.model.FileRecord;
-import com.storageplanner.v2.model.Recommendation;
 import com.storageplanner.v2.model.ScanSession;
 import com.storageplanner.v2.model.ScanState;
-import com.storageplanner.v2.model.Verdict;
 import com.storageplanner.v2.pipeline.Pipeline;
 import com.storageplanner.v2.pipeline.PipelineResult;
-import com.storageplanner.v2.plan.AppSubjects;
 import com.storageplanner.v2.plan.HashOnDemand;
-import com.storageplanner.v2.plan.Plans;
-import com.storageplanner.v2.plan.PresentationPolicy;
-import com.storageplanner.v2.plan.ProvisionalRecommendations;
-import com.storageplanner.v2.plan.UnitBuilder2;
-import com.storageplanner.v2.risk.Assessor;
-import com.storageplanner.v2.risk.RiskConfig;
 import com.storageplanner.v2.stage.PipelineConfig;
 import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
@@ -36,14 +26,13 @@ import com.storageplanner.v2.store.StoreException;
 import com.storageplanner.v2.store.V2Store;
 import com.storageplanner.v2.util.Hex;
 import com.storageplanner.v2adapter.V2Adapter;
+import com.storageplanner.v2adapter.V2Analysis;
 import com.storageplanner.v2adapter.V2Capacity;
 
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.security.MessageDigest;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -65,8 +54,17 @@ final class V2Runner {
      */
     static final long SNAPSHOT_EVERY_MS = -1;
 
-    /** The app's store (PHASE_S_STORE 5.1): MEMORY until slice S6 switches to DISK; both stay selectable. */
-    static final Stores.Kind STORE_KIND = Stores.Kind.MEMORY;
+    /**
+     * The app's store (PHASE_S_STORE 5.1, slice S6): DISK — records in getFilesDir()/v2 (app-private), only indexes and the
+     * stages' working sets in the heap. MEMORY stays selectable here (and its own capacity guard applies).
+     */
+    static final Stores.Kind STORE_KIND = Stores.Kind.DISK;
+
+    /** Capacity of this heap for the selected store (V2Capacity). */
+    static long capacity(long usedBefore) {
+        long max = Runtime.getRuntime().maxMemory();
+        return STORE_KIND == Stores.Kind.DISK ? V2Capacity.maxFiles(max, usedBefore) : V2Capacity.maxFilesMemoryStore(max, usedBefore);
+    }
 
     static AnalysisRunner.Outcome run(final Context app, double targetGb, boolean measure, final Scanner.Progress pr) {
         AnalysisRunner.Outcome o = new AnalysisRunner.Outcome();
@@ -123,10 +121,22 @@ final class V2Runner {
         for (int i = 0; i < stages.size(); i++) {
             if ("T1_METADATA".equals(stages.get(i).id())) { stages.set(i, new CapacityGuard(stages.get(i), usedBefore, guard)); break; }
         }
+        // REVIEW_S F-17: the guard also watches the record count while DISCOVER runs (every 10,000 records), so a library far
+        // above the limit stops before discovery itself fills the heap
+        final V2Store guardStore = store;
+        final long discoverLimit = capacity(usedBefore);
+        final long[] nextCheck = {10000};
         ScanControl control = new ScanControl() {
-            public boolean cancelRequested() { return AnalysisState.cancelled; }
+            public boolean cancelRequested() { return AnalysisState.cancelled || guard[0] >= 0; }
             public boolean pauseRequested() { return false; }
             public void progress(String stage, long done, long total) {
+                if ("DISCOVER".equals(stage) && guard[0] < 0) {
+                    long n = guardStore.files().size();
+                    if (n >= nextCheck[0]) {
+                        nextCheck[0] = (n / 10000 + 1) * 10000;
+                        if (n > discoverLimit) { guard[0] = n; guard[1] = discoverLimit; }
+                    }
+                }
                 pr.update(stageLabel(stage), (int) Math.min(Integer.MAX_VALUE, Math.max(0, done)), (int) Math.min(Integer.MAX_VALUE, Math.max(0, total)));
             }
         };
@@ -169,7 +179,7 @@ final class V2Runner {
         public String id() { return inner.id(); }
         public StageOutcome run(StageContext ctx) throws StoreException {
             long files = ctx.store.files().size();          // every record in memory, including ones kept from earlier scans
-            long limit = V2Capacity.maxFiles(Runtime.getRuntime().maxMemory(), usedBefore);
+            long limit = capacity(usedBefore);
             if (files > limit) { out[0] = files; out[1] = limit; return StageOutcome.CANCELLED; }
             if (STORE_KIND == Stores.Kind.DISK) {        // PHASE_S_STORE 3.12: disk preflight with the heap guard
                 long free = ctx.device.resources().sample().storageFreeBytes;
@@ -226,34 +236,22 @@ final class V2Runner {
     private static volatile boolean lastStats; private static volatile int lastSdk; private static volatile long lastTotal, lastFree;
     private static volatile String lastRoot;
 
-    /** ASSESS + PLAN (Plans.make: SAFE + NO_LOSS only, A29) + adapter. null if cancelled. */
+    /** ASSESS + PLAN (Plans.make: SAFE + NO_LOSS only, A29) + adapter, via V2Analysis (PHASE_S_STORE 4 item 6). null if cancelled. */
     private static Built analyse(Context app, final AndroidV2Device dev, V2Store store, long scanId, Scanner.Progress pr) throws StoreException {
-        if (pr != null) pr.update("Assessing", 0, 0);
-        long now = dev.clock().nowMillis();
-        List<Verdict> vs = Assessor.run(store, dev.apps(), now, PresentationPolicy.STANDARD, new RiskConfig());
-        if (pr != null && AnalysisState.cancelled) return null;
-        Map<String, FileRecord> fm = new HashMap<String, FileRecord>();
-        for (FileRecord f : store.files().all()) fm.put(f.fileId, f);
-        List<Recommendation> recs = ProvisionalRecommendations.of(vs, fm, scanId);
-        vs = null;                              // the verdicts (about 2.5 KB per file) are not needed after this: free them before hashing
-        if (pr != null) pr.update("Confirming identical copies", 0, 0);
-        HashOnDemand.run(recs, fm, new HashOnDemand.Hasher() {
+        V2Analysis.Params p = new V2Analysis.Params();
+        p.apps = dev.apps(); p.now = dev.clock().nowMillis(); p.scanId = scanId;
+        p.sdk = lastSdk; p.root = lastRoot; p.total = lastTotal; p.free = lastFree;
+        p.hasher = new HashOnDemand.Hasher() {
             public String sha256(FileRecord f) { return AnalysisState.cancelled ? null : sha256Of(dev.storage().localPath(f.volumeId, f.path)); }
-        }, HASH_BUDGET);
-        if (pr != null && AnalysisState.cancelled) return null;
-        recs.addAll(AppSubjects.recs(dev.apps(), now, lastSdk, scanId, ProvisionalRecommendations.PLAN_VERSION));
-        if (pr != null) pr.update("Planning", 0, 0);
-        UnitBuilder2.Input in = new UnitBuilder2.Input();
-        in.recs = recs; in.files = fm; in.keepers = Plans.keepers(store);
-        Plans.Made m = Plans.make(in, ActionPlan.MAX_SAFE, null, false);
-        Plans.version(store, m.plan, now, scanId);
-        ScanSession ss = store.scanSessions().get(ScanSession.keyOf(scanId));   // F-07: damage found by ASSESS/PLAN is counted too
-        if (Pipeline.noteDamaged(store, ss, now)) store.scanSessions().put(ss);
-        store.flush();
+        };
+        p.hashBudget = HASH_BUDGET;
+        p.progress = pr;
+        p.cancel = new V2Analysis.Cancel() { public boolean cancelled() { return AnalysisState.cancelled; } };
+        V2Analysis.Result r = V2Analysis.run(store, p);
+        if (r == null) return null;
         Built b = new Built();
         b.sdk = lastSdk; b.appStats = lastStats;
-        b.adapted = V2Adapter.adapt(in, m.built, dev.apps().list(), V2Adapter.duplicateOf(store.duplicateGroups().all()), lastRoot,
-                lastSdk, now, lastTotal, lastFree, false);
+        b.adapted = r.adapted;
         return b;
     }
 

@@ -23,8 +23,9 @@ public final class ContextBuilder {
         if (avail == Availability.FULL) { s = new TreeSet<String>(); for (InstalledApp x : apps.list()) s.add(x.packageName); }
         installed = s;
         for (FeatureRecord fr : store.features().all()) {
+            if (fr.apk == null || fr.fp == null) continue;            // only APK features load their file (PHASE_S 4 item 4)
             FileRecord f = g.file(fr.fileId);
-            if (f != null && fr.apk != null && fr.fp != null && fr.fp.sameAs(f.fingerprint())) g.apkStates.put(f.fileId, fr.apk.installState);
+            if (f != null && fr.fp.sameAs(f.fingerprint())) g.apkStates.put(f.fileId, fr.apk.installState);
         }
     }
     public GraphView graph() { return g; }

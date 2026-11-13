@@ -387,3 +387,171 @@ Deviations:
 
 Next: S5 (streaming callers, design section 4 items 1–6 with the F-10 pins), one item at a time with golden equality on
 the dataset (`<scratchpad>/v2out/head-mem/` baseline), synth 10k and the fixtures.
+
+## S5 — streaming callers (done)
+
+Method per item: golden equality against the unchanged-code baselines (`<scratchpad>/v2out/head-mem/` for the dataset, both
+modes, CLI JSON without timings plus the phase-4/phase-5 gate outputs; `<scratchpad>/v2out/head-synth10k/standard.json`)
+for **both** stores, script `<scratchpad>/verify.sh TAG` (compiles the tree, runs `gate.sh` for memory and disk and the synth
+10k CLI for both stores, prints `same`/`DIFF` per file); then `run_tests.sh` and `check_android_compile.sh`. Heap per file at
+100k: `<scratchpad>/prof.sh SRCROOT TAG disk` (= `run_scale.sh 100000 --store disk --profile`, tree
+`<scratchpad>/v2scale/tree-100000-0.3-7`, -Xmx2g). The "before" column comes from the HEAD c7a31ae source with the new
+`ScaleRun` copied in (`<scratchpad>/headsrc`).
+
+`ScaleRun --profile` now also marks the heap **inside** the stages (the old marks were all taken after a stage returned, so the
+T1–T3 working sets never showed): `in_<STAGE>` at the first progress report of each job loop (job list referenced) and
+`in_T2_HASH_STRUCT_groups` at T2 part B's first size-group check (the stop check after the part-A jobs; when part A has jobs a
+first, spurious mark with the same name is printed at part A's first check — the later line is the groups mark).
+
+### Item 1 — `ExtractionLoop` → `FileIdList` (done)
+
+* `v2.util.FileIdList`: append-only; a 32-char lower-case hex id as two `long`s, any other id as a String in a side
+  `TreeMap<Integer,String>`; `get(i)` rebuilds the String.
+* `ExtractionLoop.present(ctx)` is now a lazy `Iterable<FileRecord>` filtering `files().all()` (each iteration is a new pass);
+  `ExtractionLoop.run(ctx, stage, FileIdList jobs, bit, job)` loads each record with `files().get(id)` when its turn comes
+  (a missing record is skipped; none can disappear inside a stage) and its stop path does the same.
+* Callers: T1 and T2 part A select into a `FileIdList`; T3 holds only (rank, path, id) of the selected images while sorting
+  (stable sort, ties keep ascending fileId as before), then a `FileIdList` in that order; T2 part B and `assignGroups` iterate
+  `present` (item 2 then replaced their structures).
+* Why results cannot change: a job used to get the record copy taken when the list was built; the only writes between that and
+  the job are other jobs' writes to their own records (checked: T1 `extract`/`unreadable`, T2 `structure`/`Archives`, T3
+  `image` write only the job's file), so the record loaded at the job equals the old copy.
+* Tests: `StreamingTest` (new suite) — FileIdList round trip of 5,000 ids (hex, upper-case hex, non-ASCII, empty, 33 chars).
+
+### Item 2 — T2 size groups and the exact-group count (done)
+
+* Part B: one `long[]` of (size, ordinal) pairs, ordinals into a `FileIdList` of the eligible ids in ascending fileId;
+  `PairSort.pairs` (in-place heapsort by (size, ordinal), so members come out in fileId order as the `TreeMap<size, List>`
+  gave them). Size-unique groups are handled in ascending size as before. Work groups are (start, length) int arrays; their
+  order is the old comparator (size × (members − 1) desc, size desc — a total order, sizes are distinct) via `PairSort.ints`.
+  Records are loaded one group at a time; the stop path walks the remaining groups in the same order.
+* `assignGroups`: a sorted `long[]` of FNV-1a-64 hashes of the SHA-256 strings; only files whose hash occurs twice or more are
+  counted exactly in a `HashMap<sha, count>` (so the map is bounded by duplicate candidates); a hash collision only adds a
+  candidate, the exact count decides.
+* `v2.util.PairSort` (pairs / ints with an order / longs; heapsort, no allocation). `StreamingTest`: 300 random trials each
+  against `Collections.sort`/`Arrays.sort`.
+* Deviation: the pairs plus the id list are 32 B per eligible file (design: ≤ 16); the ids cannot be dropped because the store
+  has no positional access.
+
+Heap per file at 100k (DiskStore, B/file after full GC; peak inside the stage):
+
+| mark | HEAD | after item 1 | after item 2 |
+|---|---:|---:|---:|
+| in T1 (job list) | 944 | 193 | 193 |
+| in T2 part B (size groups) | 1,077 | — | 264 |
+| in T3 (job list) | 578 | 295 | 295 |
+| after GRAPH, stage referenced | 2,950 | 2,947 | 2,949 |
+| ASSESS verdicts | 2,941 | 2,941 | 2,941 |
+| end of PLAN | 1,624 | 1,621 | 1,622 |
+
+Equality after each item: dataset memory and disk, both modes — CLI JSON (timings removed) and phase-4/phase-5 outputs
+identical to the baseline (exit 1 both, the known `IMG-20240122-WA0001.jpg` exposure FAIL); synth 10k memory and disk
+identical. run_tests 41 suites, 0 failures; check_android_compile OK.
+
+### Item 3 — GRAPH lite nodes (done)
+
+* `Node` keeps id, volume, size, pHash, flags computed once in the snapshot pass (hasPhash, has features/hash/image,
+  perceptual-eligible, current SHA-256, archive listing usable, companion candidate, physicalKey present, and the old
+  `graph.perceptual` value as a 3-bit code), the old `duplicateGroupId`, and `canonical` (null = itself) / `exactGroup`.
+  `f()/fr()/hr()/fp()/name()` load through `GraphRecords` (LRU of 2,048 nodes; the snapshot pass seeds it). A reload that
+  disagrees with the pass (FileRecord missing, features or hash present then absent or vice versa) throws `StoreCorruption`
+  (fail closed + the existing retry), never a silently different graph.
+* `files().all()` is already in ascending fileId on both stores (checked at run time instead of the old sort).
+* `AliasResolver`: sorted (hash64(physicalKey), index) pairs; only equal-hash runs are loaded and grouped by the real key.
+  `ExactGrouper`: the same with hash64(sha256) of nodes with a current SHA; groups made in ascending SHA order, members in fileId
+  order, as before. `CompanionLinker`: only candidate nodes (APK with a package, OBB path, dated msgstore name, current
+  msgstore path) enter its maps and loops; for any other node the three rules are false. `ArchiveMatcher`: a node is loaded only
+  when its size equals some entry size; the per-backup linear node searches became binary searches. `Perceptual`: the id map
+  became a binary search over the id-ordered nodes; pending-pair order uses the stored size.
+* `CandidateGenerator`: band index = one sorted `long[]` (band value << 32 | index) per band (bucket = a run, ascending index,
+  cap applied in that order as before); time order an `int[]`; pairs accumulated as (key, source bit) longs, sorted and merged
+  into ascending `keys[]`/`sources[]` (`pairCount`, `sourcesOf(key)`, `pairMap()` for tests/calibration).
+* `GraphStage.diff`/stale pair-check drop use `keys()` instead of decoding whole tables; `write` (relationships, groups, file
+  group ids) commits every 2,000 writes.
+* Tests: existing suites (PerceptualTest moved to `pairMap()`/`pairCount()`); DiskKillTest/DiskCorruptionTest/ScenarioFixture
+  unchanged and green. `ArchiveMatcherTest` "file changed after verification" failed once in a full run: a same-size rewrite
+  inside one coarse mtime tick is invisible (same flake as the ExactGrouperTest fix in S3, not caused by this change — it
+  passes alone on both trees); the test now sets the rewritten file's mtime 2 s later.
+* Not done (design 4 item 3 left them optional): edges and groups stay in lists.
+
+Heap per file at 100k after item 3 (DiskStore): after GRAPH with the stage referenced **678** (was 2,949; ≈ 500 of the 678 is
+the fixed 256-entry signature cache, ≈ 50 MB); the T1–T3 marks unchanged (193 / 264 / 295); ASSESS verdicts 2,940; end of
+PLAN 1,622. Equality as for items 1–2 (dataset both stores both modes, gates, synth 10k both stores: identical). run_tests 41
+suites, 0 failures; check_android_compile OK.
+
+### Item 4 — ASSESS: store-backed `GraphView`, streaming `Assessor.run` (done)
+
+* `GraphView.of(store)` is store-backed: `file(id)` → `files().get` through a 4,096-entry LRU (missing ids cached as null);
+  `edgesOf` → `relationships().of(id)` (ascending relationship key, as the old per-node lists; a self-loop would be listed
+  twice as `add` did — none exist); groups and backups indexed in one pass as before (bounded by duplicate members / archive
+  matches); `sizeUnique` → binary search in a sorted `long[]` of PRESENT sizes ≥ 0; canonical ids only for (volume,
+  physicalKey) keys whose 64-bit hash occurs twice (a second pass over the files only when a duplicate hash exists). The
+  `add(...)` in-memory form stays for `RiskFx`. `ContextBuilder` loads a file only for APK features.
+* `Assessor.run(store, apps, now, pol, cfg, VerdictSink)`: `sink.accept(verdict, postAssessRecord)` — the written copy when
+  U/L/R/C changed, else the iterated record (F-10). The list-returning `run` is a wrapper (tests, `oldAnalyse` reference).
+* F-10 view test (`StreamingTest.viewScores`): with `GraphView.debugScrambleScores` every record the store-backed view hands out
+  has nonsense U/L/R/C; the CLI result on the DiskKillTest tree is unchanged for memory and disk. Mutation check (scratch copy:
+  `GraphView.eligible` also requiring recoverability ≠ REGENERABLE) ⇒ both checks fail (`files[3].assessment.action`).
+* Heap at 100k (DiskStore): `in_ASSESS` (view built, first verdict) **379** B/file with the store at 315 ⇒ the view costs ≈ 64
+  B/file (design: ≤ 30 + the edge/group/backup indexes; the old view was ≈ 500).
+
+### Item 5 — PLAN: `ofOne`, `StoreFileMap`, adapter iteration (done)
+
+* `ProvisionalRecommendations.ofOne(Verdict, FileRecord post, scanId, List out)`; `of` uses it.
+* `v2.plan.StoreFileMap extends AbstractMap`: `get`/`containsKey` → `files().get`, `size` → `files().size()`,
+  `keySet()` → `files().keys()`, `entrySet()` → `files().all()` (ascending id); `values`, `containsValue`, `put`, `remove`,
+  `putAll`, `clear`, `entrySet().contains/remove/clear` throw; `equals`/`hashCode` are identity. PLAN only reads `get`
+  (HashOnDemand, UnitBuilder2, PlanStaleness.stamp/check, ProvisionalRecommendations — checked).
+* `V2Adapter.sortedFiles(map)`: a `StoreFileMap` or natural-order `SortedMap` is iterated directly; any other map is copied and
+  sorted as before.
+* Callers switched: `V2Runner.analyse` (then item 6), `ScaleRun`, and **the CLI** (`V2Cli --assess`: streaming sink + `ofOne`
+  + `StoreFileMap` for PLAN; the verdict map is kept only for the CLI JSON) — so the dataset/synth golden checks exercise the
+  new PLAN path.
+* Tests: `StreamingTest.storeFileMap` on MemoryStore and DiskStore (sizes, get/containsKey incl. non-String keys, key/entry
+  order with non-ASCII and non-hex ids, 7 throwing methods, adapter order for StoreFileMap and HashMap).
+* Heap at 100k (DiskStore): after ASSESS with recommendations **570** (was 2,946 with the verdict list), PLAN made **645** (was
+  1,625), adapter result held **1,456**. The old "adapted" mark (568) is not comparable: marks are taken after a full GC
+  and the JIT's liveness already treated the dead `fm`/`recs`/plan locals of the old harness as garbage there; inside
+  `V2Analysis` the input, plan and result are all reachable at that mark (as they are in the app while `adapt` runs). The
+  adapter's own share is ≈ 810 B/file (`FileItem` per present file plus its `byId` map) — the next lever (design: S6 option).
+
+### Item 6 — `V2Analysis` (done)
+
+* `v2adapter.V2Analysis.run(store, Params)` (Android-free): streamed ASSESS (sink → `ofOne`), hash on demand over a
+  `StoreFileMap`, app subjects, `Plans.make(MAX_SAFE)`, `Plans.version`, `Pipeline.noteDamaged` on the session, flush, then
+  `V2Adapter.adapt` (optional for the harness). `Params`: apps, now, scanId, sdk, root, total/free, hasher, hash budget,
+  progress + cancel (both null on restore, as before), `adapt`, `marks` (heap marks for the harness). `V2Runner.analyse` is now
+  only the Android wiring around it (hasher with `AnalysisState.cancelled`, `last*` device values); unused imports removed.
+* `ScaleRun` runs `V2Analysis` (the S0 deviation "ScaleRun inlines V2Runner.analyse" is gone).
+* Test `StreamingTest.analysisPath`: on the DiskKillTest tree, for MemoryStore and DiskStore, two identical persisted stores;
+  one gets the pre-S5 `V2Runner.analyse` body (verdict list, `HashMap` of every FileRecord, `of`), the other `V2Analysis`:
+  recommendations (CLI JSON form + each `fp`), plan (CLI JSON form) and the adapted classic result (files, units with all
+  option fields, duplicateOf, counters) must be equal; also asserts the dump contains DELETE recommendations, plan items and
+  units. Mutation check: `ofOne(v, null, …)` in V2Analysis ⇒ both fail.
+
+Heap per file at 100k after item 6 (DiskStore): in T1 193, in T2 groups 264, in T3 296, after GRAPH (stage referenced) 678,
+store after GRAPH 315, in ASSESS 379, after ASSESS (recommendations) 570, PLAN made 645, adapter result held 1,460 (peak),
+store only at the end 316. Equality: dataset both stores both modes and gates, synth 10k both stores — identical. run_tests 41
+suites, 0 failures; check_android_compile OK.
+
+### S5 summary and exit
+
+Heap per file at 100k, DiskStore (`prof.sh`, synth 30 % images, B/file after full GC):
+
+| mark | HEAD c7a31ae | item 1 | item 2 | item 3 | item 4 | item 5 | item 6 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| in T1 (job list) | 944 | 193 | 193 | 193 | 193 | 193 | 193 |
+| in T2 part B (size groups) | 1,077 | 1,077¹ | 264 | 264 | 264 | 264 | 264 |
+| in T3 (job list) | 578 | 295 | 295 | 295 | 295 | 295 | 296 |
+| after GRAPH, stage referenced | 2,950 | 2,947 | 2,949 | 678 | 678 | 678 | 678 |
+| in ASSESS (view built) | — | — | — | — | 379 | 379 | 379 |
+| after ASSESS | 2,941 | 2,941 | 2,941 | 2,940 | 2,946 | 570 | 570 |
+| PLAN made | 1,624 | 1,621 | 1,622 | 1,622 | 1,625 | 645 | 645 |
+| adapter result held | — | — | — | — | — | 1,456 | 1,460 |
+| **peak of all marks** | **2,950** | 2,947 | 2,949 | **2,940** | 2,946 | **1,456** | **1,460** |
+
+¹ not re-measured for item 1 (unchanged code). The "adapter result held" mark did not exist before item 5 in this form (see item 5).
+
+MemoryStore at 100k after item 6 (S5 exit criterion, `prof.sh … memory`): store after GRAPH 2,541, in ASSESS 2,585, after ASSESS
+2,760, PLAN made 2,818, adapted 3,339, end 2,567 ⇒ **ASSESS peak minus the store = 219 B/file (≤ 400 required; S3: 2,545)**;
+in T1 1,311 vs after DISCOVER 1,289 (job list ≈ 22 B/file), T2 groups +65, GRAPH +260.
