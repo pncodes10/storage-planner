@@ -63,10 +63,14 @@ public final class AndroidV2Device implements V2Device {
             public long monotonicNanos() { return android.os.SystemClock.elapsedRealtimeNanos(); }
         };
         resources = new Resources(ctx, storageRoot);
-        blobs = new AndroidBlobStore(new File(ctx.getFilesDir(), "v2"));
+        blobs = new AndroidBlobStore(storeDir(ctx));
         media = new BitmapDecoder(storage);
         apps = new Apps(ctx, appList, appAvailability);
     }
+
+    /** The v2 store's directory getFilesDir()/v2 (app-private), the same blobs a device would use; for a store reset only. */
+    public static File storeDir(Context c) { return new File(c.getFilesDir(), "v2"); }
+    public static BlobStore privateBlobs(Context c) { return new AndroidBlobStore(storeDir(c)); }
 
     public StorageAccess storage() { return storage; }
     public Clock clock() { return clock; }

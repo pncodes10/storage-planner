@@ -794,6 +794,75 @@ public final class DiskStoreTest {
         T.check("below the reserve at open: the first append refused", first);
     }
 
+    /** Counts open append streams and read handles (REVIEW_S6 R-01). */
+    static final class Counting implements com.storageplanner.v2.device.BlobStore {
+        final com.storageplanner.v2.device.BlobStore in; int open;
+        Counting(com.storageplanner.v2.device.BlobStore in) { this.in = in; }
+        public java.io.InputStream read(String n) throws java.io.IOException { return in.read(n); }
+        public java.io.OutputStream append(String n) throws java.io.IOException {
+            final java.io.OutputStream o = in.append(n); open++;
+            return new java.io.FilterOutputStream(o) {
+                boolean closed;
+                @Override public void write(byte[] b, int off, int len) throws java.io.IOException { o.write(b, off, len); }
+                @Override public void close() throws java.io.IOException { if (!closed) { closed = true; open--; } o.close(); }
+            };
+        }
+        public void sync(String n) throws java.io.IOException { in.sync(n); }
+        public AtomicWrite replace(String n) throws java.io.IOException { return in.replace(n); }
+        public void truncate(String n) throws java.io.IOException { in.truncate(n); }
+        public long length(String n) { return in.length(n); }
+        public RandomRead openRead(String n) throws java.io.IOException {
+            final RandomRead r = in.openRead(n);
+            if (r == null) return null;
+            open++;
+            return new RandomRead() {
+                boolean closed;
+                public int read(long pos, byte[] b, int off, int len) throws java.io.IOException { return r.read(pos, b, off, len); }
+                public long length() throws java.io.IOException { return r.length(); }
+                public void close() throws java.io.IOException { if (!closed) { closed = true; open--; } r.close(); }
+            };
+        }
+    }
+
+    /** REVIEW_S6 R-01: close() releases every handle on every path, writes the index normally, never below the reserve. */
+    static void closeReleases() throws Exception {
+        T.section("S6 close");
+        PowerLossBlobStore b = new PowerLossBlobStore();
+        Counting c = new Counting(b);
+        DiskStore.Options o = small();
+        DiskStore s = DiskStore.create(c, 0, CLOCK, o);
+        for (int i = 0; i < 200; i++) s.files().put(StoreContractTest.file("c" + i, "c/" + i, i, Presence.PRESENT, 1));
+        s.commit();
+        s.close();
+        T.check("clean close: no handle left open, index file written", c.open == 0 && b.length("ds-a.idx") > 0);
+        s.close();
+        T.check("a second close is harmless", c.open == 0);
+        DiskStore r = DiskStore.open(c, 0, CLOCK, o);
+        int n = 0;
+        for (FileRecord f : r.files().all()) if (f != null) n++;
+        T.check("reopened from the index, records read", r.loadedFromIndex() && n == 200 && c.open > 0);
+        r.close();
+        T.check("read handles released at close", c.open == 0);
+
+        final long[] free = {1L << 40};
+        PowerLossBlobStore b2 = new PowerLossBlobStore();
+        Counting c2 = new Counting(b2);
+        DiskStore.Options o2 = small();
+        o2.space = new SpaceProbe() { public long freeBytes() { return free[0]; } };
+        o2.reserveBytes = 1 << 20; o2.spaceCheckBytes = 2048; o2.finalAllowanceBytes = 64; o2.compactMinGarbage = 1L << 40;
+        DiskStore l = DiskStore.create(c2, 0, CLOCK, o2);
+        for (int i = 0; i < 50; i++) l.files().put(StoreContractTest.file("l" + i, "l/" + i, i, Presence.PRESENT, 1));
+        l.commit();
+        free[0] = 10;
+        boolean low = false;
+        try { for (int i = 0; i < 100000; i++) l.files().put(StoreContractTest.file("m" + i, "m/" + i, i, Presence.PRESENT, 1)); }
+        catch (StoreLowSpace e) { low = true; }
+        boolean threw = false;
+        try { l.close(); } catch (java.io.IOException e) { threw = true; } catch (RuntimeException e) { threw = true; }
+        T.check("low space: close releases every handle (threw: " + threw + ") and writes no index file",
+                low && c2.open == 0 && b2.length("ds-a.idx") <= 0);
+    }
+
     // ------------------------------------------------------------------ F-03 in the store
 
     static void nonBmpOrder() throws Exception {
@@ -839,6 +908,7 @@ public final class DiskStoreTest {
         nonBmpOrder();
         compaction();
         space();
+        closeReleases();
         return T.finish("DiskStoreTest");
     }
 

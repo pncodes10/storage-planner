@@ -87,7 +87,9 @@ final class V2Runner {
             o.message = V2Capacity.OUT_OF_MEMORY;
         } catch (Throwable t) {
             o.ok = false;
-            o.message = com.storageplanner.v2.store.StoreLowSpace.in(t) != null ? V2Capacity.LOW_STORAGE : "Analysis failed (v2): " + t;
+            boolean low = com.storageplanner.v2.store.StoreLowSpace.in(t) != null;
+            o.message = low ? V2Capacity.LOW_STORAGE : "Analysis failed (v2): " + t;
+            if (low) resetStore(app);           // REVIEW_S6 R-02: give back the space the store took before it stopped
         } finally {
             ResultFiles.setRunning(app, false);
             AnalysisState.finished(o.message, o.ok);
@@ -114,6 +116,49 @@ final class V2Runner {
         if (fresh) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
         else try { store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); }
         catch (StoreException e) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
+        // REVIEW_S6 R-01: the store is closed exactly once per run, on every path (writes the index file, releases the file
+        // handles). runOpen closes it early (before publish, so its indexes can go) and clears the holder; else the finally does.
+        final V2Store[] held = {store};
+        store = null;
+        try {
+            runOpen(app, targetGb, pr, o, dev, cfg, held, usedBefore);
+        } finally {
+            if (held[0] != null) { closeQuietly(held[0]); held[0] = null; }
+        }
+    }
+
+    /** Closes a store, ignoring every failure (the result that matters was flushed; the next open validates what is on disk). */
+    static void closeQuietly(V2Store s) {
+        if (s == null) return;
+        try { s.close(); } catch (Throwable ignored) { /* handles are released by DiskStore.close in any case */ }
+    }
+
+    /**
+     * Empties the v2 store by truncation (DiskStore.create: fresh manifest, every segment and index file and an old store.snap
+     * truncated to 0 bytes; nothing deleted or renamed), only inside getFilesDir()/v2. Used when the run stopped for lack of
+     * storage or memory and after a Classic result replaced the v2 one (REVIEW_S6 R-02/R-03). Never throws.
+     */
+    static void resetStore(Context app) {
+        try {
+            closeQuietly(Stores.create(STORE_KIND, AndroidV2Device.privateBlobs(app), SNAPSHOT_EVERY_MS, RESET_CLOCK));
+        } catch (Throwable ignored) { /* the next v2 run validates the store again */ }
+    }
+
+    /** resetStore only if v2 left data behind (a disk-store manifest or an old memory-store snapshot); no-op otherwise. */
+    static void resetStoreIfPresent(Context app) {
+        java.io.File d = AndroidV2Device.storeDir(app);
+        if (new java.io.File(d, com.storageplanner.v2.store.DiskStore.MANIFEST).exists()
+                || new java.io.File(d, com.storageplanner.v2.store.MemoryStore.SNAPSHOT).length() > 0) resetStore(app);
+    }
+
+    private static final com.storageplanner.v2.device.Clock RESET_CLOCK = new com.storageplanner.v2.device.Clock() {
+        public long nowMillis() { return System.currentTimeMillis(); }
+        public long monotonicNanos() { return System.nanoTime(); }
+    };
+
+    private static void runOpen(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o,
+                                AndroidV2Device dev, PipelineConfig cfg, final V2Store[] held, final long usedBefore) throws Exception {
+        V2Store store = held[0];
         List<Stage> stages = Pipeline.defaultStages(cfg, dev);
         stages.add(new com.storageplanner.v2.graph.GraphStage());
         // memory guard (REVIEW_A M-1): right after discovery, before any extraction, the record count must fit the heap
@@ -144,6 +189,8 @@ final class V2Runner {
         stages.clear();                         // GRAPH keeps its signature cache (~50 MB) and node copies: let them go now
         if (guard[0] >= 0) {
             o.message = guard[2] == 1 ? V2Capacity.notEnoughStorageMessage(guard[0]) : V2Capacity.tooManyMessage(guard[0], guard[1]);
+            closeQuietly(store); held[0] = null;
+            resetStore(app);                    // REVIEW_S6 R-02: the same library stops again; do not keep its records on disk
             return;
         }
         if (AnalysisState.cancelled || res.outcome != StageOutcome.DONE) {
@@ -155,6 +202,7 @@ final class V2Runner {
         res = null;
         long target = (long) (targetGb * 1e9);
         Built b = analyse(app, dev, store, scanId, pr);
+        closeQuietly(store); held[0] = null;    // R-01: index file written, handles released, before the result is published
         store = null; dev = null;               // only the adapted result is kept from here on
         if (b == null) { o.cancelled = true; o.message = "Cancelled."; return; }
         prefs(app).edit().putLong("v2_target", target).putInt("v2_mode", Session.mode).commit();
@@ -198,11 +246,17 @@ final class V2Runner {
             AndroidPlatform pf = new AndroidPlatform(app);
             AndroidV2Device dev;
             try { dev = device(app, pf); } finally { pf.close(); }
-            V2Store store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock());
-            ScanSession last = null;
-            for (ScanSession s : store.scanSessions().all()) if (last == null || s.scanId > last.scanId) last = s;
-            if (last == null || last.state != ScanState.COMPLETED) return false;
-            Built b = analyse(app, dev, store, last.scanId, null);
+            V2Store store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space(dev));
+            Built b;
+            try {
+                ScanSession last = null;
+                for (ScanSession s : store.scanSessions().all()) if (last == null || s.scanId > last.scanId) last = s;
+                if (last == null || last.state != ScanState.COMPLETED) return false;
+                b = analyse(app, dev, store, last.scanId, null);
+            } finally {
+                closeQuietly(store);            // R-01: once, on every path
+            }
+            store = null;
             if (b == null) return false;
             SharedPreferences p = prefs(app);
             int mode = p.getInt("v2_mode", Session.MODE_TARGET) == Session.MODE_SAFE ? Session.MODE_SAFE : Session.MODE_TARGET;

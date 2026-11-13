@@ -766,15 +766,17 @@ public final class DiskStore implements V2Store {
     /** flush(), then the index file (if the tail is not covered) and the manifest naming it; releases file handles. */
     public void close() throws IOException {
         synchronized (lock) {
+            // REVIEW_S6 R-01: handles are released on every path (also StoreLowSpace / StoreCorruption, which are unchecked);
+            // no index file is written once the free space fell below the reserve (3.12: never write below it)
             try {
                 flush();
-                if (opt.indexAtClose && uncoveredTail() > 0) checkpoint(true);
+                if (opt.indexAtClose && !lowSpace && !broken && uncoveredTail() > 0) checkpoint(true);
             } catch (StoreException e) {
-                closeQuietly();
                 throw new IOException(e.getMessage(), e);
+            } finally {
+                closeWriter();
+                closeReaders();
             }
-            closeWriter();
-            closeReaders();
         }
     }
 

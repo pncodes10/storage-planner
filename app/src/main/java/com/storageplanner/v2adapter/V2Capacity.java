@@ -93,7 +93,8 @@ public final class V2Capacity {
     /** Shown when the preflight stops v2 before extraction. */
     public static String notEnoughStorageMessage(long files) {
         return String.format(Locale.ROOT, "Not enough free storage for v2's working data (about %,d MB needed). It stopped before reading the files. "
-                + "Nothing was changed.", (diskNeeded(files) + (1 << 20) - 1) >> 20);
+                + "Nothing was changed. Free some space and run again, or choose Classic (default) on the start screen: it needs no "
+                + "working space.", (diskNeeded(files) + (1 << 20) - 1) >> 20);
     }
 
     /** Shown when the free storage fell below the reserve during the run (D_LOW_STORAGE). */

@@ -53,6 +53,7 @@ final class AnalysisRunner {
             pr.update("Saving results", 0, 0);
             ResultFiles.save(app, s);                 // a failed save only costs a rescan after process death
             setResultAlgorithm(app, ALGO_CLASSIC);    // restore after process death uses classic for this result
+            V2Runner.resetStoreIfPresent(app);        // REVIEW_S6 R-03: the v2 result is gone, give its working data back (truncation)
 
             final CountDownLatch set = new CountDownLatch(1);
             final long[] saved = {0};
