@@ -76,6 +76,7 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A33 | User decisions (feedback, preferences, later the operation journal) are kept outside the resettable store log, in their own durable file. Until that exists, a test blocks production writes to those tables. | The store resets itself after unrecoverable damage; scan data can be rebuilt by rescanning, a user's "keep this" cannot. |
 | A34 | The 20,000-decode cap in the duplicate stage becomes a per-run budget: a capped run finishes with a result, marks unchecked photos "unknown" (never "unique") and says to run again; finished pair checks carry over. Decoded signatures are not stored. | Storing signatures would cost about 195 KB per photo, roughly 6 GB for 30,000 photos - on a phone that is short of space. |
 | A35 | Store design accepted as reviewed: one shared append-only log, capacity about 133,000 files at 256 MB (about 177,000 if the store is closed before results are shown), with a 1.25 safety factor because Android's memory overhead is unmeasured. | Reviewer recomputed the architect's 150,000 figure; the scale test runs under a hard 148 MB cap. |
+| A36 | Store accepted at about 85,000 files on a 256 MB heap and about 188,000 on 512 MB, short of the 150,000-at-256 MB target. The app is switched to the disk store now; the remaining memory work (drop the store's indexes before results are shown, slimmer on-screen result) is a follow-up. | The limit was about 15,000 / 42,000 before, so this is a 4-5x gain that is tested and result-identical. The 150k run under a 148 MB cap fails; 85k passes. Waiting for the last step would keep a working improvement off the phone. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -85,28 +86,30 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (22:53 UTC, 12 Nov)
+## State (03:38 UTC, 13 Nov)
 
-- Phases 1-5 and Phase A done; CI run 60 is the build to test on the phone.
-- Store: slices S0-S4 done (core, damage handling, compaction and low-space
-  stop). 40 suites green (re-run by the lead); dataset results byte-identical
-  through both stores and unchanged from before. At 100k files the disk store
-  holds 315 bytes per file in memory against 2,537 for the in-memory store;
-  whole-run peak is 2,951 bytes per file (was 5,082). Production still uses
-  the in-memory store, so the phone limit has not moved yet.
-- Container restarted at ~22:20 UTC; data and commits intact, one agent
-  relaunched.
-- Store implementer for S5 onward: running.
-- Open: dataset label fix (A27), ClassicParityTest and five other tests, 7 minor
-  Phase A review findings.
+- Phases 1-5 and Phase A done.
+- Store: slices S0-S5 done and S6 done except one option. **The app now uses
+  the disk store** (the in-memory one stays selectable). 41 suites green
+  (re-run by the lead); dataset results byte-identical through both stores
+  and unchanged from before the store work. Whole-run peak at 100k files:
+  1,460 bytes per file (was 5,082 at the start). Scale tests: 100k to the
+  planner under 128 MB passes; 85k full run under 148 MB passes; 150k under
+  148 MB runs out of memory (A36).
+- New guard limits: about 85,000 files at 256 MB, 188,000 at 512 MB.
+- Sixth usage-limit stop (23:00-02:20 UTC).
+- None of the store code has run on a device.
+- Open: store follow-up (A36), S7 decode budget (A34), dataset label fix
+  (A27), ClassicParityTest and five other tests, 7 minor Phase A findings.
 
 ## Next steps
 
-1. Store S5 (stage memory changes: six callers, the duplicate-graph stage is
-   the largest), S6 (switch production to the disk store, capacity guard),
-   S7 (decode budget). Exit: 150k-file scale test under -Xmx148m; dataset
-   results unchanged.
-2. Dataset label fix (A27) and missing tests.
-3. Phase 6 (content signals, A28), then 7-10.
-4. If an agent stops with a usage-limit error: wait for the reset time in the
+1. Check the CI run for this commit; that APK replaces run 60 as the build to
+   test on the phone.
+2. Independent review of the S5/S6 changes that touch the Android layer.
+3. Store follow-up + S7 (decode budget - without it a phone with more than
+   20,000 photos ends "stopped early").
+4. Dataset label fix (A27) and missing tests.
+5. Phase 6 (content signals, A28), then 7-10.
+6. If an agent stops with a usage-limit error: wait for the reset time in the
    error, then resume it with a message rather than starting over.

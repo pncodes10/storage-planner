@@ -555,3 +555,56 @@ Heap per file at 100k, DiskStore (`prof.sh`, synth 30 % images, B/file after ful
 MemoryStore at 100k after item 6 (S5 exit criterion, `prof.sh … memory`): store after GRAPH 2,541, in ASSESS 2,585, after ASSESS
 2,760, PLAN made 2,818, adapted 3,339, end 2,567 ⇒ **ASSESS peak minus the store = 219 B/file (≤ 400 required; S3: 2,545)**;
 in T1 1,311 vs after DISCOVER 1,289 (job list ≈ 22 B/file), T2 groups +65, GRAPH +260.
+
+Scale tests (`SCALE_DIR=<scratchpad>/v2scale bash tools/v2eval/run_scale_tests.sh`, new tests s5-a…s5-d, s6-cap; trees with
+20 % images as design 6 says):
+
+| test | what | cap | result |
+|---|---|---|---|
+| s5-a | 100k, DISCOVER … PLAN, DiskStore | -Xmx128m | **PASSED** (122 s, GRAPH COMPLETED, 39,529 recs) |
+| s5-b | 150k, full V2Analysis incl. adapter, DiskStore | -Xmx148m | **FAILED: OOM** (and GRAPH hit the 20,000-decode cap: 30,000 images ⇒ PAUSED, S7) |
+| s5-c | s5-a on MemoryStore | -Xmx128m | **PASSED** (OOM as required, 20 s) |
+| s5-d | 100k tree through the CLI, memory vs disk | 2g | **PASSED** (266,682,622 bytes identical without timings) |
+| s4-disk | 100k (30 %), disk size after compaction | 2g | **PASSED** (268.9 MB ≤ 2 × live 242.8 MB + 64 MiB) |
+| s6-cap | 85k, full V2Analysis incl. adapter, DiskStore | -Xmx148m | **PASSED** (81 s); 100k at the same cap ran out of memory |
+
+The end of the run (store indexes + recommendations + plan + the classic result) binds: after-GC marks give 1,415 B/file
+(linear fit 10k/100k), and 100k × that plus `adapt`'s transients does not fit 148 MiB. 150k at -Xmx148m needs the S6 option
+(F-09: drop the store's indexes before `adapt`, ≈ −300 B/file) **and** a slimmer classic result (≈ 810 B/file incl. the
+adapter's `byId` map); neither is done.
+
+## S6 — app switch (done, without the F-09 option)
+
+* `V2Runner.STORE_KIND = DISK` (MemoryStore still selectable by that constant; `capacity()` picks the matching guard). The
+  store lives in `getFilesDir()/v2` (AndroidBlobStore, app-private, unchanged). The disk preflight (`CapacityGuard`,
+  `V2Capacity.diskFits`) and the space probe (`StatFs` of the shared root, `Stores.open/create(…, SpaceProbe)`) are now active;
+  `StoreLowSpace` ⇒ `V2Capacity.LOW_STORAGE`, OOM ⇒ `OUT_OF_MEMORY` (both unchanged). `DiskStore.create` truncates an old
+  `store.snap` (S2); no migration (design 5.1).
+* **REVIEW_S F-17**: the `ScanControl` given to the pipeline checks `files().size()` at DISCOVER progress reports each time
+  another 10,000 records exist; above the limit it records the guard and answers `cancelRequested()` ⇒ the run ends with the
+  same "v2 cannot handle this many files yet" message (Android-only code; compiled by check_android_compile, not run on the JVM).
+* Restore after process death: unchanged logic (`result_algorithm` marker = `v2` ⇒ `V2Runner.restore` ⇒
+  `Stores.open(STORE_KIND …)` ⇒ last COMPLETED session ⇒ `V2Analysis` ⇒ publish). With DISK the open replays the log after the
+  last index file (or rebuilds by scan), so the completed session written by the run's final flush is found; an interrupted
+  run cleared the marker first, as before.
+* `V2Capacity` (5.3): `maxFiles = min((0.8·max − used − STORE_FIXED 16 MiB − GRAPH_RESERVE 64 MiB) / 643,
+  (0.8·max − used − 16 MiB) / 2,083)`; `maxFilesMemoryStore` keeps the old formula. GRAPH 643 = 514 B/file measured × 1.25.
+  END: 1,415 × 1.25 = 1,769 was **not** supported by the F-08 cap test (100k OOM at -Xmx148m), so END = 2,083 is derived from
+  the largest N that passed at the cap (85,000): (0.8 × 256 MiB − 20 − 16 MiB) / 85,000. **256 MB heap, 20 MB used: 84,973
+  files; 512 MB: 188,069** (memory store: 15,462 / 41,676). Design target ≥ 150,000 at 256 MB: **not met** (see above).
+  `V2AdapterTest` memory guard: new expected values incl. a 128 MB case where the GRAPH reserve binds.
+* PHASE_A_NOTES: assumptions item 6, phone checklist items 3 (new limits, F-17), 3a (disk preflight, low storage, store size),
+  4 (per-file figures, time), 8 (restore opens the disk store), known limitations (memory, disk) updated.
+
+Deviations (S5/S6):
+* T2 size groups cost 32 B per eligible file (design ≤ 16): the ordinal needs the id list.
+* GRAPH edges/groups stay lists (design: follow-up only if over target); the lite node is ≈ 180–250 B/file, not ≤ 120.
+* The CLI uses the streaming ASSESS/PLAN path too (so the dataset golden checks cover it); it keeps a verdict map for its JSON.
+* `ArchiveMatcherTest` coarse-mtime flake fixed (test only).
+* F-09 option (release indexes before the adapter) not implemented; capacity set from the cap test instead.
+* A commit "v2 store, slice S5: work in progress … not yet verified" (8a65d55) appeared on the branch during this work; it was
+  not made by this implementer. The S6 edits since then are uncommitted.
+
+Next: F-09 option (DiskStore `releaseIndexes()` + locator array, `adapt` over `Iterable<FileRecord>`) and a slimmer adapter
+result to approach 150k at 256 MB, re-running s5-b and s6-cap with a larger N; then S7 (decode budget: the 150k / 30k-image
+tree pauses GRAPH).
