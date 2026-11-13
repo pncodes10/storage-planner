@@ -17,6 +17,10 @@ public final class TempTree implements AutoCloseable {
         return new TempTree(p);
     }
 
+    /** An existing (or new) directory used as a tree; close() would delete it, so callers that keep it do not close. */
+    public static TempTree at(Path p) throws IOException { Files.createDirectories(p); return new TempTree(p); }
+    public byte[] read(String rel) throws IOException { return Files.readAllBytes(path(rel)); }
+
     public Path root() { return root; }
     public Path path(String rel) { return rel.isEmpty() ? root : root.resolve(rel); }
 

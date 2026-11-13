@@ -40,6 +40,7 @@ public final class AllV2Tests {
             {"IncrementalExtractionTest", (Suite) IncrementalExtractionTest::run},
             {"ExactGrouperTest", (Suite) ExactGrouperTest::run},
             {"PerceptualTest", (Suite) PerceptualTest::run},
+            {"PerceptualBudgetTest", (Suite) PerceptualBudgetTest::run},
             {"ArchiveMatcherTest", (Suite) ArchiveMatcherTest::run},
             {"ScenarioFixtureTest", (Suite) ScenarioFixtureTest::run},
             {"HardRulesTest", (Suite) HardRulesTest::run},

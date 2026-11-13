@@ -54,6 +54,8 @@ public final class OverviewScreen extends Screen {
 
         Ui.add(content, Ui.heading(a, "Recommendations", 20), 24);
         Ui.add(content, Ui.text(a, "Lowest risk first. Tap one to review every file it flags and keep anything you want.", 14, Ui.text2, false), 4);
+        if (Session.notPlannable != null && Session.v2Note != null)    // PHASE_S_STORE S7: photo comparison not finished
+            Ui.add(content, Ui.text(a, Session.v2Note, 14, Ui.text2, false), 8);
         final int undecided = Session.undecided(null).size();
         if (undecided > 0) {
             android.widget.Button cards = Ui.button(a, "Review " + undecided + " planned items with swipe cards", true);

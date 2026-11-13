@@ -321,6 +321,7 @@ final class V2Runner {
                     Session.loadKept(app);
                     Session.mode = mode;
                     Session.setV2(b.adapted.result, b.adapted.ub, new Estimates(), target, b.appStats, b.sdk, b.adapted.notPlannable);
+                    Session.v2Note = b.continueNote;
                     saved[0] = Session.plan.saved();
                     ok[0] = true;
                 } catch (RuntimeException e) {
