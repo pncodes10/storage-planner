@@ -97,8 +97,9 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   (leaked handles on every run, slow restore); a stopped run left v2 data on
   disk; a Classic run now clears v2 data. Verdict: fit for a phone test, not
   ready to release.
-- CI run 66 (commit 6c7a925, before the review fixes) passed. The build to
-  test is the run for the review-fix commit, once green.
+- **Build to test on the phone: CI run 68** (commit 968a69d, succeeded 03:53
+  UTC, 13 Nov): https://github.com/pncodes10/storage-planner/actions/runs/43361741084
+  It replaces run 60.
 - Limits: 84,973 files at 256 MB heap, 188,069 at 512 MB; free space A37.
 - Nothing has run on a device. Unverified there: heap margin on Android,
   free-space reading, restore time.
