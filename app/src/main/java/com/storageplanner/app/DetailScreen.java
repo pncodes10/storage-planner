@@ -58,6 +58,7 @@ public final class DetailScreen extends Screen {
     @Override public void refresh() {
         if (content == null) return;
         content.removeAllViews();
+        Ui.addSampleBanner(content);
         if (row.file != null) fileHeader(row.file); else appHeader();
         flags();
         if (row.file != null) related(row.file);

@@ -108,6 +108,7 @@ public final class ListScreen extends Screen {
     // ------------------------------------------------------------------ header
     private void fillHeader() {
         header.removeAllViews();
+        Ui.addSampleBanner(header);
         if (kind == TECH) {
             int tier = Review.tier(key, Session.candidates.containsKey(key) ? Session.candidates.get(key) : new ArrayList<Unit>());
             LinearLayout b = Ui.row(a); b.addView(Ui.badge(a, tier));

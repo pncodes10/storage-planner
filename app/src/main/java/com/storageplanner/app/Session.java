@@ -59,6 +59,8 @@ public final class Session {
     public static Set<String> notPlannable;
     /** v2 only: a line about the result itself (PHASE_S_STORE S7: photos not compared yet, run again), or null. */
     public static String v2Note;
+    /** v2 quick test only: "Sample result: ... only." while a sample result is shown, else null. Set by V2Runner.publish after setV2. */
+    public static String sampleNote;
 
     /** A v2 result adapted to classic units (V2Adapter); planned by V2Plans (SAFE + NO_LOSS only, display-only units excluded). */
     public static void setV2(Scanner.Result r, UnitBuilder b, Estimates e, long target, boolean stats, int sdkInt, Set<String> displayOnly) {
@@ -67,7 +69,7 @@ public final class Session {
     }
 
     public static void set(Scanner.Result r, UnitBuilder b, Estimates e, long target, boolean stats, int sdkInt) {
-        notPlannable = null; v2Note = null;
+        notPlannable = null; v2Note = null; sampleNote = null;
         setResults(r, b, e, target, stats, sdkInt);
     }
 

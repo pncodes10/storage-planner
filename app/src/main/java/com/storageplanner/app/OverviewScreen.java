@@ -49,6 +49,7 @@ public final class OverviewScreen extends Screen {
     @Override public void refresh() {
         if (content == null || !Session.hasResults()) return;
         content.removeAllViews();
+        Ui.addSampleBanner(content);                      // quick v2 test: the result covers the sample only
         modeToggle();
         summaryCard();
 

@@ -75,6 +75,23 @@ public final class Ui {
         return t;
     }
 
+    /**
+     * Quick v2 test: while a sample result is shown, every screen that shows the plan starts with this line (text, bold, in a
+     * bordered box: its meaning does not depend on colour). Does nothing for a Classic or a full v2 result.
+     */
+    public static void addSampleBanner(LinearLayout parent) {
+        String n = Session.sampleNote;
+        if (n == null) return;
+        Context c = parent.getContext();
+        TextView t = text(c, n, 15, text, true);
+        t.setBackground(outlineDrawable(c, accent, 2));
+        int p = dp(c, 10);
+        t.setPadding(p, p, p, p);
+        t.setContentDescription(n + " This plan does not cover the rest of your phone.");
+        add(parent, t, 0);
+        ((LinearLayout.LayoutParams) t.getLayoutParams()).bottomMargin = dp(c, 10);
+    }
+
     public static GradientDrawable round(int color, float radiusPx) {
         GradientDrawable g = new GradientDrawable();
         g.setColor(color); g.setCornerRadius(radiusPx);

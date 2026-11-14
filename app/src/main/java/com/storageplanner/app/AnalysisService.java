@@ -26,7 +26,7 @@ import com.storageplanner.core.Scanner;
 public final class AnalysisService extends Service {
     static final String ACTION_START = "com.storageplanner.app.action.START";
     static final String ACTION_CANCEL = "com.storageplanner.app.action.CANCEL";
-    static final String EXTRA_TARGET_GB = "target_gb", EXTRA_MEASURE = "measure";
+    static final String EXTRA_TARGET_GB = "target_gb", EXTRA_MEASURE = "measure", EXTRA_SAMPLE = "sample";
 
     private static final String CH_PROGRESS = "analysis", CH_RESULT = "results";
     static final int ID_PROGRESS = 1, ID_RESULT = 2;
@@ -57,11 +57,12 @@ public final class AnalysisService extends Service {
         if (!AnalysisState.running) AnalysisState.begin();
         final double gb = intent.getDoubleExtra(EXTRA_TARGET_GB, 0);
         final boolean measure = intent.getBooleanExtra(EXTRA_MEASURE, true);
-        new Thread(new Runnable() { public void run() { work(gb, measure); } }, "analysis").start();
+        final boolean sample = intent.getBooleanExtra(EXTRA_SAMPLE, false);
+        new Thread(new Runnable() { public void run() { work(gb, measure, sample); } }, "analysis").start();
         return START_NOT_STICKY;
     }
 
-    private void work(double gb, boolean measure) {
+    private void work(double gb, boolean measure, boolean sample) {
         PowerManager.WakeLock wl = null;
         AnalysisRunner.Outcome o = null;
         try {
@@ -74,7 +75,7 @@ public final class AnalysisService extends Service {
             o = AnalysisRunner.run(getApplicationContext(), gb, measure, AnalysisRunner.progress(new Scanner.Progress() {
                 public void update(String stage, int done, int total) { notifyProgress(stage, done, total, false); }
                 public boolean cancelled() { return AnalysisState.cancelled; }
-            }));
+            }), sample);
         } catch (Throwable t) {
             o = new AnalysisRunner.Outcome();
             o.message = "Analysis failed: " + t;

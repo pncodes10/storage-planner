@@ -17,6 +17,7 @@ import com.storageplanner.v2.plan.StoreFileMap;
 import com.storageplanner.v2.plan.UnitBuilder2;
 import com.storageplanner.v2.risk.Assessor;
 import com.storageplanner.v2.risk.RiskConfig;
+import com.storageplanner.v2.sample.SampleSpec;
 import com.storageplanner.v2.store.DiskStore;
 import com.storageplanner.v2.store.StoreException;
 import com.storageplanner.v2.store.V2Store;
@@ -51,6 +52,11 @@ public final class V2Analysis {
         public Cancel cancel;
         public boolean adapt = true;
         /**
+         * Quick v2 test (sample run): the store holds only the sample. No app recommendations (idle apps, app caches) are made,
+         * the adapted result lists no apps, and the result carries {@code Result.sampleNote}. null = a full run.
+         */
+        public SampleSpec sample;
+        /**
          * REVIEW_S F-09: on a DiskStore, drop the store's in-memory indexes before {@code V2Adapter.adapt} (the store is then
          * only closable, and {@code Result.in.files} is null). Default true; tests that read the store afterwards set false.
          */
@@ -68,6 +74,8 @@ public final class V2Analysis {
          * comparisons — but another run continues the comparison from the saved checks. 0 = finished.
          */
         public long pendingPhotos;
+        /** The banner line of a sample run ("Sample result: ... only."), else null. */
+        public String sampleNote;
         /** The line the app shows when {@link #pendingPhotos} &gt; 0, else null. */
         public String continueNote() { return continueMessage(pendingPhotos); }
     }
@@ -99,12 +107,15 @@ public final class V2Analysis {
         if (pr != null) pr.update("Confirming identical copies", 0, 0);
         HashOnDemand.run(recs, fm, p.hasher, p.hashBudget);
         if (pr != null && p.cancel != null && p.cancel.cancelled()) return null;
-        recs.addAll(AppSubjects.recs(p.apps, p.now, p.sdk, scanId, ProvisionalRecommendations.PLAN_VERSION));
+        if (p.sample == null) recs.addAll(AppSubjects.recs(p.apps, p.now, p.sdk, scanId, ProvisionalRecommendations.PLAN_VERSION));
         if (pr != null) pr.update("Planning", 0, 0);
         Result r = new Result();
         UnitBuilder2.Input in = new UnitBuilder2.Input();
         in.recs = recs; in.files = fm; in.keepers = Plans.keepers(store);
         r.in = in;
+        if (p.sample != null) r.sampleNote = p.sample.notice();
+        final List<com.storageplanner.v2.device.InstalledApp> appList =
+                p.sample != null ? new ArrayList<com.storageplanner.v2.device.InstalledApp>() : p.apps.list();
         r.made = Plans.make(in, ActionPlan.MAX_SAFE, null, false);
         Plans.version(store, r.made.plan, p.now, scanId);
         ScanSession ss = store.scanSessions().get(ScanSession.keyOf(scanId));   // F-07: damage found by ASSESS/PLAN is counted too
@@ -120,9 +131,9 @@ public final class V2Analysis {
                 Iterable<FileRecord> files = ((DiskStore) store).releaseIndexes();
                 in.files = null;              // StoreFileMap cannot be read any more
                 if (mk != null) mk.mark("indexes_released");
-                r.adapted = V2Adapter.adapt(in, files, r.made.built, p.apps.list(), dupOf, p.root, p.sdk, p.now, p.total, p.free, false);
+                r.adapted = V2Adapter.adapt(in, files, r.made.built, appList, dupOf, p.root, p.sdk, p.now, p.total, p.free, false);
             } else
-                r.adapted = V2Adapter.adapt(in, r.made.built, p.apps.list(), dupOf, p.root, p.sdk, p.now, p.total, p.free, false);
+                r.adapted = V2Adapter.adapt(in, r.made.built, appList, dupOf, p.root, p.sdk, p.now, p.total, p.free, false);
             if (mk != null) mk.mark("adapted");
         }
         return r;

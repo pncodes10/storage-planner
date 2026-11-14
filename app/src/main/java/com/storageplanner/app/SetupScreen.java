@@ -19,7 +19,7 @@ import java.util.Locale;
 /** Start page: permissions, target, analyse, progress. */
 public final class SetupScreen extends Screen {
     private TextView storageLine, filesStatus, usageStatus, progressText;
-    private Button filesBtn, usageBtn, analyzeBtn, cancelBtn, resultsBtn;
+    private Button filesBtn, usageBtn, analyzeBtn, cancelBtn, resultsBtn, sampleBtn;
     private EditText targetInput;
     private CheckBox measureBox;
     private ProgressBar progressBar;
@@ -128,6 +128,14 @@ public final class SetupScreen extends Screen {
         lab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(20);
         L.addView(row, rl);
+        // Quick v2 test: v2 on a small sample (newest 1,000 images + 100 videos), whatever the algorithm switch says; the switch is not changed
+        sampleBtn = Ui.button(a, "Quick v2 test (1,000 photos, 100 videos)", false);
+        sampleBtn.setContentDescription("Quick v2 test: run the new algorithm on your 1,000 newest photos and 100 newest videos only. "
+                + "The result covers this sample, not your whole phone.");
+        sampleBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { startAnalysis(true); } });
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-2, -2); sl.topMargin = dp(16);
+        L.addView(sampleBtn, sl);
+        Ui.add(L, Ui.text(a, "Runs the new algorithm on a sample only. Results cover the sample, not your whole phone.", 14, Ui.text2, false), 6);
         LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
         L.addView(lab, labl);
         Ui.add(L, Ui.text(a, "Runs in the background. You can switch apps; you'll get a notification when your plan is ready.", 14, Ui.text2, false), 8);
@@ -167,7 +175,7 @@ public final class SetupScreen extends Screen {
         usageStatus.setText((usage ? "✓ Granted: " : "Optional: ") + "usage access, for app sizes, caches and apps you have not opened in months.");
         usageBtn.setVisibility(usage ? View.GONE : View.VISIBLE);
         boolean running = AnalysisState.running, loading = ResultFiles.loading;
-        analyzeBtn.setEnabled(!running && !loading); cancelBtn.setEnabled(running && !AnalysisState.cancelled);
+        analyzeBtn.setEnabled(!running && !loading); sampleBtn.setEnabled(!running && !loading); cancelBtn.setEnabled(running && !AnalysisState.cancelled);
         resultsBtn.setVisibility(Session.hasResults() && !running && !loading ? View.VISIBLE : View.GONE);
         if (running) {
             if (AnalysisState.cancelled) { progressBar.setVisibility(View.VISIBLE); progressBar.setIndeterminate(true); progressText.setText("Cancelling…"); }
@@ -182,12 +190,14 @@ public final class SetupScreen extends Screen {
         }
     }
 
-    private void startAnalysis() {
+    private void startAnalysis() { startAnalysis(false); }
+
+    private void startAnalysis(boolean sample) {
         if (!AndroidPlatform.hasFilesAccess(a)) { a.toast("Grant all files access first."); return; }
         double gb;
         try { gb = Double.parseDouble(targetInput.getText().toString().trim()); }
         catch (NumberFormatException e) { a.toast("Enter a target in GB."); return; }
-        a.startAnalysis(gb, measureBox.isChecked());
+        a.startAnalysis(gb, measureBox.isChecked(), sample);
         refresh();
     }
 

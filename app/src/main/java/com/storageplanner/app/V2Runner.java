@@ -16,6 +16,8 @@ import com.storageplanner.v2.model.ScanState;
 import com.storageplanner.v2.pipeline.Pipeline;
 import com.storageplanner.v2.pipeline.PipelineResult;
 import com.storageplanner.v2.plan.HashOnDemand;
+import com.storageplanner.v2.sample.SampleSpec;
+import com.storageplanner.v2.sample.SampleStage;
 import com.storageplanner.v2.stage.PipelineConfig;
 import com.storageplanner.v2.stage.Stage;
 import com.storageplanner.v2.stage.StageContext;
@@ -66,17 +68,17 @@ final class V2Runner {
         return STORE_KIND == Stores.Kind.DISK ? V2Capacity.maxFiles(max, usedBefore) : V2Capacity.maxFilesMemoryStore(max, usedBefore);
     }
 
-    static AnalysisRunner.Outcome run(final Context app, double targetGb, boolean measure, final Scanner.Progress pr) {
+    static AnalysisRunner.Outcome run(final Context app, double targetGb, boolean measure, final Scanner.Progress pr, final boolean sample) {
         AnalysisRunner.Outcome o = new AnalysisRunner.Outcome();
         ResultFiles.setRunning(app, true);
         try {
             try {
-                runInner(app, targetGb, pr, o, false);   // its frame (store, stages, records) is gone once it returns or throws
+                runInner(app, targetGb, pr, o, false, sample);   // its frame (store, stages, records) is gone once it returns or throws
             } catch (Exception e) {
                 // PHASE_S_STORE 3.11: damaged saved data ⇒ one automatic retry on a fresh store (event D_STORE_RESET)
                 if (Stores.corruption(e) == null) throw e;
                 o.ok = false; o.cancelled = false; o.message = null;
-                try { runInner(app, targetGb, pr, o, true); }
+                try { runInner(app, targetGb, pr, o, true, sample); }
                 catch (Exception e2) {
                     if (Stores.corruption(e2) == null) throw e2;
                     o.ok = false; o.cancelled = false; o.message = STORE_RESET_MESSAGE;
@@ -89,7 +91,7 @@ final class V2Runner {
             o.ok = false;
             boolean low = com.storageplanner.v2.store.StoreLowSpace.in(t) != null;
             o.message = low ? V2Capacity.LOW_STORAGE : "Analysis failed (v2): " + t;
-            if (low) resetStore(app);           // REVIEW_S6 R-02: give back the space the store took before it stopped
+            if (low) resetStore(app, sample);           // REVIEW_S6 R-02: give back the space the store took before it stopped
         } finally {
             ResultFiles.setRunning(app, false);
             AnalysisState.finished(o.message, o.ok);
@@ -99,21 +101,23 @@ final class V2Runner {
 
     static final String STORE_RESET_MESSAGE = "v2's saved data was damaged and has been reset; please run again.";
 
-    private static void runInner(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o, boolean fresh) throws Exception {
+    private static void runInner(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o, boolean fresh, boolean sample) throws Exception {
         // the v2 state on disk is about to change: until this run completes, a restore must not show it
-        if (AnalysisRunner.ALGO_V2.equals(AnalysisRunner.resultAlgorithm(app))) AnalysisRunner.setResultAlgorithm(app, null);
+        // (a sample run changes only its own store, so a full v2 result stays restorable until the sample replaces it, and vice versa)
+        if ((sample ? AnalysisRunner.ALGO_V2_SAMPLE : AnalysisRunner.ALGO_V2).equals(AnalysisRunner.resultAlgorithm(app))) AnalysisRunner.setResultAlgorithm(app, null);
         pr.update("Reading installed apps", 0, 0);
         Runtime rt = Runtime.getRuntime();
         rt.gc();
         final long usedBefore = rt.totalMemory() - rt.freeMemory();   // heap in use before any v2 record is loaded (e.g. a result on screen)
         AndroidPlatform pf = new AndroidPlatform(app);
         AndroidV2Device dev;
-        try { dev = device(app, pf); } finally { pf.close(); }
+        try { dev = device(app, pf, sample); } finally { pf.close(); }
         PipelineConfig cfg = new PipelineConfig();
         cfg.maxTier = 3;
         V2Store store;
         SpaceProbe space = space(dev);
-        if (fresh) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
+        if (sample) store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space);   // always empty: the sample store is never reused
+        else if (fresh) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
         else try { store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); }
         catch (StoreException e) { store = Stores.create(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space); cfg.storeReset = true; }
         // REVIEW_S6 R-01: the store is closed exactly once per run, on every path (writes the index file, releases the file
@@ -121,7 +125,7 @@ final class V2Runner {
         final V2Store[] held = {store};
         store = null;
         try {
-            runOpen(app, targetGb, pr, o, dev, cfg, held, usedBefore);
+            runOpen(app, targetGb, pr, o, dev, cfg, held, usedBefore, sample);
         } finally {
             if (held[0] != null) { closeQuietly(held[0]); held[0] = null; }
         }
@@ -138,10 +142,20 @@ final class V2Runner {
      * truncated to 0 bytes; nothing deleted or renamed), only inside getFilesDir()/v2. Used when the run stopped for lack of
      * storage or memory and after a Classic result replaced the v2 one (REVIEW_S6 R-02/R-03). Never throws.
      */
-    static void resetStore(Context app) {
+    static void resetStore(Context app) { resetStore(app, false); }
+
+    /** sample: empties the quick test's own store (getFilesDir()/v2sample) instead; the full scan's store is never touched by it. */
+    static void resetStore(Context app, boolean sample) {
         try {
-            closeQuietly(Stores.create(STORE_KIND, AndroidV2Device.privateBlobs(app), SNAPSHOT_EVERY_MS, RESET_CLOCK));
+            closeQuietly(Stores.create(STORE_KIND, sample ? AndroidV2Device.sampleBlobs(app) : AndroidV2Device.privateBlobs(app), SNAPSHOT_EVERY_MS, RESET_CLOCK));
         } catch (Throwable ignored) { /* the next v2 run validates the store again */ }
+    }
+
+    /** resetStore of the sample store only if a sample run left data behind; no-op otherwise (no directory is created). */
+    static void resetSampleStoreIfPresent(Context app) {
+        java.io.File d = AndroidV2Device.sampleStoreDir(app);
+        if (new java.io.File(d, com.storageplanner.v2.store.DiskStore.MANIFEST).exists()
+                || new java.io.File(d, com.storageplanner.v2.store.MemoryStore.SNAPSHOT).length() > 0) resetStore(app, true);
     }
 
     /** resetStore only if v2 left data behind (a disk-store manifest or an old memory-store snapshot); no-op otherwise. */
@@ -157,9 +171,10 @@ final class V2Runner {
     };
 
     private static void runOpen(final Context app, double targetGb, final Scanner.Progress pr, AnalysisRunner.Outcome o,
-                                AndroidV2Device dev, PipelineConfig cfg, final V2Store[] held, final long usedBefore) throws Exception {
+                                AndroidV2Device dev, PipelineConfig cfg, final V2Store[] held, final long usedBefore, final boolean sample) throws Exception {
         V2Store store = held[0];
         List<Stage> stages = Pipeline.defaultStages(cfg, dev);
+        if (sample) SampleStage.insertAfterDiscovery(stages, SampleSpec.DEFAULT);   // only the sample goes on to extraction, graph, assessment, plan
         stages.add(new com.storageplanner.v2.graph.GraphStage());
         // memory guard (REVIEW_A M-1): right after discovery, before any extraction, the record count must fit the heap
         final long[] guard = {-1, -1, 0};       // {files found, limit, 1 = disk} when the guard stopped the run
@@ -178,7 +193,12 @@ final class V2Runner {
                 if ("DISCOVER".equals(stage) && guard[0] < 0) {
                     long n = guardStore.files().size();
                     if (n >= nextCheck[0]) {
-                        nextCheck[0] = (n / 10000 + 1) * 10000;
+                        if (sample) {
+                            // keep only the newest sample candidates so far (what is dropped here cannot be in the final sample)
+                            try { SampleStage.prune(guardStore, SampleSpec.DEFAULT); } catch (StoreException ignored) { /* the SAMPLE stage prunes again */ }
+                            n = guardStore.files().size();
+                            nextCheck[0] = n + 10000;
+                        } else nextCheck[0] = (n / 10000 + 1) * 10000;
                         if (n > discoverLimit) { guard[0] = n; guard[1] = discoverLimit; }
                     }
                 }
@@ -190,7 +210,7 @@ final class V2Runner {
         if (guard[0] >= 0) {
             o.message = guard[2] == 1 ? V2Capacity.notEnoughStorageMessage(guard[0]) : V2Capacity.tooManyMessage(guard[0], guard[1]);
             closeQuietly(store); held[0] = null;
-            resetStore(app);                    // REVIEW_S6 R-02: the same library stops again; do not keep its records on disk
+            resetStore(app, sample);            // REVIEW_S6 R-02: the same library stops again; do not keep its records on disk
             return;
         }
         if (AnalysisState.cancelled || res.outcome != StageOutcome.DONE) {
@@ -201,12 +221,12 @@ final class V2Runner {
         long scanId = res.session.scanId;
         res = null;
         long target = (long) (targetGb * 1e9);
-        Built b = analyse(app, dev, store, scanId, pr);
+        Built b = analyse(app, dev, store, scanId, pr, sample);
         closeQuietly(store); held[0] = null;    // R-01: index file written, handles released, before the result is published
         store = null; dev = null;               // only the adapted result is kept from here on
         if (b == null) { o.cancelled = true; o.message = "Cancelled."; return; }
         prefs(app).edit().putLong("v2_target", target).putInt("v2_mode", Session.mode).commit();
-        AnalysisRunner.setResultAlgorithm(app, AnalysisRunner.ALGO_V2);
+        AnalysisRunner.setResultAlgorithm(app, sample ? AnalysisRunner.ALGO_V2_SAMPLE : AnalysisRunner.ALGO_V2);
         final long[] saved = {0};
         if (!publish(app, b, target, Session.mode, saved)) {
             o.message = "Analysis finished (v2), but the result could not be shown. Open the app again to load it.";
@@ -214,7 +234,9 @@ final class V2Runner {
         }
         o.ok = true;
         o.saved = saved[0];
-        o.message = "Done (v2): " + b.adapted.result.files.size() + " files and " + b.adapted.result.apps.size() + " apps analysed.";
+        o.message = sample ? "Done (v2 sample): " + b.adapted.result.files.size() + " files analysed. " + b.sampleNote
+                : "Done (v2): " + b.adapted.result.files.size() + " files and " + b.adapted.result.apps.size() + " apps analysed.";
+        if (!sample) resetSampleStoreIfPresent(app);     // the quick test's result is replaced by this full one: give its data back
         if (b.continueNote != null) o.message += " " + b.continueNote;    // PHASE_S_STORE S7: decode budget used up, run again
     }
 
@@ -242,18 +264,18 @@ final class V2Runner {
      * After process death: reload the v2 store (no rescan), assess and plan again, adapt and put into Session.
      * Worker thread. Returns false if there is no complete v2 result (then nothing is shown, never a classic result instead).
      */
-    static boolean restore(Context app) {
+    static boolean restore(Context app, boolean sample) {
         try {
             AndroidPlatform pf = new AndroidPlatform(app);
             AndroidV2Device dev;
-            try { dev = device(app, pf); } finally { pf.close(); }
+            try { dev = device(app, pf, sample); } finally { pf.close(); }
             V2Store store = Stores.open(STORE_KIND, dev.blobs(), SNAPSHOT_EVERY_MS, dev.clock(), space(dev));
             Built b;
             try {
                 ScanSession last = null;
                 for (ScanSession s : store.scanSessions().all()) if (last == null || s.scanId > last.scanId) last = s;
                 if (last == null || last.state != ScanState.COMPLETED) return false;
-                b = analyse(app, dev, store, last.scanId, null);
+                b = analyse(app, dev, store, last.scanId, null, sample);
             } finally {
                 closeQuietly(store);            // R-01: once, on every path
             }
@@ -267,7 +289,7 @@ final class V2Runner {
         }
     }
 
-    private static final class Built { V2Adapter.Adapted adapted; int sdk; boolean appStats; String continueNote; }
+    private static final class Built { V2Adapter.Adapted adapted; int sdk; boolean appStats; String continueNote, sampleNote; }
 
     /** Free bytes of the shared root (same /data partition as getFilesDir()), for the DiskStore reserve checks (3.12). */
     private static SpaceProbe space(final AndroidV2Device dev) {
@@ -279,12 +301,12 @@ final class V2Runner {
         };
     }
 
-    private static AndroidV2Device device(Context app, AndroidPlatform pf) {
+    private static AndroidV2Device device(Context app, AndroidPlatform pf, boolean sample) {
         List<AppItem> classic = pf.apps();
         boolean usage = AndroidPlatform.hasUsageAccess(app);
         List<InstalledApp> apps = AndroidV2Device.fromClassic(classic, pf.appStatsAvailable, usage);
         Availability av = AndroidV2Device.appAvailability(app);
-        AndroidV2Device d = new AndroidV2Device(app, pf.storageRoot(), apps, av);
+        AndroidV2Device d = new AndroidV2Device(app, pf.storageRoot(), apps, av, sample);
         lastStats = pf.appStatsAvailable; lastSdk = pf.sdkInt(); lastTotal = pf.totalBytes(); lastFree = pf.freeBytes(); lastRoot = pf.storageRoot();
         return d;
     }
@@ -292,7 +314,7 @@ final class V2Runner {
     private static volatile String lastRoot;
 
     /** ASSESS + PLAN (Plans.make: SAFE + NO_LOSS only, A29) + adapter, via V2Analysis (PHASE_S_STORE 4 item 6). null if cancelled. */
-    private static Built analyse(Context app, final AndroidV2Device dev, V2Store store, long scanId, Scanner.Progress pr) throws StoreException {
+    private static Built analyse(Context app, final AndroidV2Device dev, V2Store store, long scanId, Scanner.Progress pr, boolean sample) throws StoreException {
         V2Analysis.Params p = new V2Analysis.Params();
         p.apps = dev.apps(); p.now = dev.clock().nowMillis(); p.scanId = scanId;
         p.sdk = lastSdk; p.root = lastRoot; p.total = lastTotal; p.free = lastFree;
@@ -301,6 +323,7 @@ final class V2Runner {
         };
         p.hashBudget = HASH_BUDGET;
         p.progress = pr;
+        if (sample) p.sample = SampleSpec.DEFAULT;      // no app recommendations, a sample notice on the result
         p.cancel = new V2Analysis.Cancel() { public boolean cancelled() { return AnalysisState.cancelled; } };
         V2Analysis.Result r = V2Analysis.run(store, p);
         if (r == null) return null;
@@ -308,6 +331,7 @@ final class V2Runner {
         b.sdk = lastSdk; b.appStats = lastStats;
         b.adapted = r.adapted;
         b.continueNote = r.continueNote();
+        b.sampleNote = r.sampleNote;
         return b;
     }
 
@@ -322,6 +346,7 @@ final class V2Runner {
                     Session.mode = mode;
                     Session.setV2(b.adapted.result, b.adapted.ub, new Estimates(), target, b.appStats, b.sdk, b.adapted.notPlannable);
                     Session.v2Note = b.continueNote;
+                    Session.sampleNote = b.sampleNote;       // non-null = a sample result: every plan screen says so
                     saved[0] = Session.plan.saved();
                     ok[0] = true;
                 } catch (RuntimeException e) {

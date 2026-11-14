@@ -25,8 +25,12 @@ final class AnalysisRunner {
         long saved;          // bytes the plan frees (for the notification)
     }
 
-    static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) {
-        if (ALGO_V2.equals(algorithm(app))) return V2Runner.run(app, targetGb, measure, pr);
+    static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) { return run(app, targetGb, measure, pr, false); }
+
+    /** sample = the "Quick v2 test" button: always v2, on the sample only, whatever the saved algorithm switch says (it is not changed). */
+    static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr, boolean sample) {
+        if (sample) return V2Runner.run(app, targetGb, measure, pr, true);
+        if (ALGO_V2.equals(algorithm(app))) return V2Runner.run(app, targetGb, measure, pr, false);
         Outcome o = new Outcome();
         ResultFiles.setRunning(app, true);
         try {
@@ -54,6 +58,7 @@ final class AnalysisRunner {
             ResultFiles.save(app, s);                 // a failed save only costs a rescan after process death
             setResultAlgorithm(app, ALGO_CLASSIC);    // restore after process death uses classic for this result
             V2Runner.resetStoreIfPresent(app);        // REVIEW_S6 R-03: the v2 result is gone, give its working data back (truncation)
+            V2Runner.resetSampleStoreIfPresent(app);  // the quick test's result is gone too
 
             final CountDownLatch set = new CountDownLatch(1);
             final long[] saved = {0};
@@ -84,7 +89,7 @@ final class AnalysisRunner {
     static void setSortPictures(Context c, boolean on) { c.getSharedPreferences("analysis", Context.MODE_PRIVATE).edit().putBoolean("sort_pictures", on).apply(); }
 
     // ---- algorithm switch (Phase A): which algorithm runs next, and which one produced the saved result
-    static final String ALGO_CLASSIC = "classic", ALGO_V2 = "v2";
+    static final String ALGO_CLASSIC = "classic", ALGO_V2 = "v2", ALGO_V2_SAMPLE = "v2sample";
     static String algorithm(Context c) {
         return ALGO_V2.equals(c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getString("algorithm", ALGO_CLASSIC)) ? ALGO_V2 : ALGO_CLASSIC;
     }
@@ -94,7 +99,7 @@ final class AnalysisRunner {
         SharedPreferences p = c.getSharedPreferences("analysis", Context.MODE_PRIVATE);
         if (!p.contains("result_algorithm")) return ALGO_CLASSIC;
         String v = p.getString("result_algorithm", "");
-        return ALGO_V2.equals(v) ? ALGO_V2 : ALGO_CLASSIC.equals(v) ? ALGO_CLASSIC : null;
+        return ALGO_V2.equals(v) ? ALGO_V2 : ALGO_V2_SAMPLE.equals(v) ? ALGO_V2_SAMPLE : ALGO_CLASSIC.equals(v) ? ALGO_CLASSIC : null;
     }
     /** null = the saved v2 state is incomplete (a v2 run is under way): restore nothing. */
     static void setResultAlgorithm(Context c, String a) {

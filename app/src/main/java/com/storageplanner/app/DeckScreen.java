@@ -129,6 +129,7 @@ public final class DeckScreen extends Screen {
         LinearLayout root = new LinearLayout(a);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(12), dp(16), dp(16));
+        Ui.addSampleBanner(root);
         progress = Ui.text(a, "", 15, Ui.text, true);
         progress.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         root.addView(progress);

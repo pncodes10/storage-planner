@@ -50,6 +50,11 @@ public final class AndroidV2Device implements V2Device {
 
     /** apps: the installed set the classic AndroidPlatform gathered (converted by the caller); availability as seen by it. */
     public AndroidV2Device(Context c, String storageRoot, List<InstalledApp> appList, Availability appAvailability) {
+        this(c, storageRoot, appList, appAvailability, false);
+    }
+
+    /** sample: the blobs live in getFilesDir()/v2sample (the quick test's own store), never in the full scan's getFilesDir()/v2. */
+    public AndroidV2Device(Context c, String storageRoot, List<InstalledApp> appList, Availability appAvailability, boolean sample) {
         ctx = c.getApplicationContext();
         PosixStorageAccess.Root r = new PosixStorageAccess.Root();
         r.volumeId = VOLUME_ID; r.kind = VolumeKind.PRIMARY_SHARED; r.label = "Internal storage"; r.path = storageRoot;
@@ -63,7 +68,7 @@ public final class AndroidV2Device implements V2Device {
             public long monotonicNanos() { return android.os.SystemClock.elapsedRealtimeNanos(); }
         };
         resources = new Resources(ctx, storageRoot);
-        blobs = new AndroidBlobStore(storeDir(ctx));
+        blobs = new AndroidBlobStore(sample ? sampleStoreDir(ctx) : storeDir(ctx));
         media = new BitmapDecoder(storage);
         apps = new Apps(ctx, appList, appAvailability);
     }
@@ -71,6 +76,10 @@ public final class AndroidV2Device implements V2Device {
     /** The v2 store's directory getFilesDir()/v2 (app-private), the same blobs a device would use; for a store reset only. */
     public static File storeDir(Context c) { return new File(c.getFilesDir(), "v2"); }
     public static BlobStore privateBlobs(Context c) { return new AndroidBlobStore(storeDir(c)); }
+    /** The quick v2 test's store, getFilesDir()/v2sample (app-private): a sample run never reads or writes getFilesDir()/v2. */
+    public static File sampleStoreDir(Context c) { return new File(c.getFilesDir(), SAMPLE_DIR); }
+    public static BlobStore sampleBlobs(Context c) { return new AndroidBlobStore(sampleStoreDir(c)); }
+    public static final String SAMPLE_DIR = "v2sample";
 
     public StorageAccess storage() { return storage; }
     public Clock clock() { return clock; }

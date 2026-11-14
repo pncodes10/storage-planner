@@ -24,6 +24,8 @@ final class PlanJson {
     static String extApps, checkPlan;
     static Tier maxTier;
     static boolean allowYourCall;
+    /** --sample: no app recommendations (idle apps, app caches), as in the app's quick test. */
+    static boolean sample;
     static long hashBudget = Long.MAX_VALUE;
     static ActionPlan plan;
     static List<String> staleness;
@@ -50,7 +52,7 @@ final class PlanJson {
         }, hashBudget);
         JvmInstalledApps ext = new JvmInstalledApps(appsPath);
         if (extApps != null) ext.mergeExt(extApps);
-        AssessJson.recs.addAll(AppSubjects.recs(ext, now, sdk, scanId, ProvisionalRecommendations.PLAN_VERSION));
+        if (!sample) AssessJson.recs.addAll(AppSubjects.recs(ext, now, sdk, scanId, ProvisionalRecommendations.PLAN_VERSION));
         UnitBuilder2.Input in = new UnitBuilder2.Input();
         in.recs = AssessJson.recs; in.files = fm; in.keepers = Plans.keepers(store);
         if (target != null) {

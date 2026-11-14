@@ -32,7 +32,7 @@ public final class V2Cli {
     private V2Cli() {}
 
     static final String USAGE = "usage: V2Cli scan <root> --out <result.json> [--state-dir D] [--volume-id primary] [--kind full|incremental]"
-            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--graph-decode-budget N] [--pretty]";
+            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--graph-decode-budget N] [--sample IMAGES VIDEOS] [--pretty]";
 
     /** In-process tests (DiskKillTest): replaces the state dir's BlobStore (e.g. by a killing or power-loss fake). */
     static java.util.function.Function<BlobStore, BlobStore> blobsHook;
@@ -81,7 +81,7 @@ public final class V2Cli {
 
     private static int runOnce(String[] args, PrintStream out, PrintStream err, boolean fresh) {
         // results of an earlier in-process run (DiskKillTest runs the CLI many times in one JVM)
-        V2Json.graphCoverage = null; AssessJson.verdicts = null; AssessJson.recs = null; PlanJson.plan = null; PlanJson.staleness = null;
+        V2Json.graphCoverage = null; AssessJson.verdicts = null; AssessJson.recs = null; PlanJson.plan = null; PlanJson.staleness = null; PlanJson.sample = false;
         String enc = System.getProperty("sun.jnu.encoding");
         if (enc == null || !(enc.equalsIgnoreCase("UTF-8") || enc.equalsIgnoreCase("UTF8"))) {
             err.println("V2Cli: file-name encoding is " + enc + ", not UTF-8; run with LC_ALL=C.UTF-8");
@@ -97,6 +97,7 @@ public final class V2Cli {
         V2Json.Options opt = new V2Json.Options();
         boolean graph = false, assess = false; String pairsOut = null, manifest = null; int randomPairs = 600;
         int decodeBudget = com.storageplanner.v2.graph.GraphConfig.MAX_DECODES_PER_RUN;
+        com.storageplanner.v2.sample.SampleSpec sample = null;      // --sample: the app's "Quick v2 test" selection
         try {
             for (int i = 0; i < a.size(); i++) {
                 String s = a.get(i);
@@ -132,6 +133,7 @@ public final class V2Cli {
                 else if (s.equals("--pairs-out")) pairsOut = a.get(++i);
                 else if (s.equals("--manifest")) manifest = a.get(++i);
                 else if (s.equals("--random")) randomPairs = Integer.parseInt(a.get(++i));
+                else if (s.equals("--sample")) { int im = Integer.parseInt(a.get(++i)); int vi = Integer.parseInt(a.get(++i)); sample = new com.storageplanner.v2.sample.SampleSpec(im, vi); }
                 else if (s.equals("--graph-decode-budget")) decodeBudget = Integer.parseInt(a.get(++i));   // PHASE_S_STORE S7
                 else if (s.startsWith("--")) { err.println("unknown option " + s); err.println(USAGE); return 2; }
                 else if (root == null) root = s;
@@ -193,6 +195,7 @@ public final class V2Cli {
         if (apps.availability() == Availability.FULL) { installed = new TreeSet<String>(); for (InstalledApp x : apps.list()) installed.add(x.packageName); }
         List<Stage> stages = new ArrayList<Stage>();
         stages.add(StageTimer.wrap(new DiscoveryEngine(lim, installed)));
+        if (sample != null) stages.add(StageTimer.wrap(new com.storageplanner.v2.sample.SampleStage(sample)));
         if (cfg.maxTier >= 1) stages.add(StageTimer.wrap(new T1MetadataStage()));
         if (cfg.maxTier >= 2) stages.add(StageTimer.wrap(new T2HashStructStage(opt.hash.equals("all"))));
         if (cfg.maxTier >= 3) stages.add(StageTimer.wrap(new T3ImageStage()));
@@ -235,6 +238,7 @@ public final class V2Cli {
                 if (opt.targetBytes != null || PlanJson.checkPlan != null) {
                     long tp = System.nanoTime();
                     AssessJson.mode = opt.mode;
+                    PlanJson.sample = sample != null;
                     String perr = PlanJson.make(store, apps, installedApps, r.path, fm, opt.targetBytes, clock.nowMillis(), res.session.scanId, err);
                     if (perr != null) { err.println(perr); return 3; }
                     StageTimer.ms.put("PLAN", (System.nanoTime() - tp) / 1000000L);
@@ -287,6 +291,13 @@ public final class V2Cli {
             err.println("cannot write " + outFile + ": " + e); return 3;
         }
         CoverageReport c = res.coverage;
+        if (sample != null) {
+            int nImg = 0, nVid = 0;
+            for (FileRecord f : store.files().all()) { int kd = com.storageplanner.v2.sample.SampleSelector.kindOf(f.extension); if (kd == 1) nImg++; else if (kd == 2) nVid++; }
+            long discovered = found + res.session.counter("sampleDropped");
+            out.println("sample: " + discovered + " files discovered, " + nImg + " images and " + nVid + " videos selected, "
+                    + (found - nImg - nVid) + " other records; " + sample.notice());
+        }
         out.println("scan " + res.session.scanId + " " + res.session.state + ": " + present + " files present (" + found + " records), "
                 + c.inaccessibleTotal + " inaccessible locations, complete=" + c.complete + ", " + totalMs + " ms");
         return 0;
