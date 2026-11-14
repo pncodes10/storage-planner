@@ -79,6 +79,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A35 | Store design accepted as reviewed: one shared append-only log, capacity about 133,000 files at 256 MB (about 177,000 if the store is closed before results are shown), with a 1.25 safety factor because Android's memory overhead is unmeasured. | Reviewer recomputed the architect's 150,000 figure; the scale test runs under a hard 148 MB cap. |
 | A36 | Store accepted at about 85,000 files on a 256 MB heap and about 188,000 on 512 MB, short of the 150,000-at-256 MB target. The app is switched to the disk store now; the remaining memory work (drop the store's indexes before results are shown, slimmer on-screen result) is a follow-up. | The limit was about 15,000 / 42,000 before, so this is a 4-5x gain that is tested and result-identical. The 150k run under a 148 MB cap fails; 85k passes. Waiting for the last step would keep a working improvement off the phone. |
 | A37 | v2 refuses to start unless about 8 KB per file plus 320 MB is free (about 1.15 GB for 100,000 files), and says to use Classic instead. Accepted for the phone test; reducing it is a follow-up. | The app exists for phones that are short of space, so this requirement works against its purpose - but running out of disk mid-scan is worse, and the estimate is deliberately conservative until real numbers come from a device. |
+| D11 | From 14 Nov the owner's instruction is: Sonnet agents write the code. Design and independent review stay on Opus. | Owner instruction ("use the sonnet agents to code"); design and review were not mentioned, and they are where a weaker model costs most. Designs are now written with more explicit, smaller slices so Sonnet can follow them. |
+| A38 | "Quick v2 test" button: always runs v2, on the 1,000 most recently modified images and the 100 most recently modified videos, nothing else (no documents, apps or caches). It uses its own store folder, shows a "sample result" notice on the results, and is saved as its own result kind. | Owner asked for a separate button running on "first 1000 images, 100 videos". "First" is read as newest, the files a user cares most about and can check by eye. A separate store keeps a sample run from marking the rest of the phone as removed in the full-scan data. The notice stops a sample being read as a whole-phone result. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -88,28 +90,24 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (08:31 UTC, 13 Nov)
+## State (02:57 UTC, 14 Nov)
 
-- Phases 1-5 and Phase A done. Store slices S0-S7 done; the app's v2 mode
-  uses the disk store. 42 suites green (re-run by the lead); classic `core/`
-  and the manifest untouched.
-- S7 decode budget: a run that exhausts the budget still finishes; unchecked
-  photos are "unknown" (never "unique") and get no look-alike-based removal;
-  the app says how many photos are not yet compared and to run again. On the
-  dataset with a budget of 200, three runs converge to the same result as one
-  unbudgeted run; a kill mid-budget resumes and converges.
-- Capacity now about 130,000 files at 256 MB and 288,000 at 512 MB (130k full
-  run passes under a 148 MB cap; 135k and above run out of memory). The
-  150,000 target needs changes in classic `core/` or slimmer recommendations.
-- **Build to test on the phone:** still CI run 68 until the run for this
-  commit is confirmed green.
-- Nothing has run on a device.
+- Phases 1-5, Phase A and the store (S0-S7) done; 42 suites green; CI run 72
+  (commit 130a013) is the build to test on the phone. Nothing has run on a
+  device.
+- Owner's instructions on 14 Nov: start the next phase; Sonnet agents code
+  (D11); add a quick-test button (A38).
+- Running: Sonnet implementer for the quick-test button; Opus architect for
+  Phase 6 (`PHASE_6.md`: OCR, document intelligence, adaptive video, and the
+  items earlier phases deferred here).
+- Hourly check-in stays disabled (D10): after a usage-limit stop, work
+  resumes only when the owner messages the session.
 - Open: dataset label fix (A27), ClassicParityTest and five other tests, minor
   review findings, free-space requirement (A37).
-- No agents running. Hourly check-in disabled (D10).
 
-## Next steps (wait for the owner)
+## Next steps
 
-1. Owner's phone test of the checklist in `PHASE_A_NOTES.md` (items 3, 3a, 4a, 8).
-2. Dataset label fix (A27) and missing tests.
-3. Phase 6 (content signals, A28), then 7-10.
+1. Quick-test button -> lead runs both scripts -> commit -> check CI -> that
+   APK becomes the build to test.
+2. Phase 6 design -> Opus review -> Sonnet implementers, slice by slice.
+3. Phases 7-10.
