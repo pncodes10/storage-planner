@@ -2,6 +2,7 @@
 meaningful edits, thumbnails, conversions, hard negatives, blurry family photos."""
 import datetime
 import os
+import re
 
 import cv2
 import numpy as np
@@ -196,11 +197,28 @@ def build(B):
                 notes="WhatsApp-sent copy; full-quality camera original still present")
     # 2. WhatsApp copy is the ONLY copy (S05)
     wa_only = docci[30:45] + people[:6]
+    # Sources that are the same photograph at several resolutions (name differs only by a -480p/-720p/-1080p
+    # suffix) are ONE picture: only the largest is unique; smaller ones are COMPRESSED_FROM it (original present).
+    def res_key(sid):
+        return re.sub(r"_(240|360|480|720|1080|1440|2160)p?$", "", sid)
+    groups = {}
+    for sid in wa_only:
+        groups.setdefault(res_key(sid), []).append(sid)
+    largest = {k: max(v, key=lambda x: img(x).size[0] * img(x).size[1]) for k, v in groups.items() if len(v) > 1}
+    wa_only = sorted(wa_only, key=lambda x: 0 if largest.get(res_key(x), x) == x else 1)  # stable
+    wa_rel = {}
     for sid in wa_only:
         cat = "people_family" if sid in people else "personal_photo"
-        wa_copy(None, cameraize(img(sid)), rand_dt("waonly", sid), sid, sent=False, cat=cat, tier="PROTECTED",
-                importance="high", mnd=True, scen=["S05"], sid=sid, acceptable=["KEEP", "REVIEW"],
-                notes="WhatsApp copy whose camera original no longer exists; unique")
+        top = largest.get(res_key(sid))
+        if top and top != sid:
+            wa_copy(wa_rel[top], cameraize(img(sid)), rand_dt("waonly", sid), sid, sent=False, cat=cat, tier="SAFE",
+                    importance="low", mnd=False, scen=["S05"], sid=sid, acceptable=["YOUR_CALL"],
+                    notes="WhatsApp-sent copy; full-quality camera original still present")
+            continue
+        wa_rel[sid] = wa_copy(None, cameraize(img(sid)), rand_dt("waonly", sid), sid, sent=False, cat=cat,
+                              tier="PROTECTED", importance="high", mnd=True, scen=["S05"], sid=sid,
+                              acceptable=["KEEP", "REVIEW"],
+                              notes="WhatsApp copy whose camera original no longer exists; unique")
     # 3. Bursts / near-duplicates (VISUALLY_SIMILAR); cover KEEP, rest REVIEW
     for g, sid in enumerate(docci[45:60]):
         base = cameraize(img(sid), 3000)
