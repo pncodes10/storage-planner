@@ -81,6 +81,11 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A37 | v2 refuses to start unless about 8 KB per file plus 320 MB is free (about 1.15 GB for 100,000 files), and says to use Classic instead. Accepted for the phone test; reducing it is a follow-up. | The app exists for phones that are short of space, so this requirement works against its purpose - but running out of disk mid-scan is worse, and the estimate is deliberately conservative until real numbers come from a device. |
 | D11 | From 14 Nov the owner's instruction is: Sonnet agents write the code. Design and independent review stay on Opus. | Owner instruction ("use the sonnet agents to code"); design and review were not mentioned, and they are where a weaker model costs most. Designs are now written with more explicit, smaller slices so Sonnet can follow them. |
 | A38 | "Quick v2 test" button: always runs v2, on the 1,000 most recently modified images and the 100 most recently modified videos, nothing else (no documents, apps or caches). It uses its own store folder, shows a "sample result" notice on the results, and is saved as its own result kind. | Owner asked for a separate button running on "first 1000 images, 100 videos". "First" is read as newest, the files a user cares most about and can check by eye. A separate store keeps a sample run from marking the rest of the phone as removed in the full-scan data. The notice stops a sample being read as a whole-phone result. |
+| A39 | Phase 6 Q1: a one-time-password message is treated as disposable unless bank, payment or amount text appears with it. | OTPs expire in minutes; treating every OTP screenshot as protected contradicts how they work and the dataset labels. The result is still only "your call", never an automatic removal. |
+| A40 | Phase 6 Q2: a picture whose text the OCR cannot read (for example a Devanagari line, since the bundled OCR is English-only) is NOT eligible for "your call". The desktop hit-rate target becomes about 0.75, stated as a desktop figure. | Architect proposed letting greetings with an unreadable Devanagari line qualify, which would reach 0.86. Unreadable text is unknown text: it may be a note or a document. Spec 7.2 singles out regional-language material; guessing there is the wrong place to buy hit rate. The real fix is Hindi/Marathi OCR data, verified on a device. |
+| A41 | Phase 6 Q3: static videos and silent recordings are not offered as candidates in Phase 6. Video motion and audio features are extracted and used only to protect (for example a long video with a short burst of activity). | Spec 5.5: no speech or music is never proof a file is unnecessary; scenario 8: a long, mostly static video can hold the one moment that matters. Quality-style signals alone should not create candidates. |
+| A42 | Phase 6 Q4: the mislabelled dataset file (A27) is fixed now, before Phase 6 code, so the exposure gate can read zero. | The gate cannot tell a new real exposure from the known label defect while it is red. |
+| A43 | On the phone, OCR and frame-based signals may protect files but may not make any file a "your call" candidate until the owner's device checklist shows they work. | They cannot be tested here; an OCR that silently returns nothing would otherwise look like "no protective text". |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -90,24 +95,22 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (02:57 UTC, 14 Nov)
+## State (03:24 UTC, 14 Nov)
 
-- Phases 1-5, Phase A and the store (S0-S7) done; 42 suites green; CI run 72
-  (commit 130a013) is the build to test on the phone. Nothing has run on a
-  device.
-- Owner's instructions on 14 Nov: start the next phase; Sonnet agents code
-  (D11); add a quick-test button (A38).
-- Running: Sonnet implementer for the quick-test button; Opus architect for
-  Phase 6 (`PHASE_6.md`: OCR, document intelligence, adaptive video, and the
-  items earlier phases deferred here).
-- Hourly check-in stays disabled (D10): after a usage-limit stop, work
-  resumes only when the owner messages the session.
-- Open: dataset label fix (A27), ClassicParityTest and five other tests, minor
-  review findings, free-space requirement (A37).
+- Phases 1-5, Phase A, the store (S0-S7) and the quick-test button (A38) done;
+  43 suites green (re-run by the lead). Button reviewed (`REVIEW_SAMPLE.md`:
+  0 blockers, 3 major fixed). Build to test: the CI run for commit 595cf30,
+  once confirmed green; until then run 72. Nothing has run on a device.
+- Phase 6 design written (`PHASE_6.md`, 13 slices); rulings A39-A43 given.
+- Running: Opus reviewer for the Phase 6 design; Sonnet agent fixing the
+  dataset label (A42).
+- Hourly check-in stays disabled (D10).
+- Open: ClassicParityTest and five other tests, minor review findings,
+  free-space requirement (A37).
 
 ## Next steps
 
-1. Quick-test button -> lead runs both scripts -> commit -> check CI -> that
-   APK becomes the build to test.
-2. Phase 6 design -> Opus review -> Sonnet implementers, slice by slice.
+1. Confirm CI for 595cf30 -> build to test.
+2. Phase 6 review -> Sonnet implementers, slice by slice (S1 model/codec,
+   S2 MP4 activity, S3 document text, S4 document categories, ...).
 3. Phases 7-10.
