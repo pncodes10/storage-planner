@@ -99,8 +99,9 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 
 - Phases 1-5, Phase A, the store (S0-S7) and the quick-test button (A38) done;
   43 suites green (re-run by the lead). Button reviewed (`REVIEW_SAMPLE.md`:
-  0 blockers, 3 major fixed). Build to test: the CI run for commit 595cf30,
-  once confirmed green; until then run 72. Nothing has run on a device.
+  0 blockers, 3 major fixed). **Build to test on the phone: CI run 74**
+  (commit 595cf30, succeeded 03:24 UTC, 14 Nov):
+  https://github.com/pncodes10/storage-planner/actions/runs/43551271466 Nothing has run on a device.
 - Phase 6 design written (`PHASE_6.md`, 13 slices); rulings A39-A43 given.
 - Running: Opus reviewer for the Phase 6 design; Sonnet agent fixing the
   dataset label (A42).
