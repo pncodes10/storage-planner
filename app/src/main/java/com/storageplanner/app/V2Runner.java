@@ -234,6 +234,7 @@ final class V2Runner {
         }
         o.ok = true;
         o.saved = saved[0];
+        o.sample = sample;
         o.message = sample ? "Done (v2 sample): " + b.adapted.result.files.size() + " files analysed. " + b.sampleNote
                 : "Done (v2): " + b.adapted.result.files.size() + " files and " + b.adapted.result.apps.size() + " apps analysed.";
         if (!sample) resetSampleStoreIfPresent(app);     // the quick test's result is replaced by this full one: give its data back

@@ -101,7 +101,7 @@ public final class AnalysisService extends Service {
                         .setContentIntent(openApp());
                 if (o != null && o.ok) {
                     b.setSmallIcon(android.R.drawable.stat_notify_sdcard)
-                     .setContentTitle("Your storage plan is ready: frees " + Report.gb(o.saved))
+                     .setContentTitle((o.sample ? "Quick v2 test ready: the sample plan frees " : "Your storage plan is ready: frees ") + Report.gb(o.saved))
                      .setContentText("Tap to review it. Nothing has been deleted or changed.");
                 } else if (o != null && o.cancelled) {
                     b.setSmallIcon(android.R.drawable.stat_notify_sdcard)

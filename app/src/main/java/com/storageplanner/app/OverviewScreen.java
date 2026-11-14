@@ -77,8 +77,10 @@ public final class OverviewScreen extends Screen {
         }
 
         pictures();
-        Ui.add(content, Ui.heading(a, "What's using space", 20), 28);
-        Ui.add(content, Ui.text(a, "Tap a category to browse its files, largest first, with any flags.", 14, Ui.text2, false), 4);
+        boolean sample = Session.sampleNote != null;     // quick v2 test: the categories hold only the sample's files
+        Ui.add(content, Ui.heading(a, sample ? "What the sample uses" : "What's using space", 20), 28);
+        Ui.add(content, Ui.text(a, sample ? "Only the sample's photos and videos are counted here, not the rest of your phone. Tap a category to browse them."
+                : "Tap a category to browse its files, largest first, with any flags.", 14, Ui.text2, false), 4);
         breakdown();
 
         Ui.add(content, Ui.heading(a, "How savings were estimated", 16), 28);
@@ -173,6 +175,29 @@ public final class OverviewScreen extends Screen {
         content.addView(grid, new LinearLayout.LayoutParams(-1, -2));
     }
 
+    /**
+     * Quick v2 test: the sample's plan cannot say whether the phone reaches its target, and "after this plan" would read as the
+     * phone's whole picture. Shows what the sample plan frees and the phone's real usage, labelled as such; no meter, no target verdict.
+     */
+    private void sampleSummary(LinearLayout c, long used, long saved) {
+        Ui.add(c, Ui.heading(a, "The sample plan frees " + Report.gb(saved), 22), 0);
+        Ui.add(c, Ui.text(a, "Of the sample's photos and videos only: " + Report.gb(Session.plan.savedExact()) + " exact and "
+                + Report.gb(saved - Session.plan.savedExact()) + " estimated (re-encoding). Whether your target is reached is not judged on a sample.",
+                15, Ui.text, false), 8);
+        Ui.add(c, Ui.text(a, "Whole phone, for reference: " + Report.gb(used) + " used of " + Report.gb(Session.result.total)
+                + ". To plan for the whole phone, tap Analyse my storage on the start screen.", 14, Ui.text2, false), 8);
+        int conf = Session.plan.confirmations();
+        if (conf > 0) {
+            TextView t = Ui.add(c, Ui.text(a, conf + " items would delete something unique. They are marked “" + Ui.TIER_WORD[4]
+                    + "”: review them before acting.", 15, Ui.tier[4], true), 8);
+            t.setContentDescription("Warning. " + t.getText());
+        } else {
+            Ui.add(c, Ui.text(a, "Nothing unique needs to be deleted in the sample.", 15, Ui.tier[0], true), 8);
+        }
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2); cl.topMargin = dp(12);
+        content.addView(c, cl);
+    }
+
     private void modeToggle() {
         LinearLayout seg = Ui.row(a);
         final String[] labels = {"Reach my target", "All safe steps"};
@@ -194,6 +219,7 @@ public final class OverviewScreen extends Screen {
     private void summaryCard() {
         long used = Session.used(), saved = Session.plan.saved(), after = used - saved, target = Session.targetUsed;
         LinearLayout c = Ui.card(a);
+        if (Session.sampleNote != null) { sampleSummary(c, used, saved); return; }
         String head = Session.plan.reachesTarget ? "After this plan: " + Report.gb(after) : "Target not reachable: best is " + Report.gb(after);
         Ui.add(c, Ui.heading(a, head, 22), 0);
         Ui.add(c, Ui.text(a, "Now " + Report.gb(used) + " used · target " + Report.gb(target) + " · capacity " + Report.gb(Session.result.total), 14, Ui.text2, false), 4);
@@ -307,6 +333,7 @@ public final class OverviewScreen extends Screen {
         for (final String cat : cats) {
             long v = bd.get(cat);
             if (v <= 0) continue;
+            if (Session.sampleNote != null && cat.equals(Categories.SYSTEM)) continue;   // "used minus counted" is the whole phone minus the sample: not a category
             LinearLayout item = new LinearLayout(a);
             item.setOrientation(LinearLayout.VERTICAL);
             item.setPadding(0, dp(10), 0, dp(6));

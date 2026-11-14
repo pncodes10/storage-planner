@@ -31,8 +31,10 @@ public final class SampleStage implements Stage {
 
     /** Inserts this stage right after DISCOVER (before every extraction stage). */
     public static void insertAfterDiscovery(List<Stage> stages, SampleSpec spec) {
-        int at = 0;
+        int at = -1;
         for (int i = 0; i < stages.size(); i++) if ("DISCOVER".equals(stages.get(i).id())) { at = i + 1; break; }
+        // before DISCOVER it would prune an empty store and let every discovered file through to extraction
+        if (at < 0) throw new IllegalArgumentException("no DISCOVER stage to put SAMPLE after");
         stages.add(at, new SampleStage(spec));
     }
 

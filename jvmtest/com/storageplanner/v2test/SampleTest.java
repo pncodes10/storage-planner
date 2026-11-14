@@ -101,13 +101,17 @@ public final class SampleTest {
     interface Hook { void progress(V2Store store, String stage); }
 
     /** The app's order: discovery, (SAMPLE), T1-T3, graph, then V2Analysis. */
-    static Run run(Path root, Path stateDir, boolean disk, SampleSpec sample, Hook hook) throws Exception {
+    static Run run(Path root, Path stateDir, boolean disk, SampleSpec sample, Hook hook) throws Exception { return run(root, stateDir, disk, sample, hook, false); }
+
+    /** reopen: open the store already in stateDir (a later full run on the same phone) instead of creating an empty one. */
+    static Run run(Path root, Path stateDir, boolean disk, SampleSpec sample, Hook hook, boolean reopen) throws Exception {
         PosixStorageAccess.Root r = new PosixStorageAccess.Root();
         r.volumeId = "primary"; r.kind = VolumeKind.DIRECTORY; r.label = "primary"; r.path = root.toString(); r.fileKeyStable = Tri.TRUE;
         r.restrictedPrefixes = Arrays.asList("Android/data", "Android/obb");
         PosixStorageAccess sa = new PosixStorageAccess(Collections.singletonList(r), Collections.singletonList(AccessGrant.readAll("primary", "", AccessMode.B_ALL_FILES)));
         FixedClock clock = new FixedClock(NOW);
-        final V2Store store = disk ? DiskStore.create(new DirBlobStore(stateDir), -1, clock) : MemoryStore.volatileStore();
+        final V2Store store = !disk ? MemoryStore.volatileStore()
+                : reopen ? DiskStore.open(new DirBlobStore(stateDir), -1, clock) : DiskStore.create(new DirBlobStore(stateDir), -1, clock);
         JvmDevice dev = new JvmDevice(sa, clock, new JvmResourceMonitor(), new DirBlobStore(stateDir), new JvmMediaDecoder(sa), new JvmInstalledApps(null));
         PipelineConfig cfg = new PipelineConfig();
         cfg.maxTier = 3;
@@ -227,10 +231,10 @@ public final class SampleTest {
             for (Recommendation rc : full.result.in.recs) if (rc.fileId != null && !idsInSample.contains(rc.fileId)) fullHasOutside = true;
             T.check(k + ": (sanity) a full run recommends files outside the sample", fullHasOutside);
 
-            // a sample run followed by a full run = a full run alone
+            // two independent full runs agree (determinism); the real "sample then full" check is sampleThenFull()
             String a = StreamingTest.dump(fullAlone.result.in.recs, fullAlone.result.made, fullAlone.result.adapted);
             String b = StreamingTest.dump(full.result.in.recs, full.result.made, full.result.adapted);
-            T.check(k + ": full run after a sample run gives the same result as a full run alone (" + a.length() + " chars)", a.equals(b) && a.length() > 200);
+            T.check(k + ": two full runs in separate stores give the same result (" + a.length() + " chars)", a.equals(b) && a.length() > 200);
 
             // dropping while discovery still walks (the app prunes every 10,000 records) gives the same sample
             final SampleSpec sp = spec;
@@ -249,8 +253,130 @@ public final class SampleTest {
         } finally { t.close(); w.close(); }
     }
 
+    // ------------------------------------------------------------------ review (REVIEW_SAMPLE): the dangerous properties
+    /**
+     * Pruning while records still arrive, in adversarial orders (newest first, oldest first, shuffled, many ties, records that are
+     * not PRESENT, other kinds newer than everything), at random intervals: the store always ends with exactly the global top N.
+     */
+    static void pruneAdversarial(boolean disk) throws Exception {
+        String k = disk ? "disk" : "memory";
+        String[] ext = {"jpg", "PNG", "heic", "mp4", "mov", "pdf", "mp3", "zip"};
+        for (int seed = 0; seed < 12; seed++) {
+            Random rnd = new Random(seed);
+            List<FileRecord> all = new ArrayList<FileRecord>();
+            for (int i = 0; i < 1500; i++) {
+                FileRecord f = rec("d" + rnd.nextInt(40) + "/f" + i + "." + ext[rnd.nextInt(ext.length)], 1000 + rnd.nextInt(seed % 3 == 0 ? 20 : 100000));
+                if (rnd.nextInt(25) == 0) f.presence = rnd.nextBoolean() ? Presence.UNVERIFIABLE : Presence.REMOVED;
+                if (rnd.nextInt(50) == 0) f.modifiedAt = Unknown.TIME;
+                all.add(f);
+            }
+            final Comparator<FileRecord> byTime = new Comparator<FileRecord>() { public int compare(FileRecord a, FileRecord b) { return Long.compare(a.modifiedAt, b.modifiedAt); } };
+            if (seed % 4 == 1) Collections.sort(all, byTime);                         // oldest first: every later record beats the kept ones
+            else if (seed % 4 == 2) Collections.sort(all, Collections.reverseOrder(byTime));
+            else Collections.shuffle(all, rnd);
+            SampleSpec spec = new SampleSpec(60, 15);
+            Set<String> expect = SampleSelector.select(all, spec);
+            TempTree w = TempTree.create();
+            try {
+                V2Store st = disk ? DiskStore.create(new DirBlobStore(w.dir("s")), -1, new FixedClock(NOW)) : MemoryStore.volatileStore();
+                int every = 1 + rnd.nextInt(200), prunes = 0; boolean bounded = true;
+                for (int i = 0; i < all.size(); i++) {
+                    st.files().put(all.get(i));
+                    if ((i + 1) % every == 0) { SampleStage.prune(st, spec); prunes++; st.commit(); }
+                    bounded &= st.files().size() <= 75 + every;
+                }
+                T.check(k + ": seed " + seed + ": never more than the sample plus one interval of records", bounded);
+                SampleStage.prune(st, spec);
+                Set<String> got = new TreeSet<String>();
+                for (String key : st.files().keys()) got.add(key);
+                T.eq(k + ": seed " + seed + ", pruned every " + every + " records (" + prunes + " times): exactly the global top N", new TreeSet<String>(expect), got);
+                st.close();
+            } finally { w.close(); }
+        }
+        // the explicit case: a file found late that is newer than one kept earlier still wins; the dropped one never comes back
+        V2Store st = MemoryStore.volatileStore();
+        SampleSpec two = new SampleSpec(2, 0);
+        st.files().put(rec("a/old1.jpg", 10)); st.files().put(rec("a/old2.jpg", 20)); st.files().put(rec("a/old3.jpg", 30));
+        SampleStage.prune(st, two);
+        st.files().put(rec("z/late_new.jpg", 40));
+        SampleStage.prune(st, two);
+        Set<String> got = new TreeSet<String>(); for (String key : st.files().keys()) got.add(key);
+        T.eq(k + ": late newer file displaces the older kept one", new TreeSet<String>(Arrays.asList("id:a/old3.jpg", "id:z/late_new.jpg")), got);
+    }
+
+    /** A sample run killed mid-discovery, then run again on the same sample store dir: exactly the sample, the same plan. */
+    static void killThenRerun() throws Exception {
+        TempTree t = TempTree.create(), w = TempTree.create();
+        try {
+            fixture(t);
+            SampleSpec spec = new SampleSpec(20, 4);
+            Run clean = run(t.root(), w.dir("clean"), true, spec, null);
+            Set<String> expect = pathsOfStore(clean.store);
+            final int[] n = {0};
+            boolean killed = false;
+            try {
+                run(t.root(), w.dir("s"), true, spec, new Hook() {
+                    public void progress(V2Store s, String stage) {
+                        if ("DISCOVER".equals(stage)) {
+                            try { SampleStage.prune(s, new SampleSpec(20, 4)); } catch (Exception e) { throw new IllegalStateException(e); }
+                            if (++n[0] == 3) throw new IllegalStateException("killed");
+                        }
+                    }
+                });
+            } catch (Throwable e) { killed = true; }
+            T.check("the first sample run was stopped mid-discovery", killed && n[0] == 3);
+            Run again = run(t.root(), w.dir("s"), true, spec, null);
+            T.eq("re-run after a kill: exactly the sample (nothing resurrected, nothing lost)", expect, pathsOfStore(again.store));
+            T.eq("re-run after a kill: the same plan as a clean run",
+                    StreamingTest.dump(clean.result.in.recs, clean.result.made, clean.result.adapted),
+                    StreamingTest.dump(again.result.in.recs, again.result.made, again.result.adapted));
+            Run third = run(t.root(), w.dir("s"), true, spec, null);
+            T.eq("a sample run over a completed sample store: the same plan", StreamingTest.dump(clean.result.in.recs, clean.result.made, clean.result.adapted),
+                    StreamingTest.dump(third.result.in.recs, third.result.made, third.result.adapted));
+        } finally { t.close(); w.close(); }
+    }
+
+    /** Full, sample (own dir), full again on the first store = full, full again with no sample in between. */
+    static void sampleThenFull() throws Exception {
+        TempTree t = TempTree.create(), w = TempTree.create();
+        try {
+            fixture(t);
+            run(t.root(), w.dir("A"), true, null, null);
+            Run a2 = run(t.root(), w.dir("A"), true, null, null, true);
+            run(t.root(), w.dir("B"), true, null, null);
+            run(t.root(), w.dir("S"), true, new SampleSpec(20, 4), null);
+            Run b2 = run(t.root(), w.dir("B"), true, null, null, true);
+            String a = StreamingTest.dump(a2.result.in.recs, a2.result.made, a2.result.adapted);
+            String b = StreamingTest.dump(b2.result.in.recs, b2.result.made, b2.result.adapted);
+            T.check("second full run after a sample run = second full run without one (" + a.length() + " chars)", a.equals(b) && a.length() > 200);
+            T.eq("and the full-scan stores are byte for byte the same", bytesOf(w.path("A")), bytesOf(w.path("B")));
+        } finally { t.close(); w.close(); }
+    }
+
+    /** A phone with no images, or no videos: the run finishes, the result is empty or partial, and still carries the notice. */
+    static void zeroMedia() throws Exception {
+        for (int variant = 0; variant < 2; variant++) {
+            TempTree t = TempTree.create(), w = TempTree.create();
+            try {
+                for (int i = 0; i < 5; i++) t.file("Download/doc" + i + ".pdf", 500 + i, 900 + i);
+                if (variant == 1) for (int i = 0; i < 3; i++) { String p = "DCIM/IMG_" + i + ".jpg"; t.file(p, FxImg.jpeg(FxImg.pattern(48, 48, 10 + i), 0.9f)); }
+                Run r = run(t.root(), w.dir("s"), true, new SampleSpec(20, 4), null);
+                String k = variant == 0 ? "no images or videos" : "images but no videos";
+                T.eq(k + ": store holds only the media", variant == 0 ? 0 : 3, r.store.files().size());
+                T.check(k + ": result made, no files outside the sample, notice set", r.result != null && r.result.adapted.result.files.size() == (variant == 0 ? 0 : 3)
+                        && r.result.adapted.result.apps.isEmpty() && r.result.sampleNote != null);
+            } finally { t.close(); w.close(); }
+        }
+    }
+
     public static int run(String[] args) throws Exception {
         selector();
+        T.section("review: pruning, kill, sample-then-full, zero media");
+        pruneAdversarial(false);
+        pruneAdversarial(true);
+        killThenRerun();
+        sampleThenFull();
+        zeroMedia();
         T.section("sample runs");
         pipeline(true);
         pipeline(false);

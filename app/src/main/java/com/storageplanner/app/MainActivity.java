@@ -421,7 +421,7 @@ public final class MainActivity extends Activity {
             File dir = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "StoragePlanner");
             if (!dir.isDirectory() && !dir.mkdirs()) throw new Exception("cannot create " + dir);
             String stamp = new SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(new Date());
-            write(new File(dir, "plan-" + stamp + ".txt"), Report.text(c, Session.plan, Session.safe));
+            write(new File(dir, "plan-" + stamp + ".txt"), samplePrefix() + Report.text(c, Session.plan, Session.safe));
             write(new File(dir, "plan-" + stamp + ".csv"), Report.csv(Session.plan));
             write(new File(dir, "plan-" + stamp + ".json"), Report.json(c, Session.plan, Session.safe));
             toast("Saved to Download/StoragePlanner/plan-" + stamp + " (.txt, .csv, .json)");
@@ -435,12 +435,18 @@ public final class MainActivity extends Activity {
         try { out.write(s.getBytes(StandardCharsets.UTF_8)); } finally { out.close(); }
     }
 
+    /** Quick v2 test: the text report says first that it covers the sample only (its totals and target line are the phone's). */
+    private static String samplePrefix() {
+        String n = Session.sampleNote;
+        return n == null ? "" : n + " The savings below are the sample's; the target line does not judge the whole phone.\n\n";
+    }
+
     void shareSummary() {
         if (!Session.hasResults()) return;
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType("text/plain");
         i.putExtra(Intent.EXTRA_SUBJECT, "Storage plan");
-        i.putExtra(Intent.EXTRA_TEXT, Report.text(Session.reportContext(), Session.plan, Session.safe));
+        i.putExtra(Intent.EXTRA_TEXT, samplePrefix() + Report.text(Session.reportContext(), Session.plan, Session.safe));
         try { startActivity(Intent.createChooser(i, "Share plan")); } catch (Throwable ignored) {}
     }
 }

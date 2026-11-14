@@ -23,6 +23,7 @@ final class AnalysisRunner {
         boolean ok, cancelled;
         String message;
         long saved;          // bytes the plan frees (for the notification)
+        boolean sample;      // the result is a quick v2 test (sample) result
     }
 
     static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) { return run(app, targetGb, measure, pr, false); }
