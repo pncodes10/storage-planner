@@ -9,7 +9,7 @@ import java.util.TreeMap;
 /** Table file_features (ARCHITECTURE 2.5, PHASE_2 2). Key = fileId. Sub-records are replaced, never mutated after a put. */
 public final class FeatureRecord implements Record {
     /** Number of extractor ids (features.Extractors.COUNT). */
-    public static final int EXTRACTORS = 20;
+    public static final int EXTRACTORS = 24;
     public String fileId; public Fingerprint fp;
     public int[] versions = new int[EXTRACTORS];
     public long extractedScanId = -1;
@@ -17,6 +17,8 @@ public final class FeatureRecord implements Record {
     public List<String> problems = new ArrayList<String>();
     public ImageInfo image; public ExifInfo exif; public NameDate nameDate;
     public VideoInfo video; public AudioInfo audio; public ApkInfo apk; public PdfInfo pdf; public ArchiveInfo archive;
+    /** Phase 6 content facts (PHASE_6 4.2); null = never extracted. */
+    public VisualInfo visual; public TextInfo text; public DocInfo doc; public ActivityInfo activity;
     public Map<String, String> extra = new TreeMap<String, String>();
 
     public String key() { return fileId; }
@@ -30,6 +32,8 @@ public final class FeatureRecord implements Record {
         r.nameDate = nameDate == null ? null : nameDate.<NameDate>copy(); r.video = video == null ? null : video.<VideoInfo>copy();
         r.audio = audio == null ? null : audio.<AudioInfo>copy(); r.apk = apk == null ? null : apk.<ApkInfo>copy();
         r.pdf = pdf == null ? null : pdf.<PdfInfo>copy(); r.archive = archive == null ? null : archive.<ArchiveInfo>copy();
+        r.visual = visual == null ? null : visual.<VisualInfo>copy(); r.text = text == null ? null : text.<TextInfo>copy();
+        r.doc = doc == null ? null : doc.<DocInfo>copy(); r.activity = activity == null ? null : activity.<ActivityInfo>copy();
         r.extra = new TreeMap<String, String>(extra);
         return r;
     }

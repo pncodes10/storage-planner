@@ -55,6 +55,11 @@ public final class T1MetadataStage implements Stage {
         long now = ctx.device.clock().nowMillis();
         FeatureRecord fr = new FeatureRecord();
         fr.fileId = f.fileId; fr.fp = f.fingerprint(); fr.extractedScanId = scanId;
+        FeatureRecord prev = ctx.store.features().get(f.fileId);   // PHASE_6 4.3 (F-B1): same bytes, content facts still valid
+        if (prev != null && prev.fp != null && prev.fp.sameAs(fr.fp)) {
+            fr.visual = prev.visual; fr.text = prev.text; fr.doc = prev.doc; fr.activity = prev.activity;
+            for (int k = Extractors.VISUAL; k <= Extractors.ACTIVITY; k++) fr.versions[k] = prev.versions[k];
+        }
         fr.nameDate = NameDates.parse(f.name, now);
         Extractors.stamp(fr, new int[]{Extractors.NAMEDATE});
         f.lastError = null;

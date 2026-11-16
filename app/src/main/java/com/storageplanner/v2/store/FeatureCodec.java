@@ -212,6 +212,7 @@ public final class FeatureCodec {
             w.name("apk"); writeApk(w, r.apk);
             w.name("pdf"); writePdf(w, r.pdf);
             w.name("archive"); writeArchive(w, r.archive, -1);
+            ContentCodec.writeAll(w, r);
             w.name("extra").beginObject(); for (Map.Entry<String, String> e : r.extra.entrySet()) w.name(e.getKey()).value(e.getValue()); w.endObject();
             w.endObject();
         }
@@ -225,6 +226,7 @@ public final class FeatureCodec {
             r.image = readImage(Json.obj(m, "image")); r.exif = readExif(Json.obj(m, "exif")); r.nameDate = readNameDate(Json.obj(m, "nameDate"));
             r.video = readVideo(Json.obj(m, "video")); r.audio = readAudio(Json.obj(m, "audio")); r.apk = readApk(Json.obj(m, "apk"));
             r.pdf = readPdf(Json.obj(m, "pdf")); r.archive = readArchive(Json.obj(m, "archive"));
+            ContentCodec.readAll(m, r);
             Map<String, Object> ex = Json.obj(m, "extra");
             if (ex != null) { r.extra = new TreeMap<String, String>(); for (Map.Entry<String, Object> e : ex.entrySet()) if (e.getValue() instanceof String) r.extra.put(e.getKey(), (String) e.getValue()); }
             return r;

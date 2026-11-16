@@ -38,6 +38,8 @@ public final class AllV2Tests {
             {"PdfProbeTest", (Suite) PdfProbeTest::run},
             {"Mp4ProbeTest", (Suite) Mp4ProbeTest::run},
             {"IncrementalExtractionTest", (Suite) IncrementalExtractionTest::run},
+            {"ContentCodecTest", (Suite) ContentCodecTest::run},
+            {"ContentCarryOverTest", (Suite) ContentCarryOverTest::run},
             {"ExactGrouperTest", (Suite) ExactGrouperTest::run},
             {"PerceptualTest", (Suite) PerceptualTest::run},
             {"PerceptualBudgetTest", (Suite) PerceptualBudgetTest::run},

@@ -6,7 +6,8 @@ import com.storageplanner.v2.model.FeatureRecord;
 public final class Extractors {
     private Extractors() {}
     public static final int TYPE = 0, EXIF = 1, JPEG = 2, PNG = 3, WEBP = 4, GIF = 5, HEIF = 6, MP4 = 7, MKV = 8, AUDIO = 9, PDF = 10,
-            ZIP = 11, TAR = 12, APK = 13, NAMEDATE = 14, INTEGRITY = 15, IMAGE_BASICS = 16, HASH = 17, BMP = 18, AVI = 19;
+            ZIP = 11, TAR = 12, APK = 13, NAMEDATE = 14, INTEGRITY = 15, IMAGE_BASICS = 16, HASH = 17, BMP = 18, AVI = 19,
+            VISUAL = 20, OCR = 21, DOC_TEXT = 22, ACTIVITY = 23;   // Phase 6 content extractors (no tier bit; PHASE_6 4.3)
     public static final int COUNT = FeatureRecord.EXTRACTORS;
     private static final int[] VERSION = new int[COUNT];
     static { for (int i = 0; i < COUNT; i++) VERSION[i] = 1; }

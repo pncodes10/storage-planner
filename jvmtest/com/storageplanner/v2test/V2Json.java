@@ -3,6 +3,7 @@ package com.storageplanner.v2test;
 import com.storageplanner.v2.V2;
 import com.storageplanner.v2.discovery.CoverageBuilder;
 import com.storageplanner.v2.model.*;
+import com.storageplanner.v2.store.ContentCodec;
 import com.storageplanner.v2.store.FeatureCodec;
 import com.storageplanner.v2.store.V2Store;
 import com.storageplanner.v2.util.Hex;
@@ -109,6 +110,14 @@ public final class V2Json {
         w.name("apk"); FeatureCodec.writeApk(w, fr == null ? null : fr.apk);
         w.name("pdf"); FeatureCodec.writePdf(w, fr == null ? null : fr.pdf);
         w.name("archive"); FeatureCodec.writeArchive(w, fr == null ? null : fr.archive, 200);
+        if (fr != null && (fr.visual != null || fr.text != null || fr.doc != null || fr.activity != null)) {
+            w.name("content").beginObject();
+            if (fr.visual != null) { w.name("visual"); ContentCodec.write(w, fr.visual); }
+            if (fr.text != null) { w.name("text"); ContentCodec.write(w, fr.text); }
+            if (fr.doc != null) { w.name("doc"); ContentCodec.write(w, fr.doc); }
+            if (fr.activity != null) { w.name("activity"); ContentCodec.write(w, fr.activity); }
+            w.endObject();
+        }
         w.name("category").value(f.category).name("categoryConfidence").nullValue()
          .name("duplicateGroupId").value(f.duplicateGroupId).name("perceptualStatus").value(fr == null ? null : fr.extra.get("graph.perceptual"))
          .name("assessment"); AssessJson.assessment(w, f.fileId);

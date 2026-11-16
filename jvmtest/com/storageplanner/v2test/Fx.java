@@ -46,6 +46,8 @@ public final class Fx implements AutoCloseable {
     public com.storageplanner.v2.device.InstalledApps apps;
     public com.storageplanner.v2.device.MediaDecoder media;
     public com.storageplanner.v2.stage.Budget budget;
+    /** Extra stages appended after T1..T3 (before the graph stage), e.g. a stub content pass. */
+    public final List<Stage> extraStages = new ArrayList<Stage>();
     private final List<TempTree> extra = new ArrayList<TempTree>();
 
     public static Fx create() throws IOException { return new Fx(TempTree.create(), Tri.TRUE); }
@@ -92,6 +94,7 @@ public final class Fx implements AutoCloseable {
         if (maxTier >= 1) stages.add(new com.storageplanner.v2.features.T1MetadataStage());
         if (maxTier >= 2) stages.add(new com.storageplanner.v2.features.T2HashStructStage(hashAll));
         if (maxTier >= 3) stages.add(new com.storageplanner.v2.features.T3ImageStage());
+        stages.addAll(extraStages);
         if (graph) stages.add(graphStage);
         return new Pipeline(new JvmDevice(sa, clock, new JvmResourceMonitor(), blobs, media, apps), store, cfg, stages).run(control);
     }

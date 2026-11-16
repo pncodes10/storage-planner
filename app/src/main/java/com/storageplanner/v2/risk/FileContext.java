@@ -29,6 +29,10 @@ public final class FileContext {
     public List<DuplicateGroup> memberOf = new ArrayList<DuplicateGroup>();
     public String perceptualStatus() { return feat == null ? null : feat.extra.get("graph.perceptual"); }
     public ImageInfo image() { return feat == null ? null : feat.image; }
+    public VisualInfo visual() { return feat == null ? null : feat.visual; }
+    public TextInfo text() { return feat == null ? null : feat.text; }
+    public DocInfo doc() { return feat == null ? null : feat.doc; }
+    public ActivityInfo activity() { return feat == null ? null : feat.activity; }
     public ApkInfo apk() { return feat == null ? null : feat.apk; }
     public ArchiveInfo archive() { return feat == null ? null : feat.archive; }
     public String lowerPath() { return f.path == null ? "" : f.path.toLowerCase(Locale.ROOT); }
