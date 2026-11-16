@@ -15,6 +15,7 @@ public final class ForbiddenApiTest {
         {"import android", "import\\s+android\\."},
         {"java.awt", "java\\.awt"},
         {"javax.imageio", "javax\\.imageio"},
+        {"javax.xml", "javax\\.xml"},
         {"java.net", "java\\.net\\."},
         {"java.lang.reflect", "java\\.lang\\.reflect"},
         {"Class.forName", "Class\\.forName"},

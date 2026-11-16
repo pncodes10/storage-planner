@@ -32,7 +32,7 @@ public final class V2Cli {
     private V2Cli() {}
 
     static final String USAGE = "usage: V2Cli scan <root> --out <result.json> [--state-dir D] [--volume-id primary] [--kind full|incremental]"
-            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--graph-decode-budget N] [--sample IMAGES VIDEOS] [--pretty]";
+            + " [--graph] [--assess] [--mode standard|aggressive] [--pairs-out F --manifest M [--random N]] [--resume] [--restricted P]... [--exclude P]... [--now MS] [--snapshot-every-ms N] [--halt-after-commits N] [--store memory|disk] [--graph-decode-budget N] [--sample IMAGES VIDEOS] [--content-dump F.jsonl] [--pretty]";
 
     /** In-process tests (DiskKillTest): replaces the state dir's BlobStore (e.g. by a killing or power-loss fake). */
     static java.util.function.Function<BlobStore, BlobStore> blobsHook;
@@ -97,6 +97,7 @@ public final class V2Cli {
         V2Json.Options opt = new V2Json.Options();
         boolean graph = false, assess = false; String pairsOut = null, manifest = null; int randomPairs = 600;
         int decodeBudget = com.storageplanner.v2.graph.GraphConfig.MAX_DECODES_PER_RUN;
+        String contentDump = null;                                   // --content-dump: one jsonl line per file with content sub-records
         com.storageplanner.v2.sample.SampleSpec sample = null;      // --sample: the app's "Quick v2 test" selection
         try {
             for (int i = 0; i < a.size(); i++) {
@@ -134,6 +135,7 @@ public final class V2Cli {
                 else if (s.equals("--manifest")) manifest = a.get(++i);
                 else if (s.equals("--random")) randomPairs = Integer.parseInt(a.get(++i));
                 else if (s.equals("--sample")) { int im = Integer.parseInt(a.get(++i)); int vi = Integer.parseInt(a.get(++i)); sample = new com.storageplanner.v2.sample.SampleSpec(im, vi); }
+                else if (s.equals("--content-dump")) contentDump = a.get(++i);
                 else if (s.equals("--graph-decode-budget")) decodeBudget = Integer.parseInt(a.get(++i));   // PHASE_S_STORE S7
                 else if (s.startsWith("--")) { err.println("unknown option " + s); err.println(USAGE); return 2; }
                 else if (root == null) root = s;
@@ -291,6 +293,10 @@ public final class V2Cli {
         } catch (IOException e) {
             err.println("cannot write " + outFile + ": " + e); return 3;
         }
+        if (contentDump != null) {
+            try { writeContentDump(store, contentDump); }
+            catch (IOException | StoreException e) { err.println("cannot write " + contentDump + ": " + e); return 3; }
+        }
         CoverageReport c = res.coverage;
         if (sample != null) {
             int nImg = 0, nVid = 0;
@@ -302,5 +308,26 @@ public final class V2Cli {
         out.println("scan " + res.session.scanId + " " + res.session.state + ": " + present + " files present (" + found + " records), "
                 + c.inaccessibleTotal + " inaccessible locations, complete=" + c.complete + ", " + totalMs + " ms");
         return 0;
+    }
+
+    /** --content-dump (PHASE_6 S3a): one JSON line per file that has a content sub-record: path, usage, then the sub-records. */
+    static void writeContentDump(V2Store store, String file) throws IOException, StoreException {
+        StringWriter sw = new StringWriter();
+        for (FileRecord f : store.files().all()) {
+            if (f.presence != Presence.PRESENT) continue;
+            FeatureRecord fr = store.features().get(f.fileId);
+            if (fr == null || (fr.visual == null && fr.text == null && fr.doc == null && fr.activity == null)) continue;
+            com.storageplanner.v2.risk.FileContext fc = new com.storageplanner.v2.risk.FileContext(); fc.f = f;
+            JsonWriter w = new JsonWriter(sw, false);
+            w.beginObject().name("path").value(f.path).name("type").value(f.type)
+             .name("usage").value(com.storageplanner.v2.risk.UsageClassifier.of(fc));
+            if (fr.visual != null) { w.name("visual"); com.storageplanner.v2.store.ContentCodec.write(w, fr.visual); }
+            if (fr.text != null) { w.name("text"); com.storageplanner.v2.store.ContentCodec.write(w, fr.text); }
+            if (fr.doc != null) { w.name("doc"); com.storageplanner.v2.store.ContentCodec.write(w, fr.doc); }
+            if (fr.activity != null) { w.name("activity"); com.storageplanner.v2.store.ContentCodec.write(w, fr.activity); }
+            w.endObject();
+            sw.write('\n');
+        }
+        try (Writer wr = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(file), StandardCharsets.UTF_8))) { wr.write(sw.toString()); }
     }
 }
