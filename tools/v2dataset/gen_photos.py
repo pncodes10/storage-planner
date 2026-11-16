@@ -203,13 +203,15 @@ def build(B):
         return re.sub(r"_(240|360|480|720|1080|1440|2160)p?$", "", sid)
     groups = {}
     for sid in wa_only:
-        groups.setdefault(res_key(sid), []).append(sid)
+        if res_key(sid) != sid:  # only sources that carry a resolution suffix; a bare name is a different file
+            groups.setdefault(res_key(sid), []).append(sid)
     largest = {k: max(v, key=lambda x: img(x).size[0] * img(x).size[1]) for k, v in groups.items() if len(v) > 1}
-    wa_only = sorted(wa_only, key=lambda x: 0 if largest.get(res_key(x), x) == x else 1)  # stable
+    members = {x for v in groups.values() if len(v) > 1 for x in v}
+    wa_only = sorted(wa_only, key=lambda x: 0 if (x not in members or largest[res_key(x)] == x) else 1)  # stable
     wa_rel = {}
     for sid in wa_only:
         cat = "people_family" if sid in people else "personal_photo"
-        top = largest.get(res_key(sid))
+        top = largest[res_key(sid)] if sid in members else None
         if top and top != sid:
             wa_copy(wa_rel[top], cameraize(img(sid)), rand_dt("waonly", sid), sid, sent=False, cat=cat, tier="SAFE",
                     importance="low", mnd=False, scen=["S05"], sid=sid, acceptable=["YOUR_CALL"],

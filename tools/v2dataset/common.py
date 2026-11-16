@@ -2,6 +2,7 @@
 files and records ground truth for manifest.json."""
 import datetime as _dt
 import hashlib
+import re
 import io
 import json
 import os
@@ -215,6 +216,8 @@ def normalize_zip(path, date_time=FIXED_ZIP_TIME):
             ni = zipfile.ZipInfo(info.filename, date_time=date_time)
             ni.compress_type = zipfile.ZIP_STORED if info.compress_type == zipfile.ZIP_STORED else zipfile.ZIP_DEFLATED
             ni.external_attr = 0o644 << 16
+            if info.filename == "docProps/core.xml":  # openpyxl stamps dcterms:modified with the build time
+                data = re.sub(rb"(<dcterms:modified[^>]*>)[^<]*(<)", rb"\g<1>2024-01-01T00:00:00Z\g<2>", data)
             z.writestr(ni, data)
     os.replace(tmp, path)
 

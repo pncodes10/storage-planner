@@ -171,7 +171,8 @@ def build(B):
         B.write_bytes(p, b"", category="temp_cache", subcategory="nomedia_marker", tier="KEEP", importance="low",
                       source=SYN, date=rand_dt("nom", p), notes="zero-byte marker; must NOT be deleted as 'empty file'")
     # WhatsApp statuses cache (real flowers/greetings copies)
-    st = pick(B, lambda r, e: r.startswith("WhatsApp/Media/WhatsApp Images/IMG-") and not e["relationships"], 10, "st")
+    st = pick(B, lambda r, e: r.startswith("WhatsApp/Media/WhatsApp Images/IMG-") and all(x["type"] == "COMPRESSED_FROM" and x["target"].startswith("WhatsApp/Media/WhatsApp Images/IMG-")
+                     for x in e["relationships"]), 10, "st")  # chat copies of a chat original (resolution siblings) stay in the pool
     for i, p in enumerate(st):
         B.copy(f"WhatsApp/Media/.Statuses/{sha256_bytes(p.encode())[:32]}.jpg", B.abs(p), category="temp_cache",
                subcategory="status_cache", tier="SAFE", importance="disposable", scenarios=["S03"],
