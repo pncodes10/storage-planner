@@ -86,6 +86,8 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
 | A41 | Phase 6 Q3: static videos and silent recordings are not offered as candidates in Phase 6. Video motion and audio features are extracted and used only to protect (for example a long video with a short burst of activity). | Spec 5.5: no speech or music is never proof a file is unnecessary; scenario 8: a long, mostly static video can hold the one moment that matters. Quality-style signals alone should not create candidates. |
 | A42 | Phase 6 Q4: the mislabelled dataset file (A27) is fixed now, before Phase 6 code, so the exposure gate can read zero. | The gate cannot tell a new real exposure from the known label defect while it is red. |
 | A43 | On the phone, OCR and frame-based signals may protect files but may not make any file a "your call" candidate until the owner's device checklist shows they work. | They cannot be tested here; an OCR that silently returns nothing would otherwise look like "no protective text". |
+| A44 | Audio analysis is cut from Phase 6. | After A41 no rule would use it; extracting features nothing reads is cost without benefit. |
+| A45 | Phone defaults for Phase 6 content checks: up to 300 OCR reads and 2,000 picture checks per run; unfinished checks leave the file "unknown" and continue next run. | Same budget pattern as the decode budget (A34); until OCR is device-verified (A43) these checks only protect. |
 
 ## Data on disk (ephemeral container — rebuild if lost)
 
@@ -95,23 +97,30 @@ exist; the real classic pipeline is Scanner -> Sorter -> UnitBuilder -> Planner/
   large for the tool. `inventory.jsonl`, `downloaded.jsonl` alongside.
 - `/home/user/sp-dataset/`: generated dataset — build in progress.
 
-## State (03:24 UTC, 14 Nov)
+## State (08:57 UTC, 16 Nov)
 
-- Phases 1-5, Phase A, the store (S0-S7) and the quick-test button (A38) done;
-  43 suites green (re-run by the lead). Button reviewed (`REVIEW_SAMPLE.md`:
-  0 blockers, 3 major fixed). **Build to test on the phone: CI run 74**
-  (commit 595cf30, succeeded 03:24 UTC, 14 Nov):
-  https://github.com/pncodes10/storage-planner/actions/runs/43551271466 Nothing has run on a device.
-- Phase 6 design written (`PHASE_6.md`, 13 slices); rulings A39-A43 given.
-- Running: Opus reviewer for the Phase 6 design; Sonnet agent fixing the
-  dataset label (A42).
-- Hourly check-in stays disabled (D10).
+- Phases 1-5, Phase A, the store and the quick-test button done; 43 suites
+  green; **build to test on the phone: CI run 74** (commit 595cf30):
+  https://github.com/pncodes10/storage-planner/actions/runs/43551271466
+  Nothing has run on a device.
+- No work happened from 14 Nov ~03:35 UTC to 16 Nov 08:46 UTC: a usage limit
+  stopped both agents and the hourly check-in is off (D10).
+- Phase 6 design reviewed (`REVIEW_6.md`: 5 blockers, 13 major, 10 minor, all
+  fixed in `PHASE_6.md`). Key blocker: every full scan rebuilt each file's
+  feature record, which would have erased content facts each run, so OCR
+  would never finish across runs. Slices S1-S9 ready for Sonnet implementers;
+  S10 (Android OCR bridge) compile-check only; S11 optional.
+  Honest "your call" hit rate: about 0.757 on the desktop (upper bound),
+  0.61 on the phone until OCR is device-verified.
+- Running: Sonnet implementer for slice S1; Sonnet agent finishing the dataset
+  label fix (A42).
 - Open: ClassicParityTest and five other tests, minor review findings,
   free-space requirement (A37).
 
 ## Next steps
 
-1. Confirm CI for 595cf30 -> build to test.
-2. Phase 6 review -> Sonnet implementers, slice by slice (S1 model/codec,
-   S2 MP4 activity, S3 document text, S4 document categories, ...).
+1. Dataset label fix reports -> lead checks verify + gates -> commit.
+2. Phase 6 slices S1..S9 with Sonnet implementers, one at a time; after each:
+   lead runs both scripts, commits, checks CI. Opus review of the finished
+   phase before it is called done.
 3. Phases 7-10.

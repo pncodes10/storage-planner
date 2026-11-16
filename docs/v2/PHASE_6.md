@@ -1,6 +1,18 @@
 # Phase 6 — content signals: OCR, document intelligence, adaptive video, audio
 
-Status: design for review. Author: Phase 6 architect. Implementers: Sonnet-class agents, one slice at a time (§13).
+Status: **reviewed (REVIEW_6); rulings A39–A43 applied in place.** Author: Phase 6 architect. Implementers: Sonnet-class agents,
+one slice at a time (§13 — start with the Implementer brief there).
+
+> **REVIEW_6 summary of binding changes (read first).** Where older text below conflicts with a `REVIEW_6 F-…` tag, the tag wins.
+> * A39 (F-M3): OTP is disposable unless bank/payment/amount text or an id pattern is present (vetoes V-TEXT/V-AMOUNT); test in S8.
+> * A40 (F-B2): only `text.status == READ` (all text read, **no unreadable token**) can enable YOUR_CALL. `PARTIAL_SCRIPT` and
+>   "rule F step 4" are removed from eligibility. Greetings with a Devanagari line are **not** eligible. Desktop hit-rate gate ≈ 0.75 (upper bound).
+> * A41 (F-B3): no `Y_STATIC_VIDEO`, no `Y_SILENT_RECORDING`. Video activity (MP4 sample-size table) is extracted and used **only to
+>   protect**. Frame sampling (old S11), `FrameInfo`, `T6_DETAIL`, the frame bridge and audio silence/`AudioProbe` (old S12) are cut.
+> * A42 (F-B4): exposure gate is exactly 0, no `KNOWN_LABEL_DEFECTS` exemption.
+> * A43 (F-B5): OCR verification is checked **live** at assessment by `ContentTrust.textEngineVerified(id)`; the Android engine id is
+>   not in the verified set (defaults to unverified); a test proves that with it off no YOUR_CALL depends on OCR.
+> * F-B1: T1 must carry content sub-records over when the file is unchanged, or every FULL scan erases them.
 Binding inputs: spec §5.2–5.5, §7, §9.4–9.5, §14.1, §16.4; `MANAGER_LOG.md` (D1–D10, A1–A37); `ARCHITECTURE.md`;
 `PHASE_2..5_NOTES.md`. Where this document departs from them it says so in §15 (design choices) and §16 (questions for the lead).
 
@@ -9,8 +21,9 @@ exactly two directions: **protect** (raise loss severity, `P_UNIQUE_RECORD`, vet
 three rules A28 deferred (`Y_OLD_SCREENSHOT`, `Y_FORWARDED_MEDIA`, `Y_OLD_DOWNLOAD`), only when positive disposable evidence exists,
 no protective signal fires, and every protective detector actually ran. Nothing in Phase 6 creates SAFE or NO-LOSS. Pure-Java detectors
 (classic `ImageSignals`, `Codes` (QR), `Faces`/`FaceNet` (YuNet), PDF/OOXML text, MP4 sample tables) run identically on the JVM and the
-phone. OCR and video frame decoding are device-only; on the desktop they are fed by fixtures that are derived from pixels/content, never
-from labels. A content rule that needs a device-only engine stays **off on the phone until that engine is verified** (§9.4).
+phone. OCR is device-only; on the desktop it is fed by a fixture derived from the text the generator drew (content), never from labels.
+A content rule that needs OCR stays **off on the phone until the engine is verified** (§9.4, A43). (REVIEW_6 F-B3: video frame decoding
+is not in Phase 6.)
 
 ---
 
@@ -24,14 +37,14 @@ long edge 1024). Numbers below are medians per (folder, manifest category).
 | Manifest group (expected YOUR_CALL, KEEP not acceptable) | n | Folder | Signal that can catch it | Phase 6 rule |
 |---|---|---|---|---|
 | `meme_greeting/meme` | 30 | WhatsApp Images | text over picture (bigText 0.56, textArea 0.098), English caption, faces in 13 % | `Y_FORWARDED_MEDIA` (faces ⇒ vetoed: ~26 reachable) |
-| `meme_greeting/greeting_*` (9 festivals) | 59 | WhatsApp Images | English greeting phrase + **Devanagari** line on every image (generator line 290–297); colourful 68–128 | `Y_FORWARDED_MEDIA`, needs the PARTIAL-script ruling (§16 Q2) |
+| `meme_greeting/greeting_*` (9 festivals) | 59 | WhatsApp Images | English greeting phrase + **Devanagari** line on every image (generator line 290–297); colourful 68–128 | **none** — A40: unreadable text ⇒ not eligible (REVIEW_6 F-B2) |
 | `meme_greeting/unicode_name` | 4 | `Pictures/शुभेच्छा/` | as above, but `pictures` area | none (no rule for `pictures`; stays KEEP) |
 | `advertisement` | 12+1 / 10 / 10 | WA / Download / Screenshots | "MEGA SALE", "FESTIVE OFFER", "FLASH DEAL" (gen_synth 360) | `Y_FORWARDED_MEDIA` / `Y_OLD_DOWNLOAD` / `Y_OLD_SCREENSHOT` |
 | `screenshot/otp_sms` | 15 | Screenshots | "{code} is your OTP. Valid for 10 min." | `Y_OLD_SCREENSHOT` kind OTP (§16 Q1) |
 | `unknown/accidental_pocket_shot` | 8 | Camera | flat 0.97, colourful 0.5 (pixel, not content) | none (not content; §14) |
 | `backup/chat_db_rotation` | 4 | Databases | — | none (Phase 4 rule; not content) |
-| `audio/silence` | 3 | Voice Recorder | every AAC frame is 4 bytes (digital silence) | `Y_SILENT_RECORDING` (S12, §16 Q3) |
-| `video/long_static_no_event` | 1 | Camera | no motion peaks, 0.0018 bits/pixel | `Y_STATIC_VIDEO` (S11, §16 Q3) |
+| `audio/silence` | 3 | Voice Recorder | every AAC frame is 4 bytes (digital silence) | none — A41 (REVIEW_6 F-B3) |
+| `video/long_static_no_event` | 1 | Camera | no motion peaks, 0.0018 bits/pixel | none — A41; scenario S08 becomes CAUTIOUS, not FAIL |
 | `archive/junk_archive` | 1 | Download | — | none (§14) |
 | capped copies (WebP etc., A23) | ~20 | various | — | none |
 
@@ -62,6 +75,10 @@ The other expected-YOUR_CALL groups already score as hits because KEEP is accept
 * Video bitstream (ffprobe packet sizes, verified to equal what `stsz` holds): the four mnd "brief activity" videos show non-key
   bytes per second ≥ 6.5 KB exactly in the labelled windows (455–465 s, 211–217 s, 377–385 s, 302–307 s) against a median of
   0.55–0.62 KB/s; the no-event control's maximum second is 0.71 KB. 640×360, 10 fps, no audio track.
+  **REVIEW_6 re-check** (own `stsz`/`stts`/`stss` parser on the rebuilt dataset, §8.1 rule with W = 1 s, P = max(4M, M+2048)):
+  peaks `[454,464]`, `[210,216]`, `[376,384]`, `[301,306]` s — 4/4 windows found; control 0 peaks (max 707 B vs P 2561 B). One video
+  also shows a spurious first-second peak `[0,0]` (encoder start-up), harmless because peaks only protect. All five have B-frames
+  (`ctts`), keyframes every 10 s (regular GOP), not fragmented.
 * Audio: the three "silence" m4a files have every AAC frame = 4 bytes; the four voice recordings have median frames 261–655 bytes.
 * PDFs: 64 of 92 dataset PDFs are reportlab `PDF-1.3` with `[/ASCII85Decode /FlateDecode]` content streams and literal `(…) Tj`
   strings; the Form 1099 / W-2 PDFs use plain Flate; paystubs use 2-byte hex glyph strings (`<0015>`) without `/ToUnicode` (text
@@ -72,12 +89,12 @@ The other expected-YOUR_CALL groups already score as hits because KEEP is accept
 
 ## 1. Scope
 
-**In Phase 6** (slices S1–S13, §13): content-fact records and codec; MP4/M4A bitstream activity profile; PDF/OOXML/ODF/TXT/CSV
-text and metadata; document categories, identifiers, dates, amounts; Devanagari and transliterated path keywords; document version
-links; visual pass (ImageSignals, QR, faces) on selected images; OCR provider interface, budgeted OCR pass, script handling;
-image categories; protective integration; `Y_OLD_SCREENSHOT`, `Y_FORWARDED_MEDIA`, `Y_OLD_DOWNLOAD`; evaluator `--gate phase6`;
-Android bridges (OCR, video frames); adaptive video frame sampling and `Y_STATIC_VIDEO`; audio container probe, digital-silence
-detection and `Y_SILENT_RECORDING`; faces for `P_PERSONAL_MEDIA_UNIQUE` (optional last slice).
+**In Phase 6** (slices S1–S11, §13, REVIEW_6 renumbered): content-fact records and codec; MP4 bitstream activity profile (protect
+only); PDF/OOXML/ODF/TXT/CSV text; document categories, identifier kinds, dates, amounts; Devanagari and transliterated path keywords;
+document version links; visual pass (ImageSignals, QR, faces) on selected images; OCR provider interface, budgeted OCR pass;
+image categories (output only); protective integration; `Y_OLD_SCREENSHOT`, `Y_FORWARDED_MEDIA`, `Y_OLD_DOWNLOAD`; HC16; evaluator
+`--gate phase6`; Android OCR bridge; faces for `P_PERSONAL_MEDIA_UNIQUE` (optional last slice).
+**Not in Phase 6 (A41, REVIEW_6 F-B3):** frame sampling, `Y_STATIC_VIDEO`, audio probe, digital silence, `Y_SILENT_RECORDING`.
 
 **Cut from Phase 6** — see §14 (full list with reasons).
 
@@ -87,8 +104,8 @@ detection and `Y_SILENT_RECORDING`; faces for `P_PERSONAL_MEDIA_UNIQUE` (optiona
 
 | # | Item (source) | Decision | Slice / reason |
 |---|---|---|---|
-| 1 | `AudioProbe` mp3/flac/ogg/opus/wav (P2 notes slice 6, A11) | **In** (header facts only) | S12 |
-| 2 | Audio silence %, speech/music activity, fingerprint (ARCH §11, REVIEW_1 F-M9) | **Partly**: digital silence for AAC-in-MP4 and PCM WAV only; speech/music/fingerprint stay unknown (need a decoder) | S12 |
+| 1 | `AudioProbe` mp3/flac/ogg/opus/wav (P2 notes slice 6, A11) | **Cut** (REVIEW_6 F-B3: no rule or protection reads it after A41; LEFT FOR LEAD L1) | §14 |
+| 2 | Audio silence %, speech/music activity, fingerprint (ARCH §11, REVIEW_1 F-M9) | **Cut** (A41; nothing protective uses them) | §14 |
 | 3 | `MkvProbe`, `AviProbe` (A11) | **Cut** | §14 |
 | 4 | `TarProbe` (A11, P3 §scenario 10) | **Cut** | §14 |
 | 5 | ICO probe, GIF frame counting (A11) | **Cut** | §14 |
@@ -100,13 +117,13 @@ detection and `Y_SILENT_RECORDING`; faces for `P_PERSONAL_MEDIA_UNIQUE` (optiona
 | 11 | Devanagari keywords (P4 notes "Keywords has no Devanagari entries") | **In** | S4 |
 | 12 | Crops / collages | **Cut** (to Phase 7) | §14 |
 | 13 | Low `EDITED_FROM` (R 0.52) and image `VERSION_OF` recall (P3) | **Cut** (graph calibration, not content) | §14 |
-| 14 | `P_PERSONAL_MEDIA_UNIQUE` (faces; PHASE_4 §9.2) | **In, optional** | S13 |
+| 14 | `P_PERSONAL_MEDIA_UNIQUE` (faces; PHASE_4 §9.2) | **In, optional** | S11 (was S13) |
 | 15 | Lossy COMPRESS at YOUR_CALL ("Phase 6+", PHASE_5 §1) | **Cut** (to Phase 9) | §14 |
 | 16 | `N_OLDER_BACKUP` producer (PHASE_5 §3 priority 4) | **Cut** (to Phase 9) | §14 |
 | 17 | OOXML/ODF docProps, OLE2/OOXML encryption detection (ARCH §11 row 6) | **In** | S3 |
 | 18 | PDF object parser with object streams (PHASE_2 choice 2-7) | **In** (bounded text extraction, not a full parser) | S3 |
 | 19 | OCR of scanned PDF pages (spec 5.3) | **Cut** (device page rendering; no Phase 6 rule needs it) | §14 |
-| 20 | Video OCR / frame faces beyond the sampler (spec 5.4) | Faces on sampled frames **in** (S11); frame OCR **cut** | §14 |
+| 20 | Video OCR / frame faces / adaptive frame sampling (spec 5.4) | **Cut** (A41, REVIEW_6 F-B3) | §14 |
 | 21 | Multi-threading (A11) | **Not in this phase** (A11) | — |
 | 22 | APK bundle base manifest (P2 P6) | **Not content**; stays with installers | — |
 
@@ -118,27 +135,34 @@ All paths under `app/src/main/java/com/storageplanner/` unless noted. "S#" = sli
 
 | Class | Package | S# | Purpose |
 |---|---|---|---|
-| `VisualInfo`, `TextInfo`, `DocInfo`, `ActivityInfo`, `FrameInfo` | `v2.model` | S1 | content sub-records of `FeatureRecord` |
+| `VisualInfo`, `TextInfo`, `DocInfo`, `ActivityInfo` | `v2.model` | S1 | content sub-records of `FeatureRecord` |
 | `TextStatus`, `DocStatus`, `ActivityStatus`, `DetectorStatus` | `v2.model` | S1 | enums with explicit unknown values |
-| `ContentCodec` | `v2.store` | S1 | JSON codec of the five sub-records (called from `FeatureCodec`) |
-| `Mp4Tables`, `ActivityProfile` | `v2.content` | S2 | sample tables → `ActivityInfo` |
-| `PdfText`, `PdfCMap`, `OoxmlText`, `OdfText`, `PlainText`, `XmlText`, `Ole2` | `v2.content.doc` | S3 | document text and metadata |
-| `DocFacts`, `DocCategorizer`, `Identifiers`, `DocKeywords`, `MinHash` | `v2.content.doc` | S4 | categories, ids, dates, amounts, text sketch |
+| `ContentCodec` | `v2.store` | S1 | JSON codec of the four sub-records (called from `FeatureCodec`) |
+| `Mp4Tables`, `ActivityProfile` | `v2.content` | S2 | sample tables → `ActivityInfo` (protect only) |
+| `PdfText`, `PdfCMap` | `v2.content.doc` | S3a | PDF text |
+| `OoxmlText`, `OdfText`, `PlainText`, `XmlText`, `Ole2` | `v2.content.doc` | S3b | zip-XML / plain text, OLE2 encryption flag |
+| `DocFacts`, `DocCategorizer`, `Identifiers`, `DocKeywords`, `MinHash` | `v2.content.doc` | S4 | categories, id kinds, dates, amounts, text sketch |
 | `DocVersionLinker` | `v2.graph` | S5 | `VERSION_OF` between document versions |
-| `VisualPass`, `FaceDetector`, `YunetFaceDetector`, `QrKind` | `v2.content` | S6 | ImageSignals + QR + faces |
+| `VisualPass`, `FaceDetector`, `FaceResult`, `YunetFaceDetector`, `QrKind` | `v2.content` | S6 | ImageSignals + QR + faces |
 | `TextReader`, `OcrResult`, `UnavailableTextReader`, `OcrPass`, `TextFacts`, `TextWords` | `v2.content` | S7 | OCR interface and pass |
-| `ContentProviders`, `ContentConfig`, `ContentStage` | `v2.content` | S6/S7 | wiring, budgets, stage `T4_TEXT` |
-| `ImageCategorizer` | `v2.content` | S8 | spec 5.2 categories |
-| `ContentFacts`, `ContentRules` | `v2.risk` | S8/S9 | per-file facts for the risk engine; Y candidates |
-| `FrameSampler`, `FrameStage` | `v2.content` | S11 | adaptive sampling, stage `T6_DETAIL` |
-| `AudioProbe`, `AudioActivity` | `v2.features` / `v2.content` | S12 | audio headers; digital silence |
-| `SidecarTextReader`, `DirFrameSource` | `jvmtest/.../v2test` | S7/S11 | desktop fixtures |
+| `ContentProviders`, `ContentConfig`, `ContentTrust`, `ContentStage` | `v2.content` | S2 (stage), S6/S7 | wiring, budgets, A43 trust, stage `T4_TEXT` |
+| `ImageCategorizer` | `v2.content` | S8 | spec 5.2 categories (JSON output only) |
+| `ContentFacts` | `v2.risk` | S4 (docs) / S8 (images, video) | per-file facts for the risk engine |
+| `ContentRules` | `v2.risk` | S9 | the three Y candidates |
+| `SidecarTextReader` | `jvmtest/.../v2test` | S7 | desktop OCR fixture |
 | `OcrTextReader` | `com.storageplanner.app` | S10 | bridge to the package-private `OcrEngine` (no edit to it) |
 | `AndroidContent` | `com.storageplanner.app.v2` | S10 | builds `ContentProviders` on the phone |
 
-Edited existing classes (exact edits are in each slice): `FeatureRecord`, `Extractors`, `FeatureCodec`, `FileContext`, `ContextBuilder`,
-`SignalExtractor`, `LossEstimator`, `CandidateRules`, `HardRules`, `PresentationPolicy`, `ReasonCatalog`, `Keywords`, `RiskConfig`,
-`V2Cli`, `V2Json`, `AndroidV2Device` (videoFrame), `V2Analysis`, `tools/v2eval/evaluate.py`, `tools/v2dataset/common.py`.
+(REVIEW_6 F-B3: `FrameInfo`, `FrameSampler`, `FrameStage`, `DirFrameSource`, `AudioProbe`, `AudioActivity` removed.)
+(REVIEW_6 F-m6: `v2.content` already holds `ContentClassifier`/`RuleClassifier`/`Classification` (PHASE_4 §10 plug point, path
+keywords → `ctx.classification`). They stay unchanged; `ContentFacts` is the Phase 6 content channel and is read **in addition** to
+`ctx.classification`. Do not delete or rename the existing classes.)
+
+Edited existing classes (exact edits are in each slice): `FeatureRecord`, `Extractors`, `FeatureCodec`, `T1MetadataStage` (carry-over,
+F-B1), `FileContext`, `ContextBuilder`, `SignalExtractor`, `LossEstimator`, `CandidateRules`, `HardRules`, `v2.plan.PresentationPolicy`,
+`v2.plan.ReasonCatalog`, `Keywords`, jvmtest `V2Cli`, jvmtest `V2Json`, jvmtest `ForbiddenApiTest`, `app/V2Runner` (phone stage list —
+REVIEW_6 F-M7: it is `V2Runner.runOpen`, not `V2Analysis`, that builds the phone's stages), `v2adapter/V2Analysis` (`pendingContent`
+only), `tools/v2eval/evaluate.py`, `tools/v2dataset/common.py`.
 **Classic `core/` is not edited.** `com.storageplanner.app.OcrEngine` is not edited.
 
 ---
@@ -154,6 +178,11 @@ Edited existing classes (exact edits are in each slice): `FeatureRecord`, `Extra
   QR payloads are never stored; only `QrKind`.
 * Every sub-record carries the version of the extractor that produced it (`FeatureRecord.versions[id]`, §4.3); a different current
   version makes the file selectable again (re-extraction).
+* REVIEW_6 F-M8 (privacy): **not stored**: document title/author (used for scoring during extraction, then dropped), any text,
+  identifier or amount *value*, QR payload. Dates found in text (`textDate`, `latestDate`) are stored **only** if they lie within
+  400 days before the extraction time (a birth date on an ID card is never stored); otherwise the field stays unknown.
+* REVIEW_6 F-m3: `Sub.copy()` is a shallow clone, so lists/arrays (`classes`, `idKinds`, `peaks`, `minhash`) are shared between
+  copies. Rule: build a new sub-record and `put` it; never mutate a sub-record or its lists after it was read from the store.
 
 ### 4.2 Classes (`com.storageplanner.v2.model`, each `extends Sub` like `PdfInfo`; `copy()` via `Sub`)
 
@@ -178,22 +207,23 @@ public final class VisualInfo extends Sub {                    // S6: one decode
 }
 
 public enum TextStatus { NOT_RUN, READ, PARTIAL_SCRIPT, NO_TEXT, LOW_CONFIDENCE, FAILED, UNAVAILABLE }
-// READ: readable Latin text; PARTIAL_SCRIPT: some text read, other text present but unreadable (non-Latin script);
-// NO_TEXT: pixels show no text AND the reader found none; LOW_CONFIDENCE: text present, reader could not read it;
-// FAILED: reader error/timeout; UNAVAILABLE: no reader this run (never stored; see §6.3). Only READ/PARTIAL_SCRIPT are "known".
+// READ: all text read (no garbage token, §6.3 step 5); PARTIAL_SCRIPT: some text read, other text present but unreadable;
+// NO_TEXT: pixels show no text (reader not called); LOW_CONFIDENCE: text present, reader could not read it;
+// FAILED: reader error/timeout; UNAVAILABLE: no reader this run (never stored).
+// REVIEW_6 F-B2 (A40): ONLY READ may enable YOUR_CALL. PARTIAL_SCRIPT and LOW_CONFIDENCE may still PROTECT (record category, V-TEXT).
 
 public final class TextInfo extends Sub {                      // S7
     public TextStatus status = TextStatus.NOT_RUN;
     public String engine; public int engineVersion = -1;
-    public boolean engineVerified;                             // engine is on ContentConfig.VERIFIED_ENGINES at extraction time (§9.4)
-    public int words = -1, goodWords = -1;                     // TextRules.goodWords
+    // REVIEW_6 F-B5: no stored "engineVerified"; verification is checked live by ContentTrust.textEngineVerified(engine) (§9.4)
+    public int words = -1, goodWords = -1, garbage = -1;       // TextRules.goodWords; garbage per §6.3 step 5
     public double meanConf = Double.NaN, readRatio = Double.NaN;   // §6.3 step 5
     public String kind;                                        // TextRules verdict kind (PhotoCategory id) or null
     public int kindScore = -1;
     public java.util.List<String> classes;                     // TextWords classes hit: PROTECT_PAY, PROTECT_ID, PROTECT_TRAVEL, PROTECT_MED,
                                                                // PROTECT_BANK, PROMO, GREETING, OTP; null = unknown, [] = none
     public int idPatterns = -1, amounts = -1, digitRuns4 = -1;   // counts; values never stored
-    public long textDate = com.storageplanner.v2.model.Unknown.TIME;
+    public long textDate = com.storageplanner.v2.model.Unknown.TIME;   // stored only if within 400 d before extraction (F-M8)
     public int attempts = 0;                                   // failed attempts with this engine version
 }
 
@@ -201,7 +231,7 @@ public enum DocStatus { NOT_RUN, OK, NO_TEXT_LAYER, ENCRYPTED, UNSUPPORTED, CORR
 public final class DocInfo extends Sub {                       // S3 (text facts) + S4 (category)
     public DocStatus status = DocStatus.NOT_RUN;
     public String format;                                      // pdf, docx, xlsx, pptx, odt, ods, odp, txt, csv, ole2
-    public String title, author;                               // metadata only (spec 5.3); ≤ 200 chars each
+    // REVIEW_6 F-M8: no title/author fields (personal names); they feed DocCategorizer during extraction only
     public int pages = -1;
     public long createdAt = Unknown.TIME, modifiedAt = Unknown.TIME;
     public int chars = -1, words = -1;
@@ -212,52 +242,60 @@ public final class DocInfo extends Sub {                       // S3 (text facts
     public java.util.List<String> categoryEvidence;            // keyword ids, ≤ 5, e.g. "kw:statement", "id:IFSC"
     public java.util.List<String> idKinds;                     // PAN, AADHAAR, IFSC, GSTIN, CARD, ACCOUNT, SSN, PASSPORT_IN; [] = none
     public int dates = -1, amounts = -1;
-    public long latestDate = Unknown.TIME;
+    public long latestDate = Unknown.TIME;                     // stored only if within 400 d before extraction (F-M8)
     public int[] minhash;                                      // 16 values, null = unknown (S4)
     public int unsupportedStreams = -1;                        // PDF streams with filters we do not decode
 }
 
 public enum ActivityStatus { NOT_RUN, OK, SHORT, NO_SAMPLE_TABLE, FRAGMENTED, ALL_KEYFRAMES, TOO_LARGE, CORRUPT, UNSUPPORTED }
-public final class ActivityInfo extends Sub {                  // S2 (video), S12 (audio)
-    public ActivityStatus videoStatus = ActivityStatus.NOT_RUN, audioStatus = ActivityStatus.NOT_RUN;
-    public long durationMs = -1; public int videoSamples = -1, audioSamples = -1;
-    public double medianWindowBytes = Double.NaN, peakThreshold = Double.NaN, bppMedian = Double.NaN, activeShare = Double.NaN;
-    public int peakWindows = -1;
+public final class ActivityInfo extends Sub {                  // S2 (video only; REVIEW_6 F-B3 removed audio and static fields)
+    public ActivityStatus videoStatus = ActivityStatus.NOT_RUN;
+    public long durationMs = -1; public int videoSamples = -1;
+    public double medianWindowBytes = Double.NaN, peakThreshold = Double.NaN;
+    public int peakWindows = -1, irregularSync = -1;           // irregularSync: §8.1 step 4b
     public long[] peaks;                                       // [start0,end0,start1,end1,…] ms, ≤ 32 intervals; null = unknown
-    public Tri staticCandidate = Tri.UNKNOWN;                  // §8.1 step 8
-    public double tinyAudioShare = Double.NaN;                 // share of audio frames ≤ 8 bytes
-    public Tri digitalSilence = Tri.UNKNOWN;                   // §10
-}
-
-public final class FrameInfo extends Sub {                     // S11
-    public DetectorStatus status = DetectorStatus.NOT_RUN;
-    public int planned = -1, decoded = -1, failed = -1;
-    public long[] timesMs; public long[] phash;                // per decoded frame, same order; null = unknown
-    public double diversity = Double.NaN;                      // mean pairwise Hamming / 64 over decoded frames
-    public int sceneChanges = -1, faceFrames = -1, nothingVisible = -1;
-    public boolean coversPeaks;                                // every ActivityInfo peak interval has ≥ 1 decoded frame
-    public boolean engineVerified;
 }
 ```
+(REVIEW_6 F-B3: `FrameInfo`, `staticCandidate`, `bppMedian`, `activeShare`, audio fields removed — nothing reads them after A41.)
 
-`FeatureRecord` gains `public VisualInfo visual; public TextInfo text; public DocInfo doc; public ActivityInfo activity; public FrameInfo frames;`
-(copied in `copy()` like `pdf`). `FileContext` gains accessors `visual()`, `text()`, `doc()`, `activity()`, `frames()` (null-safe like `image()`).
+`FeatureRecord` gains `public VisualInfo visual; public TextInfo text; public DocInfo doc; public ActivityInfo activity;`
+(copied in `copy()` like `pdf`). `FileContext` gains accessors `visual()`, `text()`, `doc()`, `activity()` (null-safe like `image()`:
+`return feat == null ? null : feat.visual;`).
 
 ### 4.3 Extractor ids and versioning (`v2.features.Extractors`)
 
-Add ids `VISUAL = 20, OCR = 21, DOC_TEXT = 22, ACTIVITY = 23, FRAMES = 24`; `FeatureRecord.EXTRACTORS = 25`. Old snapshots hold
-20 versions; `FeatureCodec` already reads `min(stored, current)` entries, so the new ids read as 0 ("never run"). No tier bit is used
+Add ids `VISUAL = 20, OCR = 21, DOC_TEXT = 22, ACTIVITY = 23`; `FeatureRecord.EXTRACTORS = 24` (REVIEW_6: FRAMES removed). Old snapshots hold
+20 versions; `FeatureCodec.read` (line ~221) copies `k < v.size() && k < r.versions.length`, so the new ids read as 0 ("never run"). No tier bit is used
 for T4/T6: `tiersDone/tiersPending` are **not** touched (P13 would turn every file PARTIAL and change `extraction.status` across the
 board). A file is pending for pass *k* iff `versions[k] != Extractors.version(k)` and the pass's selection (§6–§8) includes it. OCR
 additionally re-runs when `text.engine`/`text.engineVersion` differ from the current reader's (`TextReader.id()/version()`).
 
+**REVIEW_6 F-B1 (BLOCKER) — carry-over in T1.** `T1MetadataStage.extract` builds a `new FeatureRecord()` for every selected file,
+and with `ScanKind.FULL` (the default of `PipelineConfig`, of `V2Cli` and of the phone) **every** file is re-selected on every run
+(`selected(...)`: `full && fr.extractedScanId < scanId`). Without a change every run would erase all content sub-records, OCR would
+restart from zero each run and a budgeted run would never converge. Required edit (S1), in `T1MetadataStage.extract` right after
+`FeatureRecord fr = new FeatureRecord(); fr.fileId = …; fr.fp = f.fingerprint();`:
+```java
+FeatureRecord old = ctx.store.features().get(f.fileId);
+if (old != null && old.fp != null && old.fp.sameAs(fr.fp)) {          // same bytes: content facts still valid
+    fr.visual = old.visual; fr.text = old.text; fr.doc = old.doc; fr.activity = old.activity;
+    for (int k = Extractors.VISUAL; k <= Extractors.ACTIVITY; k++) fr.versions[k] = old.versions[k];
+}
+```
+(A changed fingerprint drops them, so a modified file is re-read.) Test `ContentCarryOverTest`: run scan twice (FULL) on a fixture tree
+with a stub content pass that counts calls ⇒ second run makes 0 calls and the sub-records are equal; touch one file (new mtime) ⇒
+exactly 1 call.
+
 ### 4.4 Codec (`v2.store.ContentCodec`)
 
-`static void write(JsonWriter w, VisualInfo|TextInfo|DocInfo|ActivityInfo|FrameInfo x)` and `static X readX(Map<String,Object> m)`;
-`FeatureCodec.write/read` call them under keys `"visual"`, `"text"`, `"doc"`, `"activity"`, `"frames"`. **Omit** every field whose
-value is its unknown value (keeps snapshot growth small, A21); a missing key reads as unknown. Arrays (`peaks`, `phash`, `minhash`,
-`timesMs`) as JSON arrays of numbers; `long` phash as a 16-hex-digit string. `V2Json` (CLI output) writes the same objects under
-`files[].content.{visual,text,doc,activity,frames}` and `files[].category`, `categoryConfidence`, `categorySource` (ARCH 2.10).
+`static void write(JsonWriter w, VisualInfo|TextInfo|DocInfo|ActivityInfo x)` and `static X readX(Map<String,Object> m)`;
+`FeatureCodec.write/read` call them under keys `"visual"`, `"text"`, `"doc"`, `"activity"`. **Omit** every field whose
+value is its unknown value (keeps snapshot growth small, A21); a missing key reads as unknown. Arrays (`peaks`, `minhash`) as JSON
+arrays of numbers. Enums by `name()`; an unknown enum name on read ⇒ the enum's `NOT_RUN` (never an exception). `V2Json` (jvmtest CLI
+output) writes the same objects under `files[].content.{visual,text,doc,activity}` and, from S8, `files[].contentCategory`,
+`contentCategoryConfidence` (REVIEW_6 F-M9: computed at output time by `ImageCategorizer`, not stored).
+Schema safety: a store written by a newer codec and read by an older one ignores unknown keys (existing `Json` behaviour); a store
+from before Phase 6 reads the new ids as version 0 ⇒ re-extracted. No store version bump is needed.
 
 ### 4.5 Tests (S1) — `ContentCodecTest` (jvmtest, registered in `AllV2Tests`)
 
@@ -265,7 +303,9 @@ value is its unknown value (keeps snapshot growth small, A21); a missing key rea
 |---|---|---|
 | round trip | each sub-record with every field set to a non-default value | `read(write(x))` equals field by field |
 | unknown omitted | fresh `new VisualInfo()` | written object is `{}`; read back gives `NaN`/`-1`/`NOT_RUN` |
-| old snapshot | `FeatureRecord` JSON with a 20-element `versions` array | reads; `versions[20..24] == 0`; no exception |
+| old snapshot | `FeatureRecord` JSON with a 20-element `versions` array | reads; `versions[20..23] == 0`; no exception |
+| bad enum | `{"text":{"status":"BOGUS"}}` | `text.status == NOT_RUN` |
+| no raw text | write a `DocInfo`/`TextInfo` with every field set | JSON contains no key `title`, `author`, `words` as string list, `text` string |
 | copy independence | `fr.copy()` then mutate `copy.visual.faceCount` | original unchanged |
 | JSON CLI | `V2Json` of a file with `text` set | contains `content.text.status`, no key named `words` holding strings |
 
@@ -277,14 +317,16 @@ value is its unknown value (keeps snapshot growth small, A21); a missing key rea
 
 | Order | Stage id | Class | Passes (in this order) | Device-only parts |
 |---|---|---|---|---|
-| after `GRAPH` | `T4_TEXT` | `ContentStage` | 1 DOC (§7) · 2 ACTIVITY (§8.1, §10) · 3 VISUAL (§6.1) · 4 OCR (§6.3) | OCR engine |
-| after `T4_TEXT` | `T6_DETAIL` | `FrameStage` | FRAMES (§8.2) | frame decoder |
+| after `GRAPH` | `T4_TEXT` | `ContentStage` | 1 DOC (§7) · 2 ACTIVITY (§8.1) · 3 VISUAL (§6.1) · 4 OCR (§6.3) | OCR engine |
 | then | `ASSESS`, `RECOMMEND`, `PLAN` | unchanged entry points | content facts read through `ContentFacts` (§9.1) | — |
 
-Wiring: wherever `GraphStage` is added to a stage list (`grep -rn "new GraphStage(" app jvmtest`), append
-`if (cfg.maxTier >= 4) list.add(new ContentStage(providers, contentCfg));` and `if (cfg.maxTier >= 6) list.add(new FrameStage(providers, contentCfg));`.
-`V2Cli` default `--max-tier` stays 3 until S9 (so slices S1–S8 leave default results unchanged); S9 makes the default 4 and S11
-makes it 6 (each slice records the new baseline). `V2Analysis` (phone) uses 4 from S10 and 6 from S11.
+Wiring (REVIEW_6 F-M7, exact places): the stage list is built in (a) jvmtest `V2Cli` (lines ~199–202: `T1…T3` then `GraphStage gs`),
+(b) `app/V2Runner.runOpen` (`stages.add(new GraphStage())`, `cfg.maxTier = 3` at line ~116), (c) jvmtest `Fx`, `SampleTest`, `ScaleRun`.
+In (a) and (b) only, directly after the `GraphStage` is added, append
+`if (cfg.maxTier >= 4) stages.add(new ContentStage(providers, contentCfg));`. (c) stay without content (their tests are unchanged).
+`V2Cli` default `--max-tier` stays 3 until S9 (so slices S1–S8 leave default results unchanged); S9 makes the default 4.
+`V2Runner` sets `cfg.maxTier = 4` in S10. The quick sample run (A38) gets the content stage too (its 1,000 images are exactly what
+OCR is for); its own store keeps the results separate.
 
 ### 5.2 `ContentProviders` and `ContentConfig`
 
@@ -293,21 +335,39 @@ package com.storageplanner.v2.content;
 public final class ContentProviders {
     public final TextReader text;          // never null: UnavailableTextReader when there is none
     public final FaceDetector faces;       // null = faces NOT_RUN (unknown)
-    public ContentProviders(TextReader text, FaceDetector faces) { ... }
-    // video frames come from V2Device.media().videoFrame (existing interface, ARCH 3.2)
+    public ContentProviders(TextReader text, FaceDetector faces) { this.text = text == null ? new UnavailableTextReader() : text; this.faces = faces; }
 }
 public final class ContentConfig {
-    public int visualPerRun = 2000, ocrPerRun = 300, framesPerRun = 600, framesPerVideo = 24;   // BALANCED
-    public long docMaxBytes = 16L << 20;          // whole-file read cap for document text
+    public int visualPerRun = 2000, ocrPerRun = 300;            // BALANCED
+    public long docMaxBytes = 16L << 20;          // whole-file read cap for PDF/plain text (zips are read entry by entry, §7.3)
     public long ocrTimeoutMs = 20000;
     public int ocrLongEdge = 1600; public long ocrMaxPixels = 4000000L;
     public int visualLongEdge = 1024; public long visualMaxPixels = 100000000L;
-    public static final java.util.Set<String> VERIFIED_ENGINES = new java.util.TreeSet<String>(java.util.Arrays.asList("sidecar-sim"));
-    public static final java.util.Set<String> VERIFIED_FRAME_SOURCES = new java.util.TreeSet<String>(java.util.Arrays.asList("dir-fixture"));
-    // Phone ids "tesseract.js-eng" / "mmr-26" are added only after the §12 checklist passes (separate commit, lead's decision).
-    public static ContentConfig forProfile(com.storageplanner.v2.device.DeviceProfile p) { ... }   // LOW: 500/100/200/12; HIGH: 5000/600/1200/40
+    public static ContentConfig forProfile(com.storageplanner.v2.device.DeviceProfile p) { ... }   // LOW: 500/100; HIGH: 5000/600
+}
+
+/** REVIEW_6 F-B5 (A43): the ONE place that says which OCR engines may enable YOUR_CALL. Read live at assessment (§9.1). */
+public final class ContentTrust {
+    private ContentTrust() {}
+    /** Engine id of the phone's OCR (OcrTextReader.id() returns exactly this constant). */
+    public static final String ANDROID_OCR_ENGINE = "tesseract.js-eng";
+    /** Desktop fixture id; the jvmtest SidecarTextReader uses it unless --ocr-unverified, which makes it report "sidecar-sim-unverified". */
+    public static final String DESKTOP_SIM_ENGINE = "sidecar-sim";
+    /** false until the owner's device checklist (§12) passes; flipping it is a one-line lead commit. */
+    public static final boolean ANDROID_OCR_VERIFIED = false;
+    public static boolean textEngineVerified(String engineId) {
+        if (engineId == null) return false;
+        if (engineId.equals(DESKTOP_SIM_ENGINE)) return true;
+        if (engineId.equals(ANDROID_OCR_ENGINE)) return ANDROID_OCR_VERIFIED;
+        return false;                                   // any other engine (incl. "none", "sidecar-sim-unverified"): unverified
+    }
 }
 ```
+Why live, not stored: a stored per-record flag keeps old records "verified" if the lead ever revokes an engine, and keeps them
+"unverified" after it is verified until a re-OCR. A live check is correct in both directions. `"sidecar-sim"` cannot occur on the
+phone (the reader exists only in jvmtest). Tests (`ContentTrustTest`, S7): `textEngineVerified(ANDROID_OCR_ENGINE) == false`;
+`ANDROID_OCR_VERIFIED == false` (this assertion is changed by the same commit that flips it); `"sidecar-sim-unverified"`, `"none"`,
+`null` ⇒ false.
 
 ### 5.3 Budgets and the S7 partial-result contract
 
@@ -319,11 +379,13 @@ public final class ContentConfig {
   exactly the unfinished files (ARCH 5.2).
 * Files a pass did not reach keep `NOT_RUN` ⇒ every rule treats them as unknown ⇒ no Phase 6 Y candidate, no content protection
   either (protection is only *added*; its absence is the Phase 5 state). The stage writes one session event
-  `C_CONTENT_INCOMPLETE` (detail `"ocr=N visual=M doc=D frames=F"`, pending counts at stage end; replaced each run; absent when all 0).
-  `V2Analysis.Result.pendingContent` reads it; message: "{n} pictures and documents have not been read yet, so v2 does not suggest
+  `C_CONTENT_INCOMPLETE` (detail `"ocr=N visual=M doc=D activity=A"`, pending counts at stage end; replaced each run; absent when all 0;
+  implement exactly like `GraphStage.noteIncomplete`/`pendingImages`: remove the old event, add the new one).
+  `V2Analysis.Result.pendingContent` (new `long` field) = sum of the four numbers (parse failure ⇒ 1); message with `{n}` = that sum: "{n} pictures and documents have not been read yet, so v2 does not suggest
   anything based on their content; run the analysis again to continue." (`ReasonCatalog` code `C_CONTENT_INCOMPLETE`.)
-* Determinism: within a pass files are processed in the order of §6.1/§6.3/§7.1/§8.2 (keys end with `fileId`), so a budgeted chain
-  converges to the unbudgeted result (test in S7 and S11, modelled on `PerceptualBudgetTest`).
+* Determinism: within a pass files are processed in the order of §6.1/§6.3/§7.1/§8.1 (keys end with `fileId`), so a budgeted chain
+  converges to the unbudgeted result (test in S6 and S7, modelled on `PerceptualBudgetTest`; requires the T1 carry-over of §4.3).
+* Time: never `System.currentTimeMillis/nanoTime` (ForbiddenApiTest); use `ctx.device.clock()`.
 * Every pass catches `RuntimeException` and `OutOfMemoryError` per file: sub-record status `FAILED`, problem `content:<pass>:<Class>`,
   continue. A thrown `StoreException` propagates (stage FAILED), as in the other stages.
 
@@ -335,11 +397,12 @@ public final class ContentConfig {
 
 Selection (a file is selected iff all hold): PRESENT; `type ∈ {jpeg, png, webp, heic, heif}` and in `media().decodableTypes()`;
 `versions[VISUAL] != current`; usage (`UsageClassifier.of` on a minimal `FileContext{f}`) ∈ {SCREENSHOT, CHAT_MEDIA, DOWNLOAD,
-PICTURES} or `area == "document"`; not a `.thumbnails`/cache file. Camera photos are selected only by S13. Order: usage rank
+PICTURES} or `area == "document"`; not a `.thumbnails`/cache file. Camera photos are selected only by S11 (optional). Order: usage rank
 (SCREENSHOT 0, CHAT_MEDIA 1, DOWNLOAD 2, PICTURES 3, document 4), then `sizeBytes` descending, then `fileId`.
 
 Steps per file:
-1. `DecodedImage d = media.decode(vol, path, cfg.visualLongEdge, cfg.visualMaxPixels, true)`; charge `budget.chargeDecode()`.
+1. `DecodedImage d = ctx.device.media().decode(f.volumeId, f.accessPath(), cfg.visualLongEdge, cfg.visualMaxPixels, true)`; charge
+   `ctx.budget.chargeDecode()`. If `d.luma == null` compute it from `d.argb` with `(299r+587g+114b)/1000`.
    `d.status != OK` ⇒ `visual.decodeStatus = d.status`, all detectors `NOT_RUN`; stamp version; done (unknown).
 2. `ImageSignals.S s = ImageSignals.measure(d.argb, d.w, d.h)`; copy the 11 fields of §4.2.
 3. `visual.aspect` = `ImageInfo.uprightWidth / uprightHeight` when both > 0, else `d.w / (double) d.h`.
@@ -363,7 +426,7 @@ Tests (`VisualPassTest`, fixtures drawn with `java.awt` in jvmtest `FxImg`):
 
 | Input | Expected |
 |---|---|
-| 800×800 PNG, white, black QR from `com.google.zxing` encoder (vendored) with text `upi://pay?pa=x@y` | `qrStatus OK`, `qrKind "UPI"`, no field holds `x@y` |
+| 800×800 white image with a black QR for `upi://pay?pa=x@y` drawn from a module matrix (REVIEW_6 F-m1: zxing's *encoder* is not vendored; generate the matrix once with `python3 -I -c "import qrcode;q=qrcode.QRCode(border=0);q.add_data('upi://pay?pa=x@y');q.make();print('\n'.join(''.join('1' if c else '0' for c in r) for r in q.get_matrix()))"` and paste it as a `String[]` constant; 20 px per module, 4-module white border) | `qrStatus OK`, `qrKind "UPI"`, no field holds `x@y` |
 | 1080×2400 PNG, flat grey with 30 lines of 24 px text | `flat ≥ 0.8`, `textBlobs ≥ 25`, `aspect 0.45 ± 0.01` |
 | JPEG with `decode` forced to `NO_DECODER` (stub `MediaDecoder`) | `decodeStatus NO_DECODER`, `qrStatus NOT_RUN`, `faceStatus NOT_RUN` |
 | stub `FaceDetector` returning 2 faces | `faceCount 2` |
@@ -396,9 +459,8 @@ public final class UnavailableTextReader implements TextReader { id "none", vers
 
 Selection (all hold): `visual.decodeStatus == OK`; usage ∈ {SCREENSHOT, CHAT_MEDIA, DOWNLOAD}; `text == null` or `versions[OCR] !=
 current` or `text.engine/engineVersion` differ from the reader, or (`text.status == FAILED` and `text.attempts < 2`); and the
-picture shows text: `visual.textBlobs ≥ 25 && visual.textArea ≥ 0.004` (classic `ImageSignals.S.wordy()`) **or** `visual.bigText ≥ 0.2`;
-and the file is not a non-keeper member of an exact group whose edge to the keeper is VERIFIED (it is NO_LOSS already; its text is the
-keeper's). Pictures that fail the "shows text" test get `text.status = NO_TEXT` **without** calling the reader (pixels found no text:
+picture shows text: `visual.textBlobs ≥ 25 && visual.textArea ≥ 0.004` (classic `ImageSignals.S.wordy()`) **or** `visual.bigText ≥ 0.2`.
+(REVIEW_6 F-m7: the old "not a verified exact copy" exclusion is cut — the stage has no graph view; it only saved time.) Pictures that fail the "shows text" test get `text.status = NO_TEXT` **without** calling the reader (pixels found no text:
 the pixel detector is the reader for "no text"). Order: as §6.1, then `fileId`.
 
 If `!reader.available()`: the pass does nothing (no record written; files stay NOT_RUN; counted in `C_CONTENT_INCOMPLETE`).
@@ -406,21 +468,28 @@ If `!reader.available()`: the pass does nothing (no record written; files stay N
 Steps per file:
 1. Decode again at `cfg.ocrLongEdge` with ARGB (`media.decode(…, 1600, 4_000_000, true)`); not OK ⇒ `status FAILED`, `attempts++`.
 2. `OcrResult r = reader.read(vol, path, argb, w, h, cfg.ocrTimeoutMs)`.
-3. `r.status == UNAVAILABLE` ⇒ stop the pass for this run (reader died); write nothing for this file.
-   `r.status == FAILED` ⇒ `text.status FAILED`, `attempts++`, stamp; continue.
-4. Build `TextRules.Words w` from `r.words/conf`; `goodWords = TextRules.goodWords(w)`; `words = r.words.size()`;
-   `meanConf` = mean of `conf` over all words (NaN if none).
-5. Readability: `expectedWords = max(1, visual.textBlobs / 5.0)`; `readRatio = goodWords / expectedWords` (cap 1.0).
-   * `goodWords ≥ 3 && readRatio ≥ 0.6` ⇒ `READ`;
-   * `goodWords ≥ 2 && readRatio ≥ 0.15` ⇒ `PARTIAL_SCRIPT` (some text read; the rest is present but unreadable — with an English-only
-     engine that is how a Devanagari line shows: low-confidence garbage, spec 7.2);
-   * `goodWords < 2` and pixels show text ⇒ `LOW_CONFIDENCE` (text "unknown", **never** "no text").
-   Thresholds (5 blobs per word, 0.6, 0.15) are initial values, fitted in S9 on fold 0 (§11.3).
+3. `r == null` or `r.status == FAILED` ⇒ `text.status FAILED`, `attempts++`, stamp; continue.
+   `r.status == UNAVAILABLE` ⇒ stop the pass for this run (reader died); write nothing for this file.
+   REVIEW_6 F-M2: `r.status == NO_TEXT`, or `READ` with an empty word list, is treated as `READ` with zero words: the pixels say there is
+   text (selection), so step 5 yields `LOW_CONFIDENCE` — an empty or timed-out OCR is **never** "no text".
+4. Build `TextRules.Words w` (`w.add(word, conf)` for each pair); `goodWords = TextRules.goodWords(w)`; `words = r.words.size()`;
+   `meanConf` = mean of `conf` over all words (NaN if none);
+   `garbage` = number of words with `conf < 50`, **or** of length ≥ 2 with fewer than 2/3 letters/digits, **or** containing a character
+   outside U+0020–U+024F and outside {`₹`, `’`, `“`, `”`, `–`, `—`, `•`} (REVIEW_6 F-B2).
+5. Readability: `expectedWords = max(1, visual.textBlobs / 5.0)`; `readRatio = min(1, goodWords / expectedWords)`.
+   * `garbage == 0 && goodWords ≥ 3 && readRatio ≥ 0.6` ⇒ `READ` (REVIEW_6 F-B2, A40: all visible text was read);
+   * else `goodWords ≥ 2` ⇒ `PARTIAL_SCRIPT` (some text read, some unreadable — e.g. a Devanagari line with the English-only engine,
+     a handwritten line, a stylised word): **protective uses only**;
+   * else ⇒ `LOW_CONFIDENCE` (text "unknown", **never** "no text").
+   Thresholds are fixed constants in `OcrPass` (`BLOBS_PER_WORD = 5`, `READ_RATIO = 0.6`, `GARBAGE_CONF = 50`); REVIEW_6 F-M13: no
+   automatic calibration — §11.3 reports fold-1 numbers only, and any change is a lead decision.
 6. For READ/PARTIAL_SCRIPT: `TextRules.Verdict v = TextRules.classify(w, visual.aspect, photoLike, usage == SCREENSHOT,
    usage == CHAT_MEDIA, now)` with `photoLike = visual.colorful ≥ 40 && visual.flat < 0.85`; store `kind = v.kind`, `kindScore = v.score`,
-   `textDate = v.date == 0 ? TIME : v.date`.
-7. `TextFacts.scan(String cleaned = TextRules.clean(w))` → `classes`, `idPatterns`, `amounts`, `digitRuns4` (§6.5, §7.3).
-8. `engine = reader.id()`, `engineVersion = reader.version()`, `engineVerified = ContentConfig.VERIFIED_ENGINES.contains(engine)`; stamp.
+   `textDate = v.date == 0 ? TIME : v.date`, then apply the 400-day rule of §4.1 (date older than `now − 400 d` ⇒ `TIME`).
+7. For every status with words (READ, PARTIAL_SCRIPT, LOW_CONFIDENCE): `TextFacts.scan(TextRules.clean(w))` → `classes`, `idPatterns`
+   (PAN/AADHAAR/IFSC/GSTIN/CARD/SSN/PASSPORT_IN patterns of §7.4 step 2), `amounts` (the pattern of **§7.4 step 3** — REVIEW_6 F-M3
+   corrected reference), `digitRuns4`. (Protective facts are taken even from partly read text.)
+8. `engine = reader.id()`, `engineVersion = reader.version()`; stamp. (No verification flag is stored — §5.2 `ContentTrust`.)
    The `Words` object and all strings are discarded here.
 
 ### 6.4 The vetoes (shared by every content Y rule; implemented once in `ContentFacts`, §9.1)
@@ -435,10 +504,25 @@ Steps per file:
 | V-PAGE | `abs(a − 0.707) ≤ 0.03` or `abs(a − 1.414) ≤ 0.04` with `visual.textBlobs ≥ 60` | photographed/scanned pages |
 | V-APPNAME | screenshot name suffix app token (`Screenshot_<date>-<time>_<App>.<ext>`, also `_<pkg>`) contains any of `pay, upi, bank, wallet, gpay, phonepe, paytm, bhim, irctc, rail, train, flight, air, boarding, ticket, uber, ola, rapido, health, hospital, pharm, digilocker, aadhaar, umang, parivahan, insurance, bill` (lower-case substring) | payment/ticket apps (dataset: `_PaySpecimen`) |
 | V-COMPANION | any `COMPANION_OF` edge on the file | multi-part / sidecar (deferred linker, §14) |
-| V-DATE-RECENT | `text.textDate` known and within 30 days before `now` (standard) / 7 (aggressive) | a ticket/booking for the near future or past week |
-| V-UNKNOWN | any required detector not OK: `visual.decodeStatus != OK`, `qrStatus != OK`, `faceStatus != OK`, `text.status ∉ {READ, PARTIAL_SCRIPT}`, or `!text.engineVerified` | protective detectors must actually have run (§9.4) |
+| V-DATE-RECENT | `text.textDate` known and `now − 30 d ≤ textDate` (future dates included); **same in both modes** (REVIEW_6 F-M10) | a ticket/booking for the near future or past month |
 
-`PARTIAL_SCRIPT` satisfies V-UNKNOWN **only** for a GREETING verdict (§9.2 rule F step 4) — §16 Q2.
+**"Check not finished" (REVIEW_6 F-M1: kept in a separate list `ContentFacts.unknowns`, not in `vetoes`).** U-ids, each appended when:
+`U-VISUAL` `visual == null || visual.decodeStatus != OK`; `U-QR` `visual.qrStatus != OK`; `U-FACES` `visual.faceStatus != OK`;
+`U-TEXT` `text == null || text.status != READ` (A40: PARTIAL_SCRIPT/LOW_CONFIDENCE/FAILED/NO_TEXT/NOT_RUN all count);
+`U-ENGINE` `!ContentTrust.textEngineVerified(text.engine)` (A43). `detectorsComplete = unknowns.isEmpty()`.
+
+How the brief's adversarial cases are stopped (each has a test row in S8/S9):
+
+| Case | Stopped by |
+|---|---|
+| Hindi bank-transfer screenshot | Devanagari ⇒ garbage tokens ⇒ not READ ⇒ U-TEXT; also V-AMOUNT (₹ amount), V-APPNAME if the app token is a pay app |
+| boarding-pass screenshot whose QR did not decode | V-TEXT PROTECT_TRAVEL ("boarding", "flight", "gate", "seat"); if text unreadable ⇒ U-TEXT; no disposable kind anyway |
+| WhatsApp-forwarded photo of a relative's ID | V-CARD (cropped card), V-TEXT PROTECT_ID ("government", "dob"), V-FACES (photo on card); Hindi-only card ⇒ U-TEXT |
+| "download" that is the only copy of a signed PDF | no Phase 6 rule touches documents (§7.5); `Y_OLD_DOWNLOAD` is jpeg/png only |
+| meme-shaped image that is a handwritten note | handwriting ⇒ low-confidence/garbage tokens ⇒ not READ ⇒ U-TEXT |
+| OCR timed out / empty / low confidence | FAILED or LOW_CONFIDENCE (§6.3 steps 3, 5) ⇒ U-TEXT |
+| OTP with bank/payment/amount text (A39) | V-TEXT (PROTECT_BANK/PAY) or V-AMOUNT |
+| phone, OCR not yet verified (A43) | U-ENGINE |
 
 ### 6.5 `TextWords` (closed lists, lower-case, matched as whole tokens of `TextRules.clean` output; multi-word entries as substrings)
 
@@ -453,14 +537,19 @@ Steps per file:
 | GREETING | happy, wishes, greetings, good morning, good night, diwali, holi, eid, mubarak, raksha, bandhan, ganpati, bappa, padwa, navratri, christmas, new year, shubh |
 | OTP | otp, one time password, verification code, do not share |
 
+Matching (REVIEW_6 F-m10): tokens = `text.split("[\\s,.:;!?()\\[\\]/|\"']+")`; single-word entries match a whole token; entries
+containing a space or a non-letter (`ref no`, `rs.`, `a/c`, `₹`, `dr.`) match as substrings of the cleaned text.
 `TextFacts.scan` also counts `idPatterns` with the patterns of §7.3 and `digitRuns4` = runs of ≥ 4 digits. Tests (`TextFactsTest`):
 `"Paid ₹ 1,250 to Ravi UPI Ref 123456789012"` → classes ⊇ {PROTECT_PAY}, amounts 1; `"482913 is your OTP. Valid for 10 min. Do not
 share."` → classes = {OTP}, amounts 0, idPatterns 0; `"MEGA SALE 50% OFF"` → {PROMO}; `"Happy Diwali"` → {GREETING};
-`"ABCPE1234F"` → idPatterns 1 (PAN); `""` → classes `[]`, counts 0.
+`"ABCPE1234F"` → idPatterns 1 (PAN); `""` → classes `[]`, counts 0; (A39) `"482913 is your OTP for a payment of Rs. 5,000 at Specimen
+Bank"` → classes ⊇ {OTP, PROTECT_BANK}, amounts 1.
 
 ### 6.6 Image categories (`ImageCategorizer`, spec 5.2; S8) — display and evaluation only, never a removal input
 
-`static Result categorize(FileContext ctx)`; `Result {String category; double confidence; String evidence}`; first match:
+`static Result categorize(FileContext ctx)` (needs only `ctx.f`, `ctx.feat`, `ctx.usage`; where `V2Json` has no context it builds one:
+`FileContext c = new FileContext(); c.f = f; c.feat = feat; c.usage = UsageClassifier.of(c);`); `Result {String category; double
+confidence; String evidence}`; "V-…" conditions below mean the §6.4 formulas evaluated on the facts (no unknowns check); first match:
 
 | # | Condition | Category | Conf |
 |---|---|---|---|
@@ -477,9 +566,9 @@ share."` → classes = {OTP}, amounts 0, idPatterns 0; `"MEGA SALE 50% OFF"` →
 | 11 | EXIF camera make present | `PERSONAL_PHOTO` | 0.5 |
 | 12 | otherwise | `UNKNOWN` | NaN |
 
-PETS, FOOD, PRODUCT, TRAVEL_SCENERY stay UNKNOWN until Phase 7 (they need a model). Written to `extra["category"]`,
-`["category.confidence"]`, `["category.source"] = "CONTENT_RULES"` only when the existing value is null/UNKNOWN (never overwrite a
-`PATH` category). Tests: one synthetic `FileContext` per row asserting the category; row order test (ID card with greeting text ⇒ row 2).
+PETS, FOOD, PRODUCT, TRAVEL_SCENERY stay UNKNOWN until Phase 7 (they need a model). REVIEW_6 F-M9: **not stored** (there is no
+"PATH category" to protect, and `FileRecord.category` is owned by discovery); jvmtest `V2Json` calls `ImageCategorizer.categorize(ctx)`
+when writing each file and emits `contentCategory`, `contentCategoryConfidence`. No rule reads it. Tests: one synthetic `FileContext` per row asserting the category; row order test (ID card with greeting text ⇒ row 2).
 
 ---
 
@@ -488,14 +577,17 @@ PETS, FOOD, PRODUCT, TRAVEL_SCENERY stay UNKNOWN until Phase 7 (they need a mode
 ### 7.1 Selection and dispatch (DOC pass)
 
 PRESENT; `type ∈ {pdf, docx, xlsx, pptx, odt, ods, odp, txt, csv}` or OLE2 magic `D0 CF 11 E0 A1 B1 1A E1` (`doc/xls/ppt`); size ≥ 1;
-`versions[DOC_TEXT] != current`. Order: `fileId`. `size > cfg.docMaxBytes (16 MiB)` ⇒ `status TOO_LARGE` (unknown). Read the whole file
-through `StorageAccess.open` into a `byte[]` (charge `budget.chargeBytes`). Dispatch: pdf → `PdfText`, OOXML → `OoxmlText`, ODF →
-`OdfText`, txt/csv → `PlainText`, OLE2 → `Ole2`. Then `DocFacts.fill(doc, text, title)` (S4). Text strings are discarded after S4 facts.
+`versions[DOC_TEXT] != current`. Order: `fileId`. PDF / txt / csv: `size > cfg.docMaxBytes (16 MiB)` ⇒ `status TOO_LARGE` (unknown);
+else read the whole file through `ctx.device.storage().open(f.volumeId, f.accessPath())` into a `byte[]` (charge `budget.chargeBytes`).
+OOXML/ODF: no whole-file read — `ReadableFile` + `ZipProbe` (§7.3). OLE2: first 4 MiB only (§7.3). Dispatch: pdf → `PdfText`,
+OOXML → `OoxmlText`, ODF → `OdfText`, txt/csv → `PlainText`, OLE2 → `Ole2`. Any `IOException` ⇒ `CORRUPT`; any `RuntimeException`/
+`OutOfMemoryError` ⇒ `CORRUPT` + problem (§5.3). Then `DocFacts.fill(doc, text, title)` (S4; before S4 the DOC pass fills only the
+§7.2/§7.3 fields). Text strings, title and author are discarded after `fill`.
 
 ### 7.2 `PdfText.extract(byte[] b, PdfInfo info) → Result {DocStatus status; StringBuilder text; int pages; int unsupported; String title, author}`
 
 1. `info != null && info.encrypted == TRUE` ⇒ `ENCRYPTED`, return (spec 5.3: unknown, scenario 9).
-2. Find streams: scan for the byte sequence `stream` followed by `\r\n` or `\n`; the stream dictionary is the last `<<`…`>>` (balanced,
+2. Find streams: scan for the byte sequence `stream` followed by `\r\n` or `\n` and **not** preceded by `end` (REVIEW_6 F-m4); the stream dictionary is the last `<<`…`>>` (balanced,
    nested allowed) that ends ≤ 3 bytes before the keyword, searched backwards ≤ 8 KiB. Data end = `/Length N` if it is a direct integer
    and `start+N ≤ b.length`; else the next `endstream` (strip one trailing EOL).
 3. Skip streams whose dictionary has `/Subtype /Image`, `/Type /XRef`, `/Type /Metadata` (read XMP separately, step 8),
@@ -544,9 +636,12 @@ Tests (`PdfTextTest`; PDFs built byte by byte in the test with `java.util.zip.De
 
 ### 7.3 OOXML, ODF, OLE2, plain text (`OoxmlText`, `OdfText`, `Ole2`, `PlainText`, `XmlText`)
 
-* Zip access: use `ZipProbe`'s central-directory listing (Phase 2) for names, compressed size, local header offset; read the local
-  header (30 bytes + name + extra), then `STORED` bytes or `BoundedInflater.inflate(comp, cap)`. Caps: per entry 16 MiB out, total
-  32 MiB, entries read ≤ 300. Encrypted entry flag (bit 0) ⇒ `ENCRYPTED`.
+* Zip access (REVIEW_6 F-M6 — reuse, do not re-implement): `ZipProbe.Listing l = ZipProbe.list(rf, size, Limits)` (existing, Phase 2)
+  gives `l.entries` (`ArchiveEntry`: `path`, `size`, `compressedSize`, `localOffset`, `encrypted` (Tri)); read one entry with the
+  existing `ZipProbe.read(rf, size, entry, maxOut = 4 MiB, maxRatio = 200)`, which returns **null** for an oversized/bad entry (⇒ `LIMIT`
+  if `entry.size > 4 MiB`, else skip with `unsupported++`). `l.info.listingStatus != "OK"` ⇒ `CORRUPT`. Caps: per entry 4 MiB
+  out, total 32 MiB, entries read ≤ 300; cap hit ⇒ `LIMIT` (unknown). An entry with `encrypted == Tri.TRUE` ⇒
+  `ENCRYPTED`. An `IOException` from `read` ⇒ skip entry, `unsupported++`.
 * Entries: docx `word/document.xml` (+ `word/footnotes.xml` if present); xlsx `xl/sharedStrings.xml` (no sheets); pptx
   `ppt/slides/slide<N>.xml` for N = 1..200 in numeric order; ODF `content.xml`, metadata `meta.xml` (`dc:title`, `meta:initial-creator`,
   `meta:creation-date`, `meta:document-statistic meta:page-count`); OOXML metadata `docProps/core.xml` (`dc:title`, `dc:creator`,
@@ -556,9 +651,9 @@ Tests (`PdfTextTest`; PDFs built byte by byte in the test with `java.util.zip.De
   data inside `textElements` (`w:t`, `t`, `a:t`, `text:p`, `text:span`, `text:h`) is appended; end of `breakElements` (`w:p`, `a:p`,
   `si`, `text:p`) appends `'\n'`; entities `&amp; &lt; &gt; &quot; &apos; &#N; &#xH;` decoded, unknown entity kept literally;
   depth > 256 or malformed ⇒ stop and return what was collected (status stays OK if ≥ 20 chars, else CORRUPT).
-* `Ole2`: magic match ⇒ read the directory sector chain minimally: if any directory entry name (UTF-16LE) equals `EncryptedPackage`
-  or `EncryptionInfo` ⇒ `ENCRYPTED` (password-protected OOXML); else `format "ole2"`, `UNSUPPORTED` (legacy .doc/.xls text is not
-  extracted; unknown). A malformed header ⇒ `CORRUPT`.
+* `Ole2` (REVIEW_6 F-M6, simplified): magic match ⇒ search the first 4 MiB for the UTF-16LE byte strings of `EncryptedPackage` or
+  `EncryptionInfo`; found ⇒ `ENCRYPTED` (password-protected OOXML); else `format "ole2"`, `UNSUPPORTED` (legacy .doc/.xls text is not
+  extracted; unknown). No sector-chain parsing. (A false hit only yields "encrypted" = unknown, the safe side.)
 * `PlainText`: first 1 MiB; BOM `EF BB BF` UTF-8, `FF FE`/`FE FF` UTF-16; else valid UTF-8 ⇒ UTF-8; else Windows-1252. CSV is text.
 
 Tests (`OoxmlTextTest`; fixtures zipped in the test with `java.util.zip.ZipOutputStream`): docx with two `w:p` → two lines, title/creator
@@ -578,7 +673,8 @@ decoded; dataset `Documents/Letter_to_Society_Secretary.docx` → OK, chars > 10
    double count of overlapping spans); `dates` = count of `TextRules`' three date shapes (re-declared as v2 patterns: `D_NUM`, `D_TXT`,
    `D_ISO`); `latestDate = TextRules.date(lowercased text, now)` (0 ⇒ unknown).
 4. Category: `DocCategorizer.score(lowercased title + "\n" + text)` adds the weight of each **distinct** keyword hit (list below,
-   English + transliterated + Devanagari, whole-token for single words, substring for multi-word) and of each `idKinds` element
+   English + transliterated + Devanagari, whole-token for single words, substring for multi-word; REVIEW_6 F-m10: text is NFC-normalised
+   and tokens are `split("[\\s\\p{Punct}।॥]+")` — do **not** use regex `\b`, which breaks Devanagari words at vowel signs) and of each `idKinds` element
    (+3 to the category in brackets). Highest score ≥ 3 wins; ties by the order of the table (protective first). Otherwise `UNKNOWN`.
 5. `minhash` = `MinHash.of(text)`: 5-character shingles of the lower-cased, whitespace-collapsed text; 16 hash functions
    `h_i(s) = (a_i · fnv1a32(s) + b_i) mod 2^31−1` with fixed `a_i, b_i` (constants in the class); `null` when `chars < 200`.
@@ -604,7 +700,9 @@ dataset); `Keywords.tokens` already splits on `_ - . space`, and NFC handles mat
 
 **Path keywords (`v2.risk.Keywords`, S4):** append the Devanagari and transliterated words above to `FINANCIAL`, `LEGAL`, `MEDICAL`, and
 `SENTIMENTAL += लग्न, विवाह, वाढदिवस, जन्मदिन, आठवणी, यादें`. This changes Phase 4/5 results (expected: `Documents/आधार_कार्ड_नमूना.pdf`
-and its sibling move KEEP → PROTECTED `P_UNIQUE_RECORD`; acceptable for both).
+and its sibling move KEEP → PROTECTED `P_UNIQUE_RECORD`; acceptable for both). REVIEW_6 F-m9: `Keywords.record(path)` also drives
+`UsageClassifier` (DOCUMENT → DOCUMENT_RECORD, and images under `Documents/`), so the slice notes must list every file whose usage
+changes, not only tier changes.
 
 Tests (`DocFactsTest`): `"PAN: ABCPE1234F"` → idKinds [PAN], category LEGAL (score 3 ≥ 3); `"Aadhaar 2345 6789 0123"` with a Verhoeff-invalid
 number → no AADHAAR; a valid one (compute in test) → [AADHAAR]; `"Account Statement … IFSC SPEC0001234 … Balance"` → FINANCIAL;
@@ -639,271 +737,268 @@ v1→v2→final→final_FINAL (chain by modifiedAt); jaccard of unrelated texts 
 
 ---
 
-## 8. Video (S2, S11)
+## 8. Video (S2) — REVIEW_6: protect only
 
-### 8.1 Bitstream activity profile (`Mp4Tables`, `ActivityProfile`; pure Java; S2)
+### 8.1 Bitstream activity profile (`Mp4Tables`, `ActivityProfile`; pure Java; S2) — protect only (A41)
 
 Why: a phone camera video's compressed non-key frames are tiny when nothing changes and spike when something moves. The sample-size
 table (`stsz`) covers **every** frame of the whole recording without decoding anything, so scenario 8's 5–10 s events cannot fall
-between sample points (§0.3).
+between sample points (§0.3, re-checked by REVIEW_6: 4/4 windows found, control 0 peaks).
 
-`Mp4Tables.read(ReadableFile f, long maxMoovBytes = 16 MiB) → Tables` (per track: handler `vide`/`soun`, `mdhd` timescale + duration,
-`stts` entries, `stsz` (constant size or table), `stss` (null = absent), `stsd` first codec fourcc). Reuse `Mp4Probe`'s box walk; read
-the whole `moov` (≤ 16 MiB, else `TOO_LARGE`). `moof` present ⇒ `FRAGMENTED`. Sample count > 2,000,000 ⇒ `TOO_LARGE`. Malformed sizes
-⇒ `CORRUPT`. Not an ISO-BMFF ⇒ `UNSUPPORTED`.
+Selection (ACTIVITY pass): PRESENT, `type ∈ {mp4, mov, 3gp}`, usage CAMERA_VIDEO or CHAT_MEDIA or DOWNLOAD, `versions[ACTIVITY] != current`.
+Order `fileId`. (m4a/audio is not selected — REVIEW_6 F-B3.)
 
-`ActivityProfile.video(Tables t, int width, int height) → fills ActivityInfo`:
-1. No `vide` track ⇒ `videoStatus` stays `NOT_RUN` (audio-only file). No `stsz` ⇒ `NO_SAMPLE_TABLE`.
-2. Sample times: `t_i` (ms) = Σ stts deltas before i × 1000 / timescale. `durationMs` = mdhd duration (else last t + last delta).
-3. `stss == null` or every sample is a sync sample ⇒ `ALL_KEYFRAMES` (MJPEG-like: profile meaningless ⇒ unknown).
+`Mp4Tables.read(ReadableFile f, long size, long maxMoovBytes = 16 MiB) → Tables` (per track: handler `vide`/`soun`, `mdhd` timescale +
+duration, `stts` entries, `stsz` (constant size or table), `stss` (null = absent), `ctts` present?). Walk the top-level boxes yourself with
+the same 32/64-bit size rules as `Mp4Probe.walk` (do not change `Mp4Probe`); read the whole `moov` (≤ 16 MiB, else `TOO_LARGE`).
+Status rules, checked in this order: no `ftyp`/`moov` box in the first 64 KiB of top-level boxes and no `moov` anywhere ⇒ `UNSUPPORTED`;
+any top-level `moof` ⇒ `FRAGMENTED`; a box size < 8 or past end of file ⇒ `CORRUPT`; `stsz` sample count > 2,000,000 **or**
+`12 + 4·count > stsz box payload` (count lies) ⇒ `TOO_LARGE`/`CORRUPT` **before** allocating any array.
+Non-MP4 containers (mkv, avi, webm, ts) are not selected and stay `NOT_RUN`. **Every status other than OK means "activity unknown"; unknown
+is never read as "static" or "no activity" by anything** (there is no static rule in Phase 6).
+
+`ActivityProfile.video(Tables t) → fills ActivityInfo`:
+1. No `vide` track ⇒ `videoStatus` stays `NOT_RUN`. No `stsz` ⇒ `NO_SAMPLE_TABLE`.
+2. Sample times (decode order): `t_i` (ms) = Σ stts deltas before i × 1000 / timescale. B-frames (`ctts`) shift presentation by < 1 s and
+   are ignored (1-s windows absorb them). `durationMs` = mdhd duration × 1000 / timescale (else last t + last delta).
+3. `stss == null` (every sample is sync) or `stss` lists every sample ⇒ `ALL_KEYFRAMES` (unknown; MJPEG-like).
 4. Windows of W = 1000 ms; `B_w` = Σ size of **non-key** samples with `t_i` in window w; `n` = number of windows with ≥ 1 non-key sample.
-5. `n < 10` ⇒ `SHORT` (peaks still computed; `staticCandidate` UNKNOWN).
-6. `M = median(B_w)`, `P = max(4·M, M + 2048)`; `peakThreshold = P`; peak windows = `B_w > P`; merge peak windows ≤ 2 windows apart
-   into intervals `[startMs, endMs)`; keep the first 32 in `peaks`; `peakWindows` = count; `activeShare = peakWindows / n`.
-7. `bppMedian = 8 · median(non-key sample sizes) / (width · height)` when width, height > 0 (from `VideoInfo`), else NaN.
-8. `staticCandidate`: `FALSE` if `peakWindows ≥ 1`; `TRUE` iff `n ≥ 60` and `peakWindows == 0` and `bppMedian < 0.005` and the 99th
-   percentile of `B_w` ≤ `2·M + 2048`; else `UNKNOWN`. (A constant-bitrate encoder fills static scenes with bits: high `bppMedian` ⇒ UNKNOWN,
-   never TRUE — that is the case a flat profile cannot decide.)
-9. `videoStatus = OK` (or SHORT).
+   4b. (REVIEW_6 F-M4) Irregular keyframes: let `g` = median distance (in samples) between consecutive sync samples. A sync sample whose
+   distance to the previous sync sample is `< 0.8·g` (an encoder "scene-cut" keyframe inserted early, which would hide an event's bytes
+   from `B_w`) marks its window as a peak window. `irregularSync` = their count. With a regular GOP (the dataset: every 10 s) it is 0.
+5. `n < 10` ⇒ `SHORT` (peaks still computed and still protect).
+6. `M = median(B_w)`, `P = max(4·M, M + 2048)`; `peakThreshold = P`; peak windows = `B_w > P` plus the windows of step 4b; merge peak
+   windows ≤ 2 windows apart into intervals `[startMs, endMs)`; keep the first 32 in `peaks`; `peakWindows` = count of peak windows.
+7. `videoStatus = OK` (or SHORT).
 
-Thresholds: 4×, +2048 B, 0.005 bpp are initial values from §0.3 (events ≥ 6.5 KB/s vs median ≤ 0.62 KB/s; static control 0.0018 bpp);
-S2 records the dataset margins; real-phone recordings are a device-verification item (§12).
+Constant-bitrate encoders, encoders that spread bits evenly, and very noisy scenes give few or no peaks: that only means *no extra
+protection* (the Phase 5 state), never a candidate. Thresholds 4×, +2048 B are fixed constants in `ActivityProfile`.
 
-Effects: `peakWindows ≥ 1` ⇒ CONTENT signal `VIDEO_ACTIVITY` (+1, 0.6) ⇒ personal L factor +0.1 (`LossEstimator`) and veto V-ACTIVITY on
-every video Y rule; it never lowers anything. `staticCandidate` alone authorises nothing (§8.3 needs decoded frames too).
+Effects (wired in S8): `peakWindows ≥ 1` ⇒ CONTENT signal `VIDEO_ACTIVITY` (+1, 0.6) ⇒ personal L factor `f[0]` +0.1 (`LossEstimator`,
+as CAPTURE does, capped at 1). It never lowers anything and no rule reads its absence.
 
-Tests (`ActivityProfileTest`; MP4 built in test via the existing `Mp4ProbeTest` box writer, extended with `stsz`/`stss`/`stts`):
+Tests (`ActivityProfileTest`; MP4 built in the test by a small box writer — `Mp4ProbeTest` has one to copy — with `stsz`/`stss`/`stts`):
 
 | # | Synthetic track | Expected |
 |---|---|---|
-| 1 | 600 s, 10 fps, key every 100, non-key 25 B, frames 4550–4650 = 800 B | 1 peak `[455000, 466000)` ±1 window, staticCandidate FALSE |
-| 2 | 300 s, non-key 51 B, 640×360 | 0 peaks, bpp 0.00177, staticCandidate TRUE |
-| 3 | 300 s CBR: every non-key 3000 B, 640×360 | 0 peaks, bpp 0.104, staticCandidate UNKNOWN |
-| 4 | no `stss` | ALL_KEYFRAMES |
-| 5 | 5 s clip | SHORT, staticCandidate UNKNOWN |
+| 1 | 600 s, 10 fps, key every 100, non-key 25 B, frames 4550–4650 = 800 B | 1 interval covering `[455000, 465000]` ± 1 window, `irregularSync 0` |
+| 2 | 300 s, non-key 51 B, regular keys | 0 peaks, OK |
+| 3 | 300 s CBR: every non-key 3000 B | 0 peaks, OK (no protection, no other effect) |
+| 4 | no `stss` | ALL_KEYFRAMES, `peaks == null` |
+| 5 | 5 s clip with one 5 KB non-key frame | SHORT, 1 peak |
 | 6 | `moof` box present | FRAGMENTED |
-| 7 | `stsz` claims 3,000,000 samples | TOO_LARGE, no allocation > 16 MiB |
-| 8 | 40 separate peaks | `peaks.length == 64` (32 intervals), `peakWindows == 40` |
-| 9 | dataset S08 (skipped without dataset) | the 4 mnd videos: ≥ 1 interval overlapping 455–466 / 211–218 / 377–386 / 302–308 s; `VID_20210313_082140.mp4`: 0 peaks, TRUE |
+| 7 | `stsz` claims 3,000,000 samples in a 100-byte box | TOO_LARGE or CORRUPT, no array allocated (assert via a counting allocator or by timing < 50 ms) |
+| 8 | 40 separate peaks 10 s apart | `peaks.length == 64` (32 intervals), `peakWindows == 40` |
+| 9 | keys every 100 samples plus one extra key at sample 4555 (event bytes inside it) | that window is a peak, `irregularSync 1` |
+| 10 | a Matroska header (`1A 45 DF A3`) named `.mp4` | UNSUPPORTED |
+| 11 | dataset S08 (skipped without dataset) | each of `VID_20211218_072048`, `VID_20221001_124052`, `VID_20221108_181137`, `VID_20240926_121949`: ≥ 1 interval overlapping 455–465 / 211–217 / 377–385 / 302–307 s; `VID_20210313_082140`: 0 peaks |
 
-### 8.2 Adaptive frame sampling (`FrameSampler`, stage `T6_DETAIL`; S11; decode device-only)
-
-Selection: usage CAMERA_VIDEO (screen recordings under `DCIM/ScreenRecorder` excluded: path contains `screenrecord`); `activity.videoStatus ∈ {OK, SHORT}`;
-`durationMs ≥ 60,000`; `versions[FRAMES] != current`; and the video is a **Y_STATIC_VIDEO prospect** (`staticCandidate == TRUE`) **or** has
-`peakWindows ≥ 1` (frames there feed faces ⇒ protection). Order: `staticCandidate TRUE` first, then size descending, then fileId.
-
-Frame source: `V2Device.media().videoFrame(vol, path, timeMs, 256)` (existing ARCH 3.2 interface; Android implementation in S10; JVM
-`JvmMediaDecoder` gets an optional `DirFrameSource`, §11.2).
-
-Plan (all times clamped to `[0, durationMs − 500]`, de-duplicated within 500 ms, processed in ascending time):
-1. Initial: 0 %, 10 %, 25 %, 50 %, 75 %, 90 %, 100 % (spec 5.4).
-2. Activity: for each peak interval (ordered by bytes, largest first): start, middle, end − 500.
-3. Scene trigger: after decoding, for consecutive decoded frames with Hamming(phash) > 12, add the midpoint once (depth ≤ 2).
-4. Face trigger: a frame with a face (detector on, ≤ 6 detector calls per video) ⇒ add t − 2000 and t + 2000.
-5. Uncertainty trigger: if after steps 1–4 the decoded frames disagree on "nothing visible" (some `contrast < 10`, some not) ⇒ add 3
-   frames evenly between the two disagreeing neighbours.
-6. Stop when `framesPerVideo` (LOW 12 / BALANCED 24 / HIGH 40) or `framesPerRun` is reached; a video stopped by the run cap keeps
-   `versions[FRAMES]` unstamped and its partial `FrameInfo` is **not** written (all-or-nothing per video ⇒ resumable).
-
-Per frame: status OK ⇒ `phash = ImageFeatures.phash(luma, w, h)`; `contrast` (luma std-dev, as `ImageBasics`); `nothingVisible` if
-`contrast < 10`. Summary: `diversity` = mean pairwise Hamming/64; `sceneChanges` = consecutive pairs with Hamming > 12;
-`faceFrames`; `coversPeaks` = every peak interval contains ≥ 1 decoded frame; `status OK` iff `decoded ≥ 7` and `failed ≤ 2`, else
-`FAILED`; `engineVerified = ContentConfig.VERIFIED_FRAME_SOURCES.contains(source id)` (`"dir-fixture"` on JVM; Android
-`"mmr-26"` added only after §12 verification).
-
-### 8.3 Video rule `Y_STATIC_VIDEO` (S11; subject to §16 Q3)
-
-YOUR_CALL DELETE, families {CONTENT, PIXEL}, `needsFeatures = true`, all must hold: usage CAMERA_VIDEO; `durationMs ≥ 60 s`;
-`activity.staticCandidate == TRUE` and `peakWindows == 0`; `frames.status == OK && engineVerified`; `frames.faceFrames == 0`;
-(`frames.nothingVisible == frames.decoded`) **or** (`frames.diversity < 0.05` and `frames.sceneChanges == 0`); audio: `VideoInfo.audioTracks == 0`
-or `activity.digitalSilence == TRUE` (a pocket recording may hold a conversation: unknown audio ⇒ not eligible); no exact/near group role
-(keeper/member); not protected. Params `{duration, n}`. Standard and aggressive identical (no knob). Scenario 8 guarantee: an mnd video
-with an event has `peakWindows ≥ 1` ⇒ ineligible **regardless of frames**; with frames unavailable the rule cannot fire at all.
+(REVIEW_6 F-B3: §8.2 adaptive frame sampling and §8.3 `Y_STATIC_VIDEO` are removed by A41. If a later phase reinstates them, the
+design is in git history at the commit before REVIEW_6.)
 
 ---
 
 ## 9. Risk integration and the A28 rules (S8, S9)
 
-### 9.1 `v2.risk.ContentFacts` (built in `ContextBuilder` after `usage`; field `FileContext.content`, never null)
+### 9.1 `v2.risk.ContentFacts` (built in `ContextBuilder.finish` right after the `classification` loop (line ~52): `c.content = ContentFacts.of(c, c.now);`; field `FileContext.content`, never null)
+
+(REVIEW_6: section rewritten for F-M1, A39–A41, A43.)
 
 ```java
+package com.storageplanner.v2.risk;
 public final class ContentFacts {
-    public String recordCategory;            // "payment confirmation", "ticket", "identity document", "receipt", "bill",
-                                             // "financial record", "legal record", "medical record", "certificate", "invoice",
-                                             // "personal record"; null = none known
+    public String recordCategory;            // see step 1; null = none known
     public java.util.List<String> recordEvidence = new java.util.ArrayList<String>();   // e.g. "text:PAYMENT", "doc:DOC_FINANCIAL", "id:PAN"
-    public java.util.List<String> vetoes = new java.util.ArrayList<String>();           // §6.4 ids that fired, incl. V-UNKNOWN reasons
-    public String disposableKind;            // OTP, ADVERT, GREETING, MEME, CHAT; null = none
-    public boolean detectorsComplete;        // V-UNKNOWN did not fire
-    public Tri videoActivity = Tri.UNKNOWN;  // TRUE peaks, FALSE staticCandidate TRUE, else UNKNOWN
-    public static ContentFacts of(FileContext ctx, long now, PresentationPolicy pol) { ... }
+    public java.util.List<String> vetoes = new java.util.ArrayList<String>();           // §6.4 V-ids that fired (protective content)
+    public java.util.List<String> unknowns = new java.util.ArrayList<String>();         // §6.4 U-ids (a check did not finish / not verified)
+    public String disposableKind;            // OTP, ADVERT, GREETING, MEME; null = none
+    public boolean detectorsComplete;        // unknowns.isEmpty() (false for every non-image file)
+    public boolean videoActivity;            // activity peaks found (protect only)
+    public static ContentFacts of(FileContext ctx, long now) { ... }      // pure: no I/O, no mode input
 }
 ```
-Algorithm `of`:
-1. Record (protect): images — `text.kind` PAYMENT → "payment confirmation", TICKET → "ticket", ID → "identity document",
-   RECEIPT → "receipt", BILL → "bill"; else `idPatterns ≥ 1` → "identity document"; else classes ∋ PROTECT_PAY and `amounts ≥ 1` →
-   "payment confirmation". Only from `text.status ∈ {READ, PARTIAL_SCRIPT}` (any engine, verified or not: protection is always allowed).
-   Documents — `doc.category ∈ RECORD` → mapped name; `idKinds` non-empty → "identity document" if LEGAL else the category's name.
-2. Vetoes: evaluate §6.4 in table order; append ids (V-UNKNOWN appends `V-UNKNOWN:<which>`).
-3. `disposableKind` (only if `text.status == READ`, or `PARTIAL_SCRIPT` and GREETING per §9.2): `kind == OTP` or classes == {OTP} ⇒ OTP;
-   ≥ 2 PROMO words (or "% off") ⇒ ADVERT; `kind == GREETING` or classes ∋ GREETING ⇒ GREETING; usage CHAT_MEDIA and `bigText ≥ 0.25`
-   and `textArea ≥ 0.03` and `goodWords ≤ 40` and `kind == null` ⇒ MEME; usage SCREENSHOT and `kind == CHAT` ⇒ CHAT.
-4. `videoActivity` from `activity`.
+Algorithm `of` (`img` = `Types.image(ctx.f.type)`; `v = ctx.visual()`, `t = ctx.text()`, `d = ctx.doc()`, `act = ctx.activity()`):
+1. **Record (protect).** Images, when `t != null && t.status ∈ {READ, PARTIAL_SCRIPT, LOW_CONFIDENCE}` (any engine, verified or not —
+   protection is always allowed): `t.kind` PAYMENT → "payment confirmation", TICKET → "ticket", ID → "identity document",
+   RECEIPT → "receipt", BILL → "bill"; else `t.idPatterns ≥ 1` → "identity document"; else `t.classes ∋ PROTECT_PAY && t.amounts ≥ 1`
+   → "payment confirmation". Evidence `"text:" + kind` or `"text:ids"` / `"text:pay"`.
+   Documents, when `d != null && d.status == OK`: `d.idKinds` ∩ {PAN, AADHAAR, PASSPORT_IN, SSN} ≠ ∅ → "identity document"; else
+   `d.category` DOC_LEGAL → "legal record", DOC_FINANCIAL → "financial record", DOC_MEDICAL → "medical record", DOC_CERTIFICATE →
+   "certificate", DOC_INVOICE → "invoice", DOC_RECEIPT → "receipt", DOC_PERSONAL_RECORD → "personal record". Evidence
+   `"doc:" + category` and `"id:" + kind` for each id kind.
+2. If `!img`: stop here (`vetoes`, `unknowns` empty, `detectorsComplete = false`, `disposableKind = null`) — then step 5.
+3. Vetoes: evaluate the §6.4 V-table in table order on `v`, `t` (a V-condition whose input is unknown does not fire — the U-list covers
+   it); append ids. Unknowns: append the U-ids of §6.4. `detectorsComplete = unknowns.isEmpty()`.
+4. `disposableKind`, only if `t.status == READ`, first match:
+   * OTP (A39) — `t.kind == OTP` or `t.classes` equals exactly `[OTP]`. (Bank/payment/amount/id text with it fires V-TEXT or V-AMOUNT,
+     so the file is not eligible; the S8 test proves it.)
+   * ADVERT — `t.classes ∋ PROMO` (TextFacts adds PROMO only for ≥ 2 distinct PROMO entries or the substring `% off`).
+   * GREETING — `t.kind == GREETING` or `t.classes ∋ GREETING`.
+   * MEME — `ctx.usage == CHAT_MEDIA && v.bigText ≥ 0.25 && v.textArea ≥ 0.03 && t.goodWords ≤ 40 && t.kind == null`.
+   (REVIEW_6 F-M10: the aggressive-only CHAT kind is removed.)
+5. `videoActivity = act != null && act.videoStatus ∈ {OK, SHORT} && act.peakWindows ≥ 1`.
 
-Effects wired in S8 (protect only):
-* `SignalExtractor`: `recordCategory != null` ⇒ `Signal(CONTENT, "CONTENT_RECORD", +1, 0.9, "content:" + evidence0)`;
-  `videoActivity == TRUE` ⇒ `Signal(CONTENT, "VIDEO_ACTIVITY", +1, 0.6, "activity")`. Disposable kinds produce **no** signal (they only
-  enable candidates; U is never lowered by content, PHASE_4 §10).
-* `LossEstimator.estimate`, after the path-keyword lines: payment/receipt/bill/invoice/financial ⇒ `f[1] = f[1].max(.9,.9,1)`;
-  identity/legal/certificate/medical ⇒ `f[2] = f[2].max(.9,.9,1)`; ticket ⇒ `f[0] = f[0].max(.6,.7,.9)` and `f[1].max(.5,.6,.8)`;
-  `VIDEO_ACTIVITY` ⇒ `f[0]` +0.1 (capped at 1), as CAPTURE does.
-* `CandidateRules` `P_UNIQUE_RECORD`: condition becomes `(u == DOCUMENT_RECORD || (u == CHAT_BACKUP && …) || (ctx.content.recordCategory != null
-  && !u.junk()))` and the rest unchanged (`lossRange.high ≥ 0.8`, not verified-backed-up, not a redundant member); `category` param =
-  `recordCategory` when set; families `{CONTENT}` for content-only records; evidence `"content:" + …`.
-  Row T then forbids transforms on them automatically (`lossRange.high ≥ 0.8`).
-* `ImageCategorizer` output to `extra["category"]` (§6.6).
+Effects wired in S4 (documents) and S8 (images, video) — protect only:
+* `SignalExtractor.extract`, at the end: `recordCategory != null` ⇒ `s.add(new Signal(EvidenceFamily.CONTENT, "CONTENT_RECORD", +1, 0.9,
+  "content:" + recordEvidence.get(0)))`; `videoActivity` ⇒ `s.add(new Signal(EvidenceFamily.CONTENT, "VIDEO_ACTIVITY", +1, 0.6, "activity"))`.
+  Disposable kinds produce **no** signal (U is never lowered by content, PHASE_4 §10).
+* `LossEstimator.estimate`, directly after the path-keyword lines (41–43): payment confirmation / receipt / bill / invoice / financial
+  record ⇒ `f[1] = f[1].max(Interval.of(.9, .9, 1))`; identity document / legal record / certificate / medical record / personal record
+  ⇒ `f[2] = f[2].max(Interval.of(.9, .9, 1))`; ticket ⇒ `f[0] = f[0].max(Interval.of(.6, .7, .9))` and `f[1] = f[1].max(Interval.of(.5, .6, .8))`;
+  `VIDEO_ACTIVITY` signal present ⇒ `f[0]` + 0.1 on low/mid/high capped at 1 (same code as the CAPTURE line 44–45).
+* `CandidateRules` `P_UNIQUE_RECORD` (line ~185): replace
+  `(u == UsageClass.DOCUMENT_RECORD || (u == UsageClass.CHAT_BACKUP && nameLow.startsWith("msgstore.db.crypt")))` by
+  `(u == UsageClass.DOCUMENT_RECORD || (u == UsageClass.CHAT_BACKUP && nameLow.startsWith("msgstore.db.crypt")) || (ctx.content.recordCategory != null && !u.junk()))`;
+  rest unchanged; `cat` = `ctx.content.recordCategory` when set (it wins over `ctx.classification`); when the content record is the
+  only reason, add `EvidenceFamily.CONTENT` to the candidate and `"content:" + recordEvidence.get(0)` to `evidenceRefs`.
 
-### 9.2 The three content Y rules (`v2.risk.ContentRules.candidates(ctx, a, pol)`, called from `CandidateRules.generate` before the P_ block; S9)
+### 9.2 The three content Y rules (`v2.risk.ContentRules.candidates(FileContext ctx, Assessment a, PresentationPolicy pol)`, called from `CandidateRules.generate` before the `// ---- P_ ----` block; S9)
 
-Common requirements (all three): action DELETE, tier YOUR_CALL, `needsFeatures = true`, `ctx.content.detectorsComplete`,
-`ctx.content.vetoes.isEmpty()`, `ctx.content.recordCategory == null`, `ctx.content.disposableKind != null`, `ctx.keeperOf.isEmpty()`,
-`f.protection == NONE`, type ∈ {jpeg, png}, `ctx.ageMs ≥ minAge` (ageSource CREATED or mtime fallback; unknown age ⇒ not eligible),
-`fallbackCode = null` (dropped when blocked). Families listed per rule; TIME is never listed (H10).
+Common requirements (all three; every one is a separate `if` returning no candidate): `ctx.content.detectorsComplete`;
+`ctx.content.vetoes.isEmpty()`; `ctx.content.recordCategory == null`; `ctx.content.disposableKind != null`; `ctx.keeperOf.isEmpty()`;
+`ctx.f.protection == Protection.NONE`; `ctx.f.type ∈ {jpeg, png}`; `ctx.ageMs ≥ 0 && ctx.ageMs ≥ minAgeDays · RiskConfig.DAY`
+(unknown age ⇒ not eligible). Candidate: `new Candidate(code, Tier.YOUR_CALL, Action.DELETE, families…)`, `needsFeatures = true`,
+`fallbackCode = null`. Families per rule; TIME is never listed (H10).
 
-| Rule | Usage | Allowed `disposableKind` (standard / aggressive) | minAge std / aggr | Families | Params |
+| Rule | Usage | Allowed `disposableKind` (both modes) | minAge std / aggr (days) | Families | Params |
 |---|---|---|---|---|---|
-| `Y_OLD_SCREENSHOT` | SCREENSHOT | OTP, ADVERT / + CHAT | 90 d / 30 d | CONTENT, PROV | `age`, `kind` ∈ {"a one-time code message", "an advertisement", "a chat conversation"} |
-| `Y_FORWARDED_MEDIA` | CHAT_MEDIA (area ∈ wa_image, telegram_media) | GREETING, MEME, ADVERT / same | 30 d / 7 d | CONTENT, PROV, PIXEL | `kind` ∈ {"greeting", "meme", "advertisement"}, `app` ("WhatsApp"/"Telegram"), `signal` ("text written over the picture", "no people in it") |
-| `Y_OLD_DOWNLOAD` | DOWNLOAD, image only | ADVERT, GREETING / same | 90 d / 30 d | CONTENT, PROV | `age`, `kind` |
+| `Y_OLD_SCREENSHOT` | SCREENSHOT | OTP, ADVERT | 90 / 30 | CONTENT, PROV | `age` (as `CandidateRules.age(ms)`), `kind` ∈ {"a one-time code message", "an advertisement"} |
+| `Y_FORWARDED_MEDIA` | CHAT_MEDIA and `ctx.f.area ∈ {wa_image, telegram_media}` | GREETING, MEME, ADVERT | 30 / 7 | CONTENT, PROV, PIXEL | `kind` ∈ {"greeting", "meme", "advertisement"}, `app` ("WhatsApp" for wa_image, "Telegram"), `signal` "text written over the picture, no people in it" |
+| `Y_OLD_DOWNLOAD` | DOWNLOAD | ADVERT, GREETING | 90 / 30 | CONTENT, PROV | `age`, `kind` ∈ {"an advertisement", "a greeting"} |
 
-Rule F step 4 (PARTIAL_SCRIPT greetings, §16 Q2): `Y_FORWARDED_MEDIA` with `disposableKind == GREETING` accepts `text.status ==
-PARTIAL_SCRIPT` iff additionally `digitRuns4 == 0`, `bigText ≥ 0.25` and `colorful ≥ 50`; every other rule and kind needs `READ`.
+(REVIEW_6 F-B2: "rule F step 4" — PARTIAL_SCRIPT greetings — is deleted by A40.)
 
-Defence in depth — new hard rule **HC16** in `HardRules.check` (no mode input, H7): for a removal candidate whose `families` contain
-`CONTENT`: `!ctx.content.vetoes.isEmpty()` or `ctx.content.recordCategory != null` ⇒ block `H_CONTENT_PROTECTIVE`; `!ctx.content.detectorsComplete`
-⇒ block `H_CONTENT_NOT_CHECKED`. Add `"HC16"` to `HardRules.ORDER`. The existing HC7 (CONTENT/TIME alone never enough) and HC8
-(`needsFeatures`) apply unchanged; HC12 is extended in S11/S12 only (§16 Q3).
+`PresentationPolicy` gains three `int` fields `screenshotMinAgeDays 90/30`, `forwardMinAgeDays 30/7`, `downloadMinAgeDays 90/30`
+(add them to the constructor; STANDARD/AGGRESSIVE constants updated). REVIEW_6 F-M10: aggressive mode changes **only these ages**;
+eligible kinds, vetoes, unknowns and HC16 are identical in both modes.
 
-`PresentationPolicy` gains (STANDARD / AGGRESSIVE): `screenshotMinAgeDays 90/30`, `forwardMinAgeDays 30/7`, `downloadMinAgeDays 90/30`,
-`screenshotChatKind false/true`, `recentTextDateDays 30/7`. `HardRules`, vetoes and detector requirements are identical in both modes.
+**Hard rule HC16** (defence in depth, `HardRules.check`, no mode input, H7). Add at the end of `check()` (after HC14) and append `"HC16"`
+to `ORDER`:
+```java
+if (rem && c.families.contains(EvidenceFamily.CONTENT)) {                                                        // HC16
+    if (!ctx.content.vetoes.isEmpty() || ctx.content.recordCategory != null) add(b, "H_CONTENT_PROTECTIVE");
+    if (!ctx.content.detectorsComplete) add(b, "H_CONTENT_NOT_CHECKED");
+}
+```
+Order rationale: HC1 (user protection) and HC2 still come first; HC16 is last because it can only add blocks, never remove one.
+It applies to **every** removal candidate citing CONTENT (today only the three rules above). HC7 (CONTENT alone never enough, never SAFE)
+and HC8 (`needsFeatures`) apply unchanged; HC12 is **not** extended (A41). `ReasonCatalog` gets both block codes (§9.3).
 
-TierAssigner row 8 is unchanged (EL_pess ≤ tYourCall, C ≥ cYourCall). Check (S9 test): with the Phase 4 tables a SCREENSHOT has
-`EL_pess ≈ 0.218 × 0.80 = 0.17`, CHAT_MEDIA ≈ 0.08, DOWNLOAD ≈ 0.08 (all ≤ 0.25) — if `anyUnknown` pushes a screenshot over 0.25 the
-candidate is dropped, which is the safe direction; report the count.
+TierAssigner row 8 is unchanged (EL_pess ≤ tYourCall, C ≥ cYourCall). If `anyUnknown` pushes a screenshot's EL over 0.25 the candidate
+is dropped — the safe direction; S9 reports the count.
 
-### 9.3 User-facing sentences (ReasonCatalog; S5, S8, S9, S11, S12)
+### 9.3 User-facing sentences (ReasonCatalog; S4, S5, S8, S9) — all are **new** entries (REVIEW_6 F-m5: none exists yet)
 
 | Code | Tier | Sentence |
 |---|---|---|
-| `Y_OLD_SCREENSHOT` | YOUR_CALL | "Screenshot from {age} ago that looks like {kind}." (unchanged) |
-| `Y_FORWARDED_MEDIA` | YOUR_CALL | "Looks like a forwarded {kind} received in {app} ({signal})." (parenthesis replaces "and"; same params) |
+| `Y_OLD_SCREENSHOT` | YOUR_CALL | "Screenshot from {age} ago that looks like {kind}." |
+| `Y_FORWARDED_MEDIA` | YOUR_CALL | "Looks like a forwarded {kind} received in {app} ({signal})." |
 | `Y_OLD_DOWNLOAD` | YOUR_CALL | "Downloaded {age} ago; it looks like {kind}. Android does not tell us whether you opened it since." |
-| `Y_STATIC_VIDEO` ★ | YOUR_CALL | "{duration} video in which nothing changes: {n} frames checked and no movement found anywhere in the recording." |
-| `Y_SILENT_RECORDING` ★ | YOUR_CALL | "{duration} recording that contains only silence: no sound at all was recorded." |
-| `R_OLDER_VERSION` ★ | REVIEW | "Earlier version of {newer} ({similarity}). Compare them before removing either." |
-| `H_CONTENT_PROTECTIVE` ★ | (block) | "Its content looks important ({why}), so it is not offered." |
-| `H_CONTENT_NOT_CHECKED` ★ | (block) | "Its content could not be fully checked on this device, so it is not offered." |
-| `C_CONTENT_INCOMPLETE` ★ | — | "{n} pictures and documents have not been read yet, so nothing is suggested from their content; run the analysis again to continue." |
+| `R_OLDER_VERSION` | REVIEW | "Earlier version of {newer} ({similarity}). Compare them before removing either." |
+| `H_CONTENT_PROTECTIVE` | (block) | "Its content looks important, so it is not offered." |
+| `H_CONTENT_NOT_CHECKED` | (block) | "Its content could not be fully checked on this device, so it is not offered." |
+| `C_CONTENT_INCOMPLETE` | — | "{n} pictures and documents have not been read yet, so nothing is suggested from their content; run the analysis again to continue." |
 
-`P_UNIQUE_RECORD` is reused with `category` = `recordCategory` ("Only copy of what looks like a payment confirmation; …").
+Add each with `c(code, tier, sentence)` exactly like the existing lines 23–41 of `ReasonCatalog`. `P_UNIQUE_RECORD` is reused with
+`category` = `recordCategory`.
 
-### 9.4 Device-only engines are never a precondition until verified
+### 9.4 Device-only engines are never a precondition until verified (A43)
 
-* OCR text from an engine not in `ContentConfig.VERIFIED_ENGINES` sets `engineVerified = false` ⇒ V-UNKNOWN fires ⇒ **no Y rule** —
-  but its protective uses (record category, V-TEXT) still apply. On the phone `tesseract.js-eng` starts unverified; the Phase 6 Y rules
-  therefore produce nothing on the phone until the owner's checklist (§12) passes and the lead adds the engine id (one-line change,
-  separate commit). Same for frames (`VERIFIED_FRAME_SOURCES`).
-* QR, faces, ImageSignals, PDF/OOXML text, MP4 tables and AAC frame sizes are the same Java code on both platforms: verified on the JVM.
-  The only difference is the decoder (BitmapFactory vs ImageIO); `MediaDecoder`'s contract (upright, long edge, luma) is already tested.
+* OCR text from an engine for which `ContentTrust.textEngineVerified(text.engine)` is false ⇒ `U-ENGINE` ⇒ `detectorsComplete = false`
+  ⇒ **no Y rule** and HC16 blocks any CONTENT removal — but its protective uses (record category, V-TEXT, V-AMOUNT) still apply.
+  On the phone `OcrTextReader.id()` returns `ContentTrust.ANDROID_OCR_ENGINE` and `ANDROID_OCR_VERIFIED == false`, so the Phase 6 Y rules
+  produce nothing on the phone until the owner's checklist (§12) passes and the lead flips that constant (one-line commit).
+* Frame-based signals: none exist in Phase 6 (A41). Any future frame source must get its own `ContentTrust` flag defaulting to false.
+* QR, faces, ImageSignals, PDF/OOXML text and MP4 tables are the same Java code on both platforms: verified on the JVM. The only
+  difference is the image decoder (BitmapFactory vs ImageIO); `MediaDecoder`'s contract is already tested.
+* Tests: S8 `ContentFactsTest` "engine tesseract.js-eng, everything else eligible ⇒ unknowns = [U-ENGINE], recordCategory still set";
+  S9 `ContentRulesTest` same fixture ⇒ 0 candidates; S9 gate row "unverified invariance" (§11.3).
 
-### 9.5 Expected effect (dataset, standard mode; estimates to be replaced by the S9 measurement)
+### 9.5 Expected effect (dataset, standard mode; REVIEW_6 F-M12 — honest figures)
 
-| Rule / kind | Reachable misses | Expected caught (sidecar OCR) |
+| Rule / kind | Reachable misses | Expected caught (simulated OCR) |
 |---|---|---|
 | `Y_FORWARDED_MEDIA` MEME | 30 | ~26 (faces veto ~4) |
-| `Y_FORWARDED_MEDIA` GREETING (PARTIAL_SCRIPT) | 59 | ~45–55 if Q2 = yes; 0 if no |
-| ADVERT (WA / Download / Screenshot) | 33 | ~28 |
-| `Y_OLD_SCREENSHOT` OTP | 15 | ~13 if Q1 = yes; 0 if no |
-| `Y_STATIC_VIDEO`, `Y_SILENT_RECORDING` | 4 | 4 with fixtures if Q3 = yes |
-| **Hit rate** (276 + caught) / 453 | | **≈ 0.86** with Q1–Q3 yes; **≈ 0.75** with Q2 no; **0.61 with no OCR** |
+| `Y_FORWARDED_MEDIA` GREETING | 59 | **0** (A40: every greeting has a Devanagari line ⇒ not READ) |
+| ADVERT (WA 15 / Download 10 / Screenshot 10) | 33–35 | ~28 |
+| `Y_OLD_SCREENSHOT` OTP | 15 | ~13 |
+| video / audio | 4 | 0 (A41) |
+| **Hit rate** (276 + caught) / 453 | | **≈ 0.757 desktop, an upper bound** (simulated OCR reads every drawn Latin word); **0.61 with no OCR and on the phone until §12 passes** |
 
-Exposure (Y on mnd): designed 0 — every mnd group of §0.2 is covered by ≥ 1 veto or by having no positive evidence or no rule for its
-folder. The A27 label defect (`IMG-20240122-WA0001.jpg`, `Y_CHAT_COPY`) is not a Phase 6 code and stays the only exposure until fixed.
-**0.8 is reachable on the desktop only with Q2 (or Q1+Q3 and near-perfect OCR).** On the phone the A28 rules add 0 until §12 passes.
-
----
-
-## 10. Audio (spec 5.5; S12)
-
-* `AudioProbe` (`v2.features`, tier 1, extractor id `AUDIO` = 9, version 1 → `AudioInfo`): MP3 (skip ID3v2; first frame header →
-  sample rate, channels, bitrate; Xing/Info/VBRI frame count ⇒ duration, else CBR `(size − tags) × 8 / bitrate`, `durationConfidence` 0.5),
-  FLAC (`STREAMINFO`: sample rate, channels, total samples ⇒ duration), Ogg (Vorbis/Opus id header: rate, channels; last page granule
-  position within the last 64 KiB ⇒ duration; Opus granule at 48 kHz minus pre-skip), WAV (`fmt `: format, channels, rate; `data` size ⇒
-  duration), AAC ADTS (first header). Read caps: head 64 KiB + tail 64 KiB (`Limits.audioBytes`). Malformed ⇒ fields unknown + problem.
-* Digital silence (`AudioActivity`, in the ACTIVITY pass): AAC in MP4/M4A — `soun` track `stsz`: `tinyAudioShare` = share of frames ≤ 8 bytes;
-  `digitalSilence = TRUE` iff ≥ 100 frames and share ≥ 0.995; `FALSE` iff share < 0.5; else UNKNOWN. PCM WAV (format 1, 16-bit) —
-  read ≤ 4 MiB of `data` in 64 KiB blocks: TRUE iff every sample |x| ≤ 2; FALSE if > 1 % of samples |x| > 64; else UNKNOWN. All other codecs:
-  UNKNOWN. **Speech activity, music activity and fingerprints are not computed (UNKNOWN) — they need a decoder.**
-* Rule `Y_SILENT_RECORDING` (§16 Q3): YOUR_CALL DELETE, families {CONTENT, PROV}, usage VOICE, `digitalSilence == TRUE`, duration ≥ 2 s,
-  no group role, not protected. "No speech/music" is never evidence (it is not computed); digital silence means the file holds no sound
-  samples at all, which is the audio counterpart of `Y_LOW_QUALITY`'s "nothing visible".
-* Tests: MP3 CBR/Xing fixtures, FLAC/Ogg/WAV headers (bytes built in test); AAC stsz with all 4-byte frames → TRUE, voice-like sizes → FALSE,
-  mixed 60 % tiny → UNKNOWN; WAV zeros → TRUE, sine → FALSE; dataset: the 3 silent m4a → TRUE, 4 voice m4a → FALSE.
+The gate (§11.3) is 0.75. If the measured value is between 0.74 and 0.75 the implementer reports it and stops (lead decides); the
+gate is **not** met by relaxing a threshold. Exposure (Y on mnd): exactly 0 (A42) — every mnd group of §0.2 is covered by ≥ 1 veto, by
+having no positive evidence, or by having no rule for its folder.
 
 ---
 
-## 11. Evaluation (`tools/v2eval/evaluate.py --gate phase6`; S9 and later)
+## 10. Audio — cut (REVIEW_6 F-B3, A41)
 
-### 11.1 Desktop fixtures (labels never enter v2)
+No `AudioProbe`, no digital-silence detection, no `Y_SILENT_RECORDING` in Phase 6: no rule and no protection would read them. The
+`Extractors.AUDIO` id stays reserved. If they return later, `Extractors` must bump `AUDIO` to version 2, otherwise files already stamped
+version 1 are never probed. (LEFT FOR LEAD L1.)
+
+---
+
+## 11. Evaluation (`tools/v2eval/evaluate.py --gate phase6`; S9)
+
+### 11.1 Desktop OCR fixture (labels never enter v2)
 
 | Fixture | Built by | Content | Where |
 |---|---|---|---|
-| OCR truth | `tools/v2dataset/common.py`: a recorder wraps `PIL.ImageDraw.ImageDraw.text` during `build.py`; `save_image` writes `{path, sha256, lines:[{text, font_script}]}` per image | the strings the generator drew (content, not labels) | `/home/user/sp-dataset-text/ocr_truth.jsonl` (outside the scanned tree) |
-| OCR simulation | `tools/v2eval/ocr_sim.py TRUTH OUT --seed 6` | English-only Tesseract model: Latin words kept with conf U[70,95], 15 % dropped, 5 % with one character changed (conf 50–69); every Devanagari word → 1–3 ASCII garbage tokens conf U[15,45]; seeded by sha256 | `/home/user/sp-dataset-text/ocr_sim.jsonl` (`{"path","size","sha256","engine":"sidecar-sim","version":1,"words":[[w,conf],…]}`) |
-| Frames | `tools/v2eval/extract_frames.sh DATASET OUT` — `ffmpeg -v error -i IN -vf fps=1,scale=256:-2 OUT/<sha256(relpath)>/%06d.png` for every mp4 under DCIM, Movies | 1 frame per second | `/home/user/sp-dataset-frames/` |
+| OCR truth | `tools/v2dataset/common.py`: a recorder wraps `PIL.ImageDraw.ImageDraw.text` during `build.py`; `save_image` writes `{path, sha256, lines:[text, …]}` per image | the strings the generator drew (content, not labels) | `/home/user/sp-dataset-text/ocr_truth.jsonl` (outside the scanned tree) |
+| OCR simulation | `tools/v2eval/ocr_sim.py TRUTH OUT` | English-only Tesseract model, below | `/home/user/sp-dataset-text/ocr_sim.jsonl` |
 
-The dataset is rebuilt into a scratch directory (`build.py --out <scratch>/rebuild`); entries whose sha256 differs from the live
-manifest are dropped from `ocr_truth.jsonl` (count printed). Real (non-synthetic) images have no truth ⇒ the sidecar reader returns
-`UNAVAILABLE` for them ⇒ they stay unknown (honest coverage, reported). `ocr_sim.py` reads only `ocr_truth.jsonl`, never the manifest;
-`evaluate.py` asserts the sim file has no keys other than those listed.
+Recorder details (REVIEW_6 F-M11): the recorder keeps a dict `id(image) → [text, …]`; `ImageDraw.Draw(im)` remembers `im`; each
+`.text(xy, text, …)` call appends `text` to that image's list. `save_image(rel, img, …)` writes one truth line for `img` **only if**
+`id(img)` has an entry (an image derived by `resize/convert/crop/paste` is a new object without an entry ⇒ no truth ⇒ the sidecar
+answers FAILED ⇒ unknown — honest, safe). It records **no** label fields (no category, tier, importance, mnd, scenario). The truth
+is built by `build.py --out <scratch>/rebuild`; truth lines whose sha256 differs from the live manifest are dropped. If more than 5 %
+of the truth lines are dropped the slice **stops and reports** (the build is then not reproducible enough for a fair figure).
 
-`SidecarTextReader` (jvmtest): constructor reads the jsonl into `Map<relPath, entry>`; `read()` returns `READ` with the words when the
-path and size match; a missing or size-mismatched entry returns `FAILED` with error `"no fixture"` (never `UNAVAILABLE`, which would
-stop the whole pass); after 2 attempts such files are not retried until the sidecar version changes. `id() = "sidecar-sim"`, `version() = 1`, `available() = true`. `DirFrameSource`: `frame(path, timeMs)` loads
-`<root>/<sha256hex(relPath)>/<k+1 zero-padded 6>.png` with `k = round(timeMs/1000)`; missing ⇒ `UNSUPPORTED_FORMAT`; source id `"dir-fixture"`.
+`ocr_sim.py` (reads only `ocr_truth.jsonl`; deterministic: `random.Random(sha256)` per image): split each line on spaces; per word, the
+**script is decided from the characters** (any char in U+0900–U+097F ⇒ Devanagari) — never from the font (the generator draws Latin
+text with a "deva" font); Latin word: dropped with p 0.15, else one character changed with p 0.05 (conf 50–69), else kept (conf 70–95);
+Devanagari word: replaced by 1–3 ASCII garbage tokens of 2–6 chars from `"il1|/\\-_.,:;'~^"` (conf 15–45). Output
+`{"path","size","sha256","engine":"sidecar-sim","version":1,"words":[[w,conf],…]}` — no other keys (`evaluate.py` asserts this).
 
-`V2Cli` options (S7/S11): `--ocr-sidecar FILE`, `--frames-dir DIR`, `--face-model FILE`, `--ocr-budget N`, `--visual-budget N`,
-`--frame-budget N`, `--content-dump FILE` (jsonl of every file's content sub-records + usage; no manifest data).
+`SidecarTextReader` (jvmtest): constructor `(Path jsonl, Path root, boolean unverified)` reads the jsonl into `Map<relPath, entry>`;
+`read()` returns `READ` with the words when the path and size match; a missing or size-mismatched entry returns `FAILED` with error
+`"no fixture"` (never `UNAVAILABLE`, which would stop the whole pass). `id()` = `unverified ? "sidecar-sim-unverified" :
+ContentTrust.DESKTOP_SIM_ENGINE`, `version() = 1`, `available() = true`.
+
+The figure produced with it is an **upper bound**: the simulated reader sees exactly the drawn strings, never misreads layout, and
+real (non-synthetic) images get no text at all.
+
+`V2Cli` options: `--ocr-sidecar FILE` (S7), `--ocr-unverified` (S7), `--face-model FILE` (S6, default `app/src/main/assets/faces/yunet.bin`),
+`--ocr-budget N`, `--visual-budget N` (S6/S7), `--content-dump FILE` (S7: jsonl, one line per file with path, usage and the content
+sub-records — no manifest data).
 
 ### 11.2 Runs
 
-`tools/v2eval/p6_gate.sh OUT CLASSES` (copy of the lead's `gate.sh`): for mode in standard, aggressive: run A = `--max-tier 6
---ocr-sidecar … --frames-dir … --face-model …`; run N = `--max-tier 6` with no sidecar and no frames (`UnavailableTextReader`);
-`evaluate.py --gate phase6 --result A --no-content N`.
+`tools/v2eval/p6_gate.sh OUT` (created in S1, §13): for mode in standard, aggressive: run A = `--max-tier 4 --ocr-sidecar
+/home/user/sp-dataset-text/ocr_sim.jsonl` (from S7); run U = run A plus `--ocr-unverified` (from S9); run N = `--max-tier 4` without a
+sidecar. Evaluations: phase4 and phase5 on A (as the lead's gate.sh); from S9 `evaluate.py --gate phase6 --result A --no-content N
+--unverified U`.
 
-### 11.3 Metrics and gates
+### 11.3 Metrics and gates (`--gate phase6`, S9)
 
 | Metric | Definition | Gate |
 |---|---|---|
-| DDRR | Phase 5 definition, runs A and N, both modes | 0 |
-| exposure | YOUR_CALL/any delete on mnd, A and N | 0 excluding the A27 file (listed in `KNOWN_LABEL_DEFECTS` with the ruling id); **0 strict for Phase 6 codes** |
+| DDRR | Phase 5 definition, runs A, U and N, both modes | 0 |
+| exposure | YOUR_CALL / any delete on a must_never_delete file, runs A, U, N, both modes | **exactly 0, no exemption** (A42, REVIEW_6 F-B4); if the A27 file is still mislabelled when S9 runs, stop and report — do not add an exemption |
 | spec_violations | Phase 5 | 0 |
-| no-content invariance | in N, count of recs with codes `Y_OLD_SCREENSHOT/Y_FORWARDED_MEDIA/Y_OLD_DOWNLOAD/Y_STATIC_VIDEO` | 0 |
-| unverified invariance | run A with `--ocr-unverified` (engine id not in the verified set) | 0 of the same codes |
-| YOUR_CALL hit rate | Phase 5 row "YOUR_CALL after cap", run A standard | ≥ 0.80 (if §16 Q2 = no: report, gate 0.75, lead to rule) |
-| YOUR_CALL precision | Phase 5 | ≥ 0.95 (was 0.987) |
-| category precision (fold 1) | per predicted class among SCREENSHOT, QR_CODE, GREETING_MEME, ADVERTISEMENT, RECEIPT, DOCUMENT_PHOTO; truth map: screenshot→SCREENSHOT, qr_code→QR_CODE, meme_greeting→GREETING_MEME, advertisement→ADVERTISEMENT, receipt→RECEIPT, id_document & document (images)→DOCUMENT_PHOTO | each ≥ 0.85; coverage (non-UNKNOWN share per manifest class) reported |
-| protective recall | manifest `payment_confirmation`, `ticket`, `id_document`, `receipt` images that have a sim entry: share with `recordCategory != null` or a V-TEXT/V-QR/V-CARD veto | 1.00 for mnd, ≥ 0.9 others |
-| documents | text-layer PDFs (manifest pdf, not encrypted, not scanned) with `doc.status OK`: ≥ 0.9; encrypted 5/5 ENCRYPTED & category UNKNOWN; scanned 11/11 NO_TEXT_LAYER; `financial_document` PDFs with status OK → category ∈ {FINANCIAL, INVOICE, RECEIPT}: ≥ 0.9 | as stated |
-| video | 4 event videos: a peak interval overlaps the window parsed from the manifest `notes` ("activity only at A-Bs"): 4/4; control: 0 peaks | as stated |
-| scenarios | Phase 5 rules | no FAIL; ≥ 8 PASS; S08 PASS in A (CAUTIOUS allowed in N) |
-| budget convergence | S7-style chain, `--ocr-budget 40 --visual-budget 150` until no `C_CONTENT_INCOMPLETE` | final run equals unbudgeted (minus timings/decode counts) |
+| no-content invariance | in N, recs with `Y_OLD_SCREENSHOT/Y_FORWARDED_MEDIA/Y_OLD_DOWNLOAD` | 0 |
+| unverified invariance (A43) | in U, recs with the same codes | 0 |
+| YOUR_CALL hit rate | Phase 5 row "YOUR_CALL after cap", run A standard | ≥ 0.75, printed as "desktop, simulated OCR, upper bound" |
+| YOUR_CALL precision | Phase 5 | ≥ 0.95 |
+| category precision (fold 1, reported) | per predicted class among SCREENSHOT, QR_CODE, GREETING_MEME, ADVERTISEMENT, RECEIPT, DOCUMENT_PHOTO vs manifest category | reported only |
+| protective recall | manifest `payment_confirmation`, `ticket`, `id_document`, `receipt` images: share with `recordCategory != null` or a V-TEXT/V-QR/V-CARD veto **or** a U-id | 1.00 for mnd, ≥ 0.9 others |
+| documents | text-layer PDFs (manifest pdf, not encrypted, not scanned) with `doc.status OK` ≥ 0.9; encrypted 5/5 ENCRYPTED; scanned 11/11 NO_TEXT_LAYER; financial PDFs with status OK → category ∈ {FINANCIAL, INVOICE, RECEIPT} ≥ 0.9 | as stated |
+| video | 4 event videos: a peak interval overlaps the window parsed from the manifest `notes` ("activity only at A-Bs") | 4/4 |
+| scenarios | Phase 5 rules | no FAIL; S08 CAUTIOUS is expected (its control video stays KEEP, A41) |
+| budget convergence | chain of runs with `--ocr-budget 40 --visual-budget 150 --state DIR` (FULL kind) until no `C_CONTENT_INCOMPLETE` | final run equals the unbudgeted one (minus timings/decode counts) |
 
-Calibration (S9): `tools/v2eval/calibrate_content.py --dump D --manifest M` reads the `--content-dump` of run A, fits on fold 0
-(`fold_of(path)`, the evaluator's function) the thresholds marked "initial" in §6.3 (5, 0.6, 0.15), §6.4 (0.06, 0.03/0.04), §9.1 step 3
-(0.25, 0.03, 40), §9.2 (50) with the objective: (1) zero eligible mnd and zero eligible protective-class files on fold 0 with each
-threshold moved ≥ 2 grid steps away from the nearest violation; (2) maximise eligible expected-YOUR_CALL. Reports fold 1. The chosen
-values are written as constants into `ContentRules`/`OcrPass` with a comment citing the fold-1 numbers.
+(REVIEW_6 F-M13: `calibrate_content.py` is cut. Thresholds are fixed constants; S9 prints fold-0/fold-1 margins only.)
 
 ---
 
@@ -912,128 +1007,151 @@ values are written as constants into `ContentRules`/`OcrPass` with a comment cit
 | Feature | JVM (this container) | Fixture | Phone only |
 |---|---|---|---|
 | PDF/OOXML/ODF/TXT text, categories, ids, version links | fully | synthetic bytes + dataset | — |
-| MP4/M4A activity profile, AAC silence, WAV silence, audio headers | fully | synthetic boxes + dataset (real H.264/AAC) | real phone recordings' noise floor and CBR behaviour (thresholds §8.1) |
+| MP4 activity profile | fully | synthetic boxes + dataset (real H.264) | real phone recordings' bitrate behaviour (thresholds §8.1) |
 | ImageSignals, QR, faces | fully (same code) | dataset images | WebP/HEIC chat images (decoder) |
 | OCR pass logic, readability, vetoes, Y rules | fully, with the simulated sidecar | `ocr_sim.jsonl` | real Tesseract output (confidence scale, Devanagari garbage shape, speed) |
-| Frame sampler logic | fully, with 1-fps PNG fixtures | `sp-dataset-frames` | `MediaMetadataRetriever` frame accuracy, timing, memory |
-| Android bridges | compile only (`check_android_compile.sh`) | — | everything |
+| Android OCR bridge | compile only (`check_android_compile.sh`) | — | everything |
 
 Owner's phone checklist (added to `PHASE_A_NOTES.md` in S10): (1) OCR starts and reads 20 chosen screenshots (5 payment, 5 OTP, 5 ads,
-5 chat): kinds as expected, no crash, time per image recorded; (2) 10 Hindi/Marathi greetings: status PARTIAL_SCRIPT or LOW_CONFIDENCE,
-never READ with a protective kind missing; (3) one 10-min static video and one with a 5-s event: activity peaks as expected; frames
-decoded ≥ 7; (4) budget: run on the full phone and confirm `C_CONTENT_INCOMPLETE` then convergence over runs. Passing (1)–(2) is the
-condition for adding `tesseract.js-eng` to `VERIFIED_ENGINES`; (3) for `mmr-26`.
+5 chat): kinds as expected, no crash, time per image recorded; (2) 10 Hindi/Marathi greetings and 5 Hindi payment screenshots: status
+PARTIAL_SCRIPT or LOW_CONFIDENCE, **never READ**; (3) a timed-out read gives FAILED, not NO_TEXT; (4) budget: run on the full phone and
+confirm `C_CONTENT_INCOMPLETE`, then convergence over runs. Passing (1)–(3) is the condition for the lead to set
+`ContentTrust.ANDROID_OCR_VERIFIED = true`.
 
 ---
 
-## 13. Implementation plan — slices for Sonnet agents
+## 13. Implementation plan — slices for Sonnet agents (REVIEW_6: rewritten)
 
-Every slice ends with: `bash tools/v2eval/run_tests.sh` green; `bash tools/v2eval/check_android_compile.sh` green;
-`bash tools/v2eval/p6_gate.sh` (from S9; before S9 the lead's `gate.sh`) and `python3 -I tools/v2eval/rec_diff.py BASE NEW` showing
-**only** the changes the slice lists. `BASE` = the previous slice's result (S1 records the first one). Each new test class is added to
-`AllV2Tests`. No slice edits `core/` or `app/OcrEngine.java`. ForbiddenApiTest must stay green (no `java.awt`, `javax.imageio`, `javax.xml`,
-`java.net`, reflection, `File.delete` in v2).
+### Implementer brief (read before any slice)
 
-### S1 — content model, codec, versions, diff tool (≈ 350 lines + tests)
-Files: new `v2/model/{VisualInfo,TextInfo,DocInfo,ActivityInfo,FrameInfo,TextStatus,DocStatus,ActivityStatus,DetectorStatus}.java`,
-`v2/store/ContentCodec.java`; edit `FeatureRecord` (fields, `EXTRACTORS = 25`, `copy()`), `Extractors` (ids 20–24, `COUNT`), `FeatureCodec`
-(call `ContentCodec`), `FileContext` (accessors), `V2Json` (`content` object, category fields); new `tools/v2eval/rec_diff.py`
-(joins two result JSONs by path; prints files whose predicted tier or primary reason changed; `--allow CODE,…` exit 0 if every change
-involves an allowed code; `--expect-none` exit 1 on any change). Tests §4.5. Acceptance: dataset results identical (`rec_diff --expect-none`);
-JSON gains no keys for files without content.
+* **Constraints.** Java 8 source (`javac --release 8`), zero new libraries. Under `app/src/main/java/com/storageplanner/v2/`: no
+  `android.*`, no reflection, no `java.net`, no `File.delete`/`renameTo`/`Files.move/delete`, no `System.currentTimeMillis/nanoTime`
+  (use `ctx.device.clock()`), no Java 9+ API (`List.of`, `String.repeat`, `Optional.isEmpty`, `var`, …) and nothing newer than Android
+  API 26. `ForbiddenApiTest` enforces most of this. **Do not edit `app/src/main/java/com/storageplanner/core/`** or `app/OcrEngine.java`.
+* **Verify after every slice (both must be green):**
+  `LC_ALL=C.UTF-8 bash tools/v2eval/run_tests.sh` and `bash tools/v2eval/check_android_compile.sh`.
+  Then the dataset run: `bash tools/v2eval/p6_gate.sh /home/user/p6runs/S<k>` and
+  `python3 -I tools/v2eval/rec_diff.py /home/user/p6runs/S<k-1>/standard.json /home/user/p6runs/S<k>/standard.json <flags of the slice>`
+  (and the same for `aggressive.json`). S1's previous run is `/home/user/p6runs/S0` (S1 step 0 creates it).
+* **Every new test class** goes into `jvmtest/com/storageplanner/v2test/` and is registered in `AllV2Tests`.
+* **Notes:** append a section `## S<k>` to `docs/v2/PHASE_6_NOTES.md`: what was done, every deviation from this document with the
+  reason, the rec_diff output (counts and every changed file), gate rows. If something in this document does not match the code, do
+  the smallest thing that keeps the safety rules and write it down — never invent a new rule or relax a threshold.
+* **Do not commit or push.**
+* Dataset results may change **only** as each slice's "Allowed changes" says; anything else is a stop-and-report.
+* Thresholds in this document are constants. A slice that misses a gate reports; it does not tune.
 
-### S2 — MP4 tables and activity profile (≈ 400)
-Files: `v2/content/{Mp4Tables,ActivityProfile}.java`; `ContentStage` skeleton with the ACTIVITY pass only (selection: type ∈ {mp4, mov, 3gp, m4a};
-`versions[ACTIVITY]` stale); wiring (§5.1) behind `--max-tier ≥ 4`; `Limits.activityMoovMax = 16 MiB`. Algorithm §8.1. Tests §8.1 table
-(+ `ContentStage` resume: kill after first commit ⇒ second run processes only the rest). Acceptance: default runs unchanged
-(`--expect-none`); `--max-tier 4` run: activity for 25 videos, S08 numbers of test 9 printed by the test; recommendations unchanged
-(`--expect-none` against the `--max-tier 3` run — S2 has no effect on rules).
+### S1 — content model, codec, carry-over, tools (≈ 350 prod lines)
+Step 0: create `tools/v2eval/p6_gate.sh OUT [extra V2Cli args]`: compile exactly like `run_tests.sh` (same `find … | sort` source list,
+`javac --release 8 -encoding UTF-8 -nowarn -d OUT/classes`), then for mode in standard, aggressive run
+`java -cp OUT/classes com.storageplanner.v2test.V2Cli scan /home/user/sp-dataset --store memory --mode $m --target-bytes max --now 1792000000000 --out OUT/$m.json "$@"`
+and `evaluate.py --gate phase4` and `--gate phase5 --plans max=OUT/$m.json` (copy the body of
+`/tmp/claude-0/-home-user-storage-planner/69e294b1-7ff5-57b8-9df7-ed244c7e43c3/scratchpad/v2out/gate.sh`, the lead's script); exit 1 if
+any step's rc ≠ 0. Run it on the unchanged tree into `/home/user/p6runs/S0`.
+Create `tools/v2eval/rec_diff.py OLD NEW [--allow CODE,…] [--expect-none]`: load both results; map `fileId → path` from `files[]`;
+per path compute `evaluate.translate(recs)` (copy that function) and the first `reasonCodes[0]` of the first rec; print every path whose
+translated tier or primary code differs as `path: OLDTIER/OLDCODE -> NEWTIER/NEWCODE`; `--expect-none` exit 1 on any change; `--allow`
+exit 1 if a change involves neither an allowed code in OLD nor in NEW; print counts by (old→new).
+Java: create `v2/model/{VisualInfo,TextInfo,DocInfo,ActivityInfo,TextStatus,DocStatus,ActivityStatus,DetectorStatus}.java` exactly as
+§4.2; `v2/store/ContentCodec.java` (§4.4); edit `FeatureRecord` (`EXTRACTORS = 24`, 4 fields, `copy()`), `Extractors` (ids 20–23),
+`FeatureCodec` (call `ContentCodec` under the four keys), `FileContext` (4 accessors), `T1MetadataStage.extract` (carry-over, §4.3),
+jvmtest `V2Json.writeFile` (`content` object only when at least one sub-record is non-null).
+Tests: §4.5 table (`ContentCodecTest`), `ContentCarryOverTest` (§4.3).
+Allowed changes: none (`rec_diff --expect-none`); JSON gains no keys for files without content.
 
-### S3 — document text (≈ 600; may split S3a PDF / S3b OOXML+ODF+OLE2+TXT)
-Files: `v2/content/doc/{PdfText,PdfCMap,OoxmlText,OdfText,Ole2,PlainText,XmlText}.java`; DOC pass in `ContentStage` filling the S3 fields
-of `DocInfo` (§7.1–7.3). Tests §7.2, §7.3. Acceptance: recommendations unchanged; `--content-dump` shows ≥ 90 % of text-layer dataset
-PDFs OK, 5/5 ENCRYPTED, 11/11 NO_TEXT_LAYER, all 13 OOXML OK.
+### S2 — `ContentStage` skeleton + MP4 activity (≈ 400)
+Create `v2/content/{Mp4Tables,ActivityProfile,ContentStage,ContentConfig,ContentProviders}.java` (ContentProviders/ContentConfig as §5.2
+with what S2 needs; `UnavailableTextReader` and `TextReader` may be created here as empty-reader stubs per §6.2).
+`ContentStage implements Stage`, id `"T4_TEXT"`, constructor `(ContentProviders p, ContentConfig cfg)`; `run(ctx)` runs the passes in
+§5.1 order (S2: only ACTIVITY), honouring §5.3 (budget/ScanControl check before each file; commit every 200 files or 3 s; per-file
+catch; `C_CONTENT_INCOMPLETE` event). Wire it in `V2Cli` only (§5.1 (a), behind `--max-tier ≥ 4`); V2Cli builds
+`new ContentProviders(null, null)` and `new ContentConfig()`.
+Algorithm §8.1. Tests: §8.1 table; `ContentStageResumeTest`: 30 synthetic MP4s, a `ScanControl` that pauses after the first commit ⇒
+second run processes only the rest and the final records equal a single uninterrupted run.
+Allowed changes: default runs none (`--expect-none`); also run `p6_gate.sh /home/user/p6runs/S2m4 --max-tier 4` and
+`rec_diff S2 S2m4 --expect-none` (activity is not used by any rule yet). Print the S08 intervals in the notes.
 
-### S4 — document facts, categories, Devanagari keywords, protective wiring for documents (≈ 450)
-Files: `v2/content/doc/{DocFacts,DocCategorizer,Identifiers,DocKeywords,MinHash}.java`; `v2/risk/ContentFacts.java` (record part only,
-§9.1 step 1 for documents); edits `Keywords` (§7.4 lists), `ContextBuilder` (build `ctx.content`), `SignalExtractor`, `LossEstimator`,
-`CandidateRules` (`P_UNIQUE_RECORD` condition, §9.1). Tests §7.4 + `ContentFactsDocTest`: a DOCUMENT (not path-keyworded) with
-`doc.category = DOC_FINANCIAL` ⇒ `P_UNIQUE_RECORD` PROTECTED with category "financial record"; same with `DOC_TEMPORARY` ⇒ unchanged;
-`doc.status ENCRYPTED` ⇒ unchanged; `RiskPropertyTest` invariants still pass (content never lowers L/U). Acceptance (`rec_diff --allow
-P_UNIQUE_RECORD`): only KEEP → PROTECTED changes, every one on a file whose manifest `acceptable_tiers` contains PROTECTED **or** listed
-in the slice notes with its manifest category (expected: the two Devanagari-named ID/financial files; any `KEEP`-only file that turns
-PROTECTED, e.g. `School_Admission_Form.docx`, is reported, not blocked); DDRR/exposure unchanged.
+### S3a — PDF text (≈ 450)
+Create `v2/content/doc/{PdfText,PdfCMap}.java`; DOC pass in `ContentStage` for `type == pdf` only (§7.1) filling `DocInfo.status, format,
+pages, chars, words, unsupportedStreams` (`chars/words`: count of the extracted text; text then discarded). Add `{"javax.xml", "javax\\.xml"}`
+to `ForbiddenApiTest`'s pattern list (REVIEW_6 F-m2). Algorithm §7.2. Tests §7.2 table (`PdfTextTest`; build PDFs in the test with
+`java.util.zip.Deflater` and a small ASCII85 encoder). Allowed changes: none; `--content-dump` (add the option here if not yet present:
+one jsonl line per file with path, usage and sub-records) shows ≥ 90 % of text-layer PDFs OK, 5/5 encrypted ENCRYPTED, 11/11 scanned NO_TEXT_LAYER.
+
+### S3b — OOXML, ODF, OLE2, plain text (≈ 400)
+Create `v2/content/doc/{OoxmlText,OdfText,Ole2,PlainText,XmlText}.java`; extend the DOC pass dispatch (§7.1). Algorithm §7.3. Tests
+§7.3 (`OoxmlTextTest`). Allowed changes: none; dump: all dataset OOXML/ODF documents OK or ENCRYPTED.
+
+### S4 — document facts, categories, keywords, document protection (≈ 500)
+Create `v2/content/doc/{DocFacts,DocCategorizer,Identifiers,DocKeywords,MinHash}.java` (§7.4); call `DocFacts.fill` from the DOC pass;
+create `v2/risk/ContentFacts.java` with §9.1 steps 1 (documents part), 2 and 5 (the image part comes in S8); edits: `Keywords` (§7.4
+lists), `ContextBuilder.finish` (build `c.content`), `SignalExtractor`, `LossEstimator`, `CandidateRules` (`P_UNIQUE_RECORD`, §9.1).
+Bump `Extractors` version of `DOC_TEXT` to 2 (the S3 records lack facts). Tests §7.4 + `ContentFactsDocTest`: a DOCUMENT (no path
+keyword) with `doc.category = DOC_FINANCIAL` ⇒ `P_UNIQUE_RECORD` PROTECTED with category "financial record"; `DOC_TEMPORARY` ⇒ unchanged;
+`doc.status ENCRYPTED` ⇒ unchanged; `RiskPropertyTest` still passes.
+Allowed changes (`rec_diff --allow P_UNIQUE_RECORD`): only KEEP/REVIEW → PROTECTED and usage DOCUMENT → DOCUMENT_RECORD; list each
+with its manifest category and acceptable tiers; any file whose new tier is not acceptable is reported (not blocked) unless it is a
+removal. DDRR/exposure unchanged. Run the gate with `--max-tier 4` too (`/home/user/p6runs/S4m4`) — the content effects show only there.
 
 ### S5 — document version links (≈ 300)
-Files: `v2/graph/DocVersionLinker.java` (called at the end of `ContentStage` DOC pass, not in GRAPH — it needs DocInfo); `CandidateRules`
-`R_OLDER_VERSION`; `ReasonCatalog`. Algorithm §7.6. Tests §7.6. Acceptance: `rec_diff --allow R_OLDER_VERSION`: exactly
-`Documents/Resume_Priya_{v1,v2,final}.docx` KEEP → REVIEW (plus any other doc-stem group, each listed).
+Create `v2/graph/DocVersionLinker.java` (§7.6), called at the end of the DOC pass with all `DocInfo` records of the run (store through
+the existing relationship table exactly as `CompanionLinker` writes its edges); `CandidateRules` `R_OLDER_VERSION`; `ReasonCatalog`
+entry (§9.3). Tests §7.6. Allowed changes (`--max-tier 4` run): `--allow R_OLDER_VERSION`: `Documents/Resume_Priya_{v1,v2,final}.docx`
+KEEP → REVIEW plus any other doc-stem group, each listed.
 
 ### S6 — visual pass (≈ 400)
-Files: `v2/content/{VisualPass,FaceDetector,FaceResult,YunetFaceDetector,QrKind,ContentProviders,ContentConfig}.java`; VISUAL pass in
-`ContentStage`; V2Cli `--face-model`, `--visual-budget`. Algorithm §6.1. Tests §6.1 + budget: `--visual-budget 50` ⇒ event
-`C_CONTENT_INCOMPLETE`, re-runs converge. Acceptance: recommendations unchanged; dump shows QR on 12/12 ticket screenshots, faces on 6/6
-WhatsApp family images, card aspect 1.586 on the 4 ID images.
+Create `v2/content/{VisualPass,FaceDetector,FaceResult,YunetFaceDetector,QrKind}.java`; VISUAL pass in `ContentStage` (§6.1);
+`ContentProviders` gets the face detector; V2Cli `--face-model`, `--visual-budget`. Tests §6.1 table + `VisualBudgetTest`: budget 50 on
+a 120-image fixture ⇒ event present, three runs converge to the unbudgeted records. Allowed changes: none; dump shows QR on 12/12
+ticket screenshots, faces on the 6 WhatsApp family images, aspect 1.586 ± 0.01 on the 4 ID images.
 
-### S7 — OCR interface and pass (≈ 450)
-Files: `v2/content/{TextReader,OcrResult,UnavailableTextReader,OcrPass,TextFacts,TextWords}.java`; jvmtest `SidecarTextReader`;
-`tools/v2dataset/common.py` recorder; `tools/v2eval/ocr_sim.py`; V2Cli `--ocr-sidecar`, `--ocr-budget`, `--ocr-unverified`,
-`--content-dump`. Algorithm §6.3, §6.5. Tests: `TextFactsTest` (§6.5); `OcrPassTest` with a stub reader: (a) 30 good words on a picture with
-120 blobs → READ (readRatio 1.0); (b1) 3 good + 40 garbage (conf 30) on 200 blobs → readRatio 0.075 → LOW_CONFIDENCE; (b2) 8 good +
-30 garbage on 200 blobs → readRatio 0.2 → PARTIAL_SCRIPT; (b3) 1 good word on 200 blobs → LOW_CONFIDENCE (never NO_TEXT); (c) reader FAILED twice → `attempts 2`, not
-selected a third time; (d) `available() false` → no records; (e) picture with 5 blobs → NO_TEXT without a reader call; (f) engine version
-bump → re-selected; (g) `UNAVAILABLE` mid-pass → pass stops, earlier files kept. Acceptance: recommendations unchanged (no rule reads text
-yet); dump: sim coverage count printed; OTP screenshots READ kind OTP ≥ 12/15.
+### S7 — OCR interface, pass, desktop fixture (≈ 450)
+Create `v2/content/{TextReader,OcrResult,UnavailableTextReader,OcrPass,TextFacts,TextWords,ContentTrust}.java`; jvmtest
+`SidecarTextReader`; `tools/v2dataset/common.py` recorder; `tools/v2eval/ocr_sim.py`; build the fixture (§11.1); V2Cli
+`--ocr-sidecar`, `--ocr-unverified`, `--ocr-budget`. Algorithm §6.3, §6.5. Tests: `TextFactsTest` (§6.5), `ContentTrustTest` (§5.2),
+`OcrPassTest` with a stub reader: (a) 30 good words, 0 garbage, 120 blobs → READ; (b) 8 good + 3 garbage (conf 30) on 40 blobs →
+PARTIAL_SCRIPT; (c) 1 good word on 200 blobs → LOW_CONFIDENCE; (d) reader returns NO_TEXT on a wordy picture → LOW_CONFIDENCE;
+(e) reader returns null / FAILED twice → `attempts 2`, not selected a third time; (f) `available() false` → no records; (g) picture
+with 5 blobs and bigText 0 → NO_TEXT without a reader call; (h) engine version bump → re-selected; (i) UNAVAILABLE mid-pass → pass
+stops, earlier files kept; (j) word "दिवाळी" (conf 90) → garbage 1 → not READ; (k) a DOB-like text date 30 years old → `textDate` unknown.
+Allowed changes: none (no rule reads text yet); dump: OTP screenshots READ ≥ 12/15, greetings READ 0/59, truth drop rate printed.
 
-### S8 — image categories and protective integration for images (≈ 350)
-Files: `ImageCategorizer`; `ContentFacts` full (§9.1 steps 1–4, vetoes); `SignalExtractor`/`LossEstimator` image records; category to
-`extra`. Tests §6.6 + `ContentFactsTest`: payment screenshot fixture (kind PAYMENT) ⇒ recordCategory "payment confirmation", V-TEXT;
-ID card aspect 1.586 ⇒ V-CARD; `text.engineVerified false` ⇒ V-UNKNOWN but recordCategory still set; faces NOT_RUN ⇒ V-UNKNOWN:faces.
-Acceptance (`rec_diff --allow P_UNIQUE_RECORD`): the 30 `payment_confirmation` screenshots KEEP → PROTECTED, ID/receipt images may move
-to PROTECTED; nothing else; category precision table printed (§11.3).
+### S8 — protective integration for images and video, categories output (≈ 350)
+Complete `ContentFacts` (§9.1 steps 1 images, 3, 4) and the S8 effects (§9.1); create `ImageCategorizer` (§6.6) and emit it in
+`V2Json`. Tests: §6.6 rows; `ContentFactsTest`: payment screenshot (kind PAYMENT) ⇒ recordCategory "payment confirmation" and V-TEXT;
+ID aspect 1.586 ⇒ V-CARD; engine `tesseract.js-eng` ⇒ unknowns [U-ENGINE] and recordCategory still set; faces NOT_RUN ⇒ U-FACES;
+OTP text READ + classes [OTP] ⇒ disposableKind OTP, no veto; OTP + "bank" ⇒ V-TEXT; OTP + "Rs. 5,000" ⇒ V-AMOUNT; PARTIAL_SCRIPT
+greeting ⇒ U-TEXT, disposableKind null; video with peaks ⇒ VIDEO_ACTIVITY signal and `f[0]` +0.1.
+Allowed changes (`--max-tier 4` run, `--allow P_UNIQUE_RECORD`): only → PROTECTED on payment/ID/receipt/ticket images; the 4 S08 event videos may
+only move toward KEEP/REVIEW/PROTECTED; **no** change on SAFE/NO_LOSS redundant copies (the WA receipt copies must stay SAFE — report if not).
 
-### S9 — A28 rules, HC16, policy knobs, gate phase6, calibration (≈ 500)
-Files: `v2/risk/ContentRules.java`; edits `CandidateRules` (call), `HardRules` (HC16), `PresentationPolicy`, `ReasonCatalog`, `V2Cli`
-(default `--max-tier 4`); `tools/v2eval/{evaluate.py (phase6), p6_gate.sh, calibrate_content.py}`. Algorithm §9.2, §11. Tests:
-`ContentRulesTest` — one positive fixture per rule/kind, and for each positive one negative per veto of §6.4 (11 vetoes × 3 rules, table
-driven), `detectorsComplete false` ⇒ none, age unknown ⇒ none, PARTIAL_SCRIPT only for GREETING; `HardRulesTest` HC16 ± (both modes
-identical); `RiskPropertyTest` extension: random content facts never yield SAFE/NO_LOSS with a CONTENT family, never Y with any veto;
-`ReasonCatalogTest` params filled. Acceptance: `p6_gate.sh` exit 0 (all §11.3 rows); `rec_diff --allow Y_OLD_SCREENSHOT,Y_FORWARDED_MEDIA,Y_OLD_DOWNLOAD,P_UNIQUE_RECORD`
-against S8; hit rate and the calibrated constants recorded in `PHASE_6_NOTES.md`.
+### S9 — the three Y rules, HC16, gate (≈ 450 incl. evaluator)
+Create `v2/risk/ContentRules.java` (§9.2); edits: `CandidateRules.generate` (call), `HardRules` (HC16), `PresentationPolicy` (3 ages),
+`ReasonCatalog` (§9.3), V2Cli default `--max-tier 4`; `evaluate.py --gate phase6` (§11.3; new args `--no-content`, `--unverified`);
+`p6_gate.sh` runs A/U/N (§11.2). Tests: `ContentRulesTest` — one positive per (rule, kind); for each positive, one negative per V-id and
+per U-id (table driven), `ageMs` unknown ⇒ none, aggressive vs standard differ only in age; `HardRulesTest` HC16 ±; `RiskPropertyTest`
+extension: random content facts never yield SAFE/NO_LOSS with a CONTENT family, never Y with any veto or unknown.
+Allowed changes (`--allow Y_OLD_SCREENSHOT,Y_FORWARDED_MEDIA,Y_OLD_DOWNLOAD,P_UNIQUE_RECORD`): KEEP → YOUR_CALL only on files whose
+manifest expected tier is YOUR_CALL; every §11.3 gate passes; hit rate and margins recorded.
 
-### S10 — Android bridges (≈ 300; compile-checked only)
-Files: `app/OcrTextReader.java` (package `com.storageplanner.app`: wraps a lazily started `OcrEngine` (`start(90000)` on first `read`;
-failure ⇒ `available()` false for the rest of the run); converts ARGB → JPEG 92 like `AndroidPlatform.readText`; `read` honours
-`timeoutMs`; id `"tesseract.js-eng"`, version = hash of the asset list (`eng.traineddata` size) & 0x7fffffff); `app/v2/AndroidContent.java`
-(builds `ContentProviders` with `OcrTextReader` and `YunetFaceDetector` from `assets/faces/yunet.bin`; profile-based `ContentConfig`);
-`AndroidV2Device.BitmapDecoder.videoFrame` via `MediaMetadataRetriever` (API 26: `getFrameAtTime(us, OPTION_CLOSEST_SYNC)` for the
-initial 7 points, `OPTION_CLOSEST` otherwise; scale with `Bitmap.createScaledBitmap`; keep one retriever per path, released on path
-change and in `close()`; source id `"mmr-26"`); `V2Analysis` adds the stages and `pendingContent`. No `getScaledFrameAtTime` (API 27).
-Acceptance: `check_android_compile.sh` green; JVM results unchanged; phone checklist appended to `PHASE_A_NOTES.md`.
+### S10 — Android OCR bridge (≈ 200; compile-checked only)
+Create `app/src/main/java/com/storageplanner/app/OcrTextReader.java` (package `com.storageplanner.app`, implements `TextReader`): lazily
+`new OcrEngine(context)` + `start(90000)` on the first `read`; start failure ⇒ `available()` false for the rest of the run; converts ARGB →
+`Bitmap` → JPEG 92 (copy `AndroidPlatform.readText` lines ~325–340); `OcrEngine.read(jpeg, timeoutMs)` returns `null` on timeout or
+error ⇒ `OcrResult.status FAILED`; else `READ` with its words/conf (possibly empty — §6.3 step 3 handles it); `id()` returns
+`ContentTrust.ANDROID_OCR_ENGINE`; `version()` = 1 (bump when the traineddata asset changes). Create `app/v2/AndroidContent.java`
+(builds `ContentProviders(new OcrTextReader(ctx), new YunetFaceDetector(bytes of assets/faces/yunet.bin))` and
+`ContentConfig.forProfile(profile)`); `V2Runner`: `cfg.maxTier = 4`, add the `ContentStage` (§5.1 (b)), close the engine at the end;
+`V2Analysis.Result.pendingContent` (§5.3). Allowed changes: JVM results none; phone checklist (§12) appended to `PHASE_A_NOTES.md`.
 
-### S11 — frame sampler and `Y_STATIC_VIDEO` (≈ 450; rule only if §16 Q3 = yes)
-Files: `v2/content/{FrameSampler,FrameStage}.java`; jvmtest `DirFrameSource` + `JvmMediaDecoder.videoFrame` using it;
-`tools/v2eval/extract_frames.sh`; `ContentRules` video rule; `HardRules` HC12 exception list += `Y_STATIC_VIDEO`; V2Cli `--frames-dir`,
-`--frame-budget`, default `--max-tier 6`. Algorithm §8.2–8.3. Tests: synthetic frame source (luma arrays) — static dark video ⇒ 7 frames,
-nothingVisible 7, eligible; peak at 455 s ⇒ frames at 455/460/465 s planned, `coversPeaks`; scene change between 50 % and 75 % ⇒ midpoint
-added; face at a frame ⇒ ±2 s added; per-video cap 12 respected; run cap mid-video ⇒ nothing written for that video, resumes next run;
-source unverified ⇒ rule silent. Acceptance: `p6_gate.sh` green; `rec_diff --allow Y_STATIC_VIDEO`: only `DCIM/Camera/VID_20210313_082140.mp4`
-KEEP → YOUR_CALL (if its frames qualify; else no change, reported); the 4 mnd S08 videos unchanged; S08 PASS in run A.
-
-### S12 — audio probe, digital silence, `Y_SILENT_RECORDING` (≈ 450; rule only if §16 Q3 = yes)
-Files: `v2/features/AudioProbe.java` (wired in `Extractors.probe` for mp3/flac/ogg/opus/wav/aac, `T1MetadataStage` dispatch);
-`v2/content/AudioActivity.java` (ACTIVITY pass); rule in `ContentRules`; HC12 exception += `Y_SILENT_RECORDING`. Tests §10. Acceptance:
-`rec_diff --allow Y_SILENT_RECORDING`: exactly the 3 `Recordings/Voice Recorder` silent m4a KEEP → YOUR_CALL; audio durations now known
-for 31 files (JSON-only change, listed).
-
-### S13 (optional) — faces on camera photos, `P_PERSONAL_MEDIA_UNIQUE` (≈ 250)
+### S11 (optional) — faces on camera photos, `P_PERSONAL_MEDIA_UNIQUE` (≈ 250)
 VISUAL selection += camera photos that are non-keeper members of a BURST/CONTENT_EQUIVALENT group or have `ImageInfo.contrast < 10`;
-rule PHASE_4 §9.2 (`P_PERSONAL_MEDIA_UNIQUE`, PROTECTED, faces ≥ 1, no verified copy). Acceptance: only KEEP/YOUR_CALL/REVIEW → PROTECTED
-changes on camera photos with faces; DDRR unchanged; S01 PASS count ≥ before.
+rule PHASE_4 §9.2 (`P_PERSONAL_MEDIA_UNIQUE`, PROTECTED, `faceCount ≥ 1`, no verified copy). Allowed changes: only KEEP/YOUR_CALL/REVIEW
+→ PROTECTED on camera photos with faces; DDRR unchanged; S01 PASS count ≥ before.
 
-Order rationale: S1–S5 are pure Java, fully testable, and protect only; S6–S8 add detectors and protection with no new removal;
-S9 is the first slice that creates YOUR_CALL, after every veto it relies on exists and is measured; device bridges (S10) come after the
-logic they feed; S11–S13 are lower value and depend on rulings.
+Order rationale: S1–S5 are pure Java and protect only; S6–S8 add detectors and protection with no new removal; S9 is the first slice
+that creates YOUR_CALL, after every veto and unknown it relies on exists and is measured; S10 (device) comes after the logic it feeds.
+S3a, S3b, S5, S6 are independent of each other after S2 and may run in any order.
 
 ---
 
@@ -1055,6 +1173,10 @@ logic they feed; S11–S13 are lower value and depend on rulings.
 | `Y_` rules for `pictures`, `camera` QR photos, photo-of-screen, pocket shots, junk archives | no positive content evidence that is safe enough, or not content at all (pocket shots are pixel quality) | Phase 7 / later tuning |
 | A non-English traineddata (hin/mar) | asset size (~15–25 MB each), needs owner approval and device benchmarking | owner decision |
 | Multi-threading | A11 | Phase 10 |
+| Adaptive video frame sampling, `Y_STATIC_VIDEO`, frame bridge (REVIEW_6 F-B3) | A41: static videos are not offered; nothing protective needs frames once the bitstream profile protects scenario 8 | later phase, behind its own `ContentTrust` flag |
+| `AudioProbe`, digital silence, `Y_SILENT_RECORDING` (REVIEW_6 F-B3) | A41; no rule or protection reads them | later phase (bump `Extractors.AUDIO`) |
+| `calibrate_content.py` (REVIEW_6 F-M13) | automatic threshold fitting on the scored dataset invites tuning to the labels; thresholds are fixed constants | — |
+| Stored image categories (REVIEW_6 F-M9) | no rule reads them; computed at output | — |
 
 ---
 
@@ -1062,32 +1184,29 @@ logic they feed; S11–S13 are lower value and depend on rulings.
 
 | # | Choice | Rejected alternative | Why |
 |---|---|---|---|
-| C1 | Video motion from the **compressed frame-size table** over the whole recording; decoded frames only to confirm | dense frame decoding (every 2 s) | scenario 8's events are 5–10 s long; 7 + triggered samples can miss them, a full-coverage table cannot; zero decode cost; pure Java ⇒ JVM-verified on real H.264 |
+| C1 | Video motion from the **compressed frame-size table** over the whole recording; used to protect only (A41) | dense frame decoding (every 2 s) | scenario 8's events are 5–10 s long; 7 + triggered samples can miss them, a full-coverage table cannot; zero decode cost; pure Java ⇒ JVM-verified on real H.264 |
 | C2 | Store **no raw OCR/document text**, only derived facts and a MinHash | store the text for re-classification | spec 15 (extracted text is as sensitive as the file); store size (A21/A31); re-classification re-extracts via the version bump |
 | C3 | Desktop OCR = generator-drawn text + an English-only degradation model | (a) install a desktop OCR engine; (b) fake text from labels | (a) blocked in this environment and a different engine than the phone's anyway; (b) leaks labels. (a)/(b) both overstate; the sim at least reproduces the script failure |
-| C4 | Y rules need **every** protective detector complete (visual, QR, faces, verified OCR) | allow pixel-only eligibility when OCR is missing | pixel signals alone make the WhatsApp ID card (aspect 1.586, bigText 0.55) look like a meme; spec 7.2 regional text |
-| C5 | Device-only engines are **unverified until the owner's checklist** passes; protection uses them immediately | enable Y rules on the phone at once | task rule: nothing device-only becomes a precondition for a deletion recommendation until verified; protection is the safe direction |
+| C4 | Y rules need **every** protective detector complete (visual, QR, faces, verified OCR with status READ — A40) | allow pixel-only eligibility when OCR is missing | pixel signals alone make the WhatsApp ID card (aspect 1.586, bigText 0.55) look like a meme; spec 7.2 regional text |
+| C5 | Device-only engines are **unverified until the owner's checklist** passes (`ContentTrust`, checked live — A43); protection uses them immediately | enable Y rules on the phone at once | task rule: nothing device-only becomes a precondition for a deletion recommendation until verified; protection is the safe direction |
 | C6 | Content providers passed to the stages (`ContentProviders`), not added to `V2Device` | add `text()` to `V2Device` (its comment says Phase 6 would) | avoids default methods/interface churn in the Android device class (P5 D-3 avoided them too) |
-| C7 | No tier bits for T4/T6; versions only | `Tiers.T4/T6` bits | P13 would mark every file PARTIAL and change `extraction.status` for the whole dataset |
+| C7 | No tier bits for T4; versions only (+ T1 carry-over, F-B1) | `Tiers.T4/T6` bits | P13 would mark every file PARTIAL and change `extraction.status` for the whole dataset |
 | C8 | Documents get categories and protection only, no Y rule | `DOC_TEMPORARY` ⇒ YOUR_CALL | spec 9.5; one dataset category (`docx REVIEW`) is better served by version links |
 | C9 | Card/page aspect vetoes | rely on OCR ID words | IDs photographed with Devanagari text or OCR failure; aspect is free, script-independent and measured exact (1.586) |
 | C10 | OCR bridge class in package `com.storageplanner.app` | widen `OcrEngine` visibility | leaves the classic class untouched (A2 spirit) |
 | C11 | Version links in `ContentStage`, not `GRAPH` | add to GRAPH | needs `DocInfo` (text sketch), which exists only after the DOC pass |
+| C12 (REVIEW_6) | `ContentFacts` alongside the existing `ContentClassifier` plug point | implement Phase 6 as a `ContentClassifier` | that interface returns one category and a family; vetoes, unknowns and disposable kinds do not fit it |
 
 ---
 
-## 16. Questions for the lead (each changes the expected result)
+## 16. Questions for the lead — answered (REVIEW_6)
 
-* **Q1 — OTP screenshots.** The task brief lists OTP among protective texts; the dataset labels 15 OTP screenshots YOUR_CALL with KEEP
-  *not* acceptable, and OTPs expire within minutes. Proposal: OTP is a disposable kind **unless** any bank/payment/amount word or ID pattern
-  is present (V-TEXT, V-AMOUNT). If ruled protective, drop OTP from §9.2 (−13 hits).
-* **Q2 — mixed-script greetings.** Every dataset greeting has an English line and a Devanagari line; an English-only OCR reads only the
-  first. Proposal (§9.2 rule F step 4): a GREETING verdict with PARTIAL_SCRIPT text is eligible when no digit run ≥ 4, big decorative text
-  and colourful image, and every other veto passes. If ruled "non-Latin anywhere ⇒ unknown", 0.8 is not reachable (≈ 0.75).
-* **Q3 — HC12 exceptions.** `Y_STATIC_VIDEO` and `Y_SILENT_RECORDING` remove personal captures on content evidence; HC12 allows that only
-  for `Y_LOW_QUALITY` ("nothing visible"). Proposal: extend the exception to "nothing recorded" (static, no-audio/digitally-silent video with
-  frames confirmed; digitally silent recording). Gain 4 hits.
-* **Q4 — A27.** The exposure gate stays red until the dataset label of `IMG-20240122-WA0001.jpg` is fixed; Phase 6 assumes the
-  `KNOWN_LABEL_DEFECTS` exemption of §11.3.
-* **Q5 — default tier.** S9 turns `--max-tier 4` on by default in V2Cli and S10 in the app; OCR then costs ≈ 1–3 s per selected image on the
-  phone (300 per run at BALANCED). Confirm the per-run caps.
+* Q1 → **A39**: OTP disposable unless bank/payment/amount/id text appears (V-TEXT, V-AMOUNT). Applied in §9.1 step 4, tests in S7/S8.
+* Q2 → **A40**: rejected. Only READ (no unreadable token) enables YOUR_CALL. Applied in §6.3 step 5, §6.4 U-TEXT, §9.2; hit-rate gate 0.75 desktop.
+* Q3 → **A41**: no static-video / silent-recording candidates; video activity protects only. Applied in §8, §10, §13, §14.
+* Q4 → **A42**: exposure exactly 0, no exemption. Applied in §11.3.
+* (new) **A43**: `ContentTrust` (§5.2, §9.4).
+* Q5 (default tier / per-run caps: `--max-tier 4` by default from S9 on the desktop and from S10 on the phone; BALANCED 2000 visual /
+  300 OCR per run): still open — REVIEW_6 L2.
+* REVIEW_6 L1: audio probe and silence detection cut (A41 says audio features are "extracted and used only to protect", but no
+  protective rule needs them). Recommended: confirm the cut.
