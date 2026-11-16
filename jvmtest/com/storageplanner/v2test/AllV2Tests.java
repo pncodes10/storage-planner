@@ -40,6 +40,8 @@ public final class AllV2Tests {
             {"IncrementalExtractionTest", (Suite) IncrementalExtractionTest::run},
             {"ContentCodecTest", (Suite) ContentCodecTest::run},
             {"ContentCarryOverTest", (Suite) ContentCarryOverTest::run},
+            {"ActivityProfileTest", (Suite) ActivityProfileTest::run},
+            {"ContentStageResumeTest", (Suite) ContentStageResumeTest::run},
             {"ExactGrouperTest", (Suite) ExactGrouperTest::run},
             {"PerceptualTest", (Suite) PerceptualTest::run},
             {"PerceptualBudgetTest", (Suite) PerceptualBudgetTest::run},

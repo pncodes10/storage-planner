@@ -202,6 +202,7 @@ public final class V2Cli {
         com.storageplanner.v2.graph.GraphStage gs = new com.storageplanner.v2.graph.GraphStage();
         gs.decodeBudget = decodeBudget;
         if (graph || pairsOut != null) stages.add(StageTimer.wrap(gs));
+        if (cfg.maxTier >= 4) stages.add(StageTimer.wrap(new com.storageplanner.v2.content.ContentStage(new com.storageplanner.v2.content.ContentProviders(null, null), new com.storageplanner.v2.content.ContentConfig())));
         long heapBefore = measureMemory ? usedHeapAfterGc() : 0;
         PipelineResult res;
         try {

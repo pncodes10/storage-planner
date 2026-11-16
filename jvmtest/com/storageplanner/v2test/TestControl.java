@@ -3,7 +3,7 @@ package com.storageplanner.v2test;
 import com.storageplanner.v2.device.ScanControl;
 
 /** ScanControl for tests: cancel or pause after n progress reports; optional hook per progress. */
-public final class TestControl implements ScanControl {
+public class TestControl implements ScanControl {
     private int cancelAfter = -1, pauseAfter = -1, progress;
     private boolean cancel, pause;
     private int hookAt = -1; private Runnable hook;
