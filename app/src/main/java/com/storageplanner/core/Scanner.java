@@ -203,7 +203,7 @@ public final class Scanner {
 
     static boolean sortedBefore(FileItem f, Map<String, FileItem> prev) {
         FileItem p = same(f, prev);
-        return p != null && p.category != null && !p.textPending;
+        return Sorter.current(p);
     }
 
     static FileItem same(FileItem f, Map<String, FileItem> prev) {

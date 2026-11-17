@@ -31,6 +31,7 @@ public final class FileItem {
     public int faces = -1;        // faces found (-1 = not checked)
     /** Picture measurements (brightness, text, paper, screens, ...) kept from sorting; null = not measured. */
     public ImageSignals.S signals;
+    public int sortVersion;       // Sorter.VERSION in force when this picture was sorted; 0 = sorted by an older app (measure and sort again once)
 
     public String apkPackage;     // for .apk files: the package inside
     public long apkVersion;

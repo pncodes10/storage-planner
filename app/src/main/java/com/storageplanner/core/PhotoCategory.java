@@ -94,6 +94,9 @@ public final class PhotoCategory {
         if (sig.flat >= 0.35 && !isCamera(f) && !sig.wordy() && (text == null || text.goodWords < 5)) { r.category = GRAPHIC; return r; }
         if (sig.flat >= 0.35 && !isCamera(f)) { r.category = DOCUMENT; r.why = "Mostly text"; return r; }
         if (sig.wordy() && sig.paper >= 0.3 && sig.flat >= 0.12) { r.category = DOCUMENT; r.why = "Looks like a page of text"; return r; }
+        // a photo of a page of paper (handwritten notes, printed sheets), even where the text cannot be read; a face
+        // means someone is holding it up, which is a photo of a person. Only ever moves a picture INTO Documents.
+        if (sig.page() && faces <= 0) { r.category = DOCUMENT; r.why = "Looks like a handwritten or printed page"; return r; }
         r.category = faces > 0 ? PEOPLE : PHOTO;
         return r;
     }
@@ -101,7 +104,7 @@ public final class PhotoCategory {
     /** Dark (lens covered, pocket), almost featureless, or so shaken that nothing is sharp anywhere; never with text. */
     public static boolean accidental(ImageSignals.S s) {
         if (s.textBlobs >= 20 || s.flat >= 0.3) return false;
-        if (s.contrast < 16) return true;                                  // nothing in the picture
+        if (s.contrast < 16 && !s.page()) return true;                     // nothing in the picture (a lightly written page is not "nothing")
         if (s.meanLuma < 25 && s.contrast < 30) return true;               // dark
         return s.sharp >= 0 && s.sharp < 0.12 && s.meanLuma > 25;          // shaken: no sharp detail anywhere
     }
@@ -118,6 +121,7 @@ public final class PhotoCategory {
         if (s == null || accidental(s)) return false;
         if (isScreenshot(f) || "download".equals(f.area) || f.area.startsWith("wa_") || "pictures".equals(f.area) || "document".equals(f.area)) return true;
         if (s.flat >= 0.15) return true;                        // paper, screens, printed pages photographed straight
+        if (s.page()) return true;                              // a page of paper, also in dim light (rare, so cheap)
         return s.textBlobs >= 60 && s.textLines >= 4;
     }
 

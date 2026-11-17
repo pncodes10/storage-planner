@@ -186,7 +186,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 | QR codes & barcodes | The code is decoded (ZXing). The card says what it is for: "UPI payment code for …", "Wi-Fi network …", "Link to …" | No |
 | Receipts | Text: totals, cash, change, GST lines, many prices; a tall, narrow shape | No (browse and search) |
 | Bills & invoices | Text: invoice, bill to, due date, GSTIN, amount due; a page shape | No (browse and search) |
-| Documents & text | Mostly text (pages, notes, printouts) | No |
+| Documents & text | Mostly text (pages, notes, printouts), or a photo of a handwritten or printed page that is recognised by its look alone (see below) | No |
 | Payment screenshots | Text: paid to, UPI transaction ID, Google Pay / PhonePe / Paytm … | Yes, if older than 3 months |
 | One-time codes | Text: OTP, verification code, "do not share", plus a 4–8 digit code | Yes, if older than 1 day |
 | Tickets & passes | Text: PNR, train no., boarding pass, gate, seat, booking ID; the travel date is read | Yes, once the date has passed by a week (or 6 months after saving if no date is found) |
@@ -209,15 +209,18 @@ The overview has a **Your pictures** section. It shows every category with its c
 file, such as where it came from (camera photo, screenshot, chat image received or sent, download, ...), its kind,
 size, age (days since it was last *modified*; Android does not say when you last opened it), picture size, category,
 whether text was read, faces, whether it has a QR code or barcode, and, for pictures, brightness, how dark, how
-colourful, how much of it is flat graphics or paper, and how much text. Yes/no facts (exact duplicate, extra shot of a
+colourful, how much of it is flat graphics, how much is paper (judged against the picture's own light), how much is
+ink (pen or print on that paper), whether it looks like a page of paper, and how much text. Yes/no facts (exact duplicate, extra shot of a
 burst, best shot of a burst, sent copy of a camera photo, installer of an app that is already installed, ID document,
 someone has eyes closed, and so on) are listed only when they are true. Anything that was not measured is left out,
 never shown as zero: for example faces are not looked for in screenshots. **Blur** (0 to 100, higher is blurrier) is
 compared with your own camera photos, so it needs at least ten of them; it is not a measure against other people's
 photos. Nothing the planner decides has changed: tags only show what it knows. They prepare the ground for rules you
 will be able to write yourself later ("chat image, greeting, older than 3 days, no faces: delete"). The picture
-measurements are saved with the results (results format 4); results saved by older versions still open, and the
-tags that need them appear after the next scan. The Algorithm Lab's **Picture category** run prints the same tags.
+measurements are saved with the results (results format 5); results saved by older versions still open, and the
+tags that need them appear after the next scan. `paper_share` changed meaning in this step: it is now the share of
+the picture that is plain, colourless and as bright as the picture's own white (so a page in dim light counts), not
+the share above a fixed brightness. `ink_share` and the yes/no `looks_like_page` are new; none of the built-in rules uses them. The Algorithm Lab's **Picture category** run prints the same tags.
 
 As everywhere else, the app deletes nothing itself.
 
@@ -225,6 +228,7 @@ As everywhere else, the app deletes nothing itself.
 1. **Sorting pictures.** Every picture is measured:
    - rows of character-shaped marks (text);
    - bright colourless areas (paper);
+   - whether the whole picture is a page of paper (see **Pages of paper** below);
    - perfectly flat areas (screens);
    - darkness and blur;
    - QR codes and barcodes;
@@ -235,7 +239,35 @@ As everywhere else, the app deletes nothing itself.
    with **Tesseract**, the open-source text reader. Screenshots and the newest pictures go first. Reading is
    limited to 20 minutes per scan; anything left says "text not read yet" and is read at the next **Analyse**.
 3. **Next scans.** Pictures that have not changed (same size and date) keep their category, text and
-   measurements, so later scans skip all of this.
+   measurements, so later scans skip all of this. The exception is a picture that was sorted by an older version
+   of the sorting rules: each sorted picture is saved with the version that sorted it, and when the version goes up,
+   the picture is measured and sorted again once, at the next **Analyse**, even though the file is unchanged. In that
+   one pass a verdict that came from the text or a code (receipt, ticket, ID, QR ...) is kept, text already read is not
+   read again, and only pictures in Photos, People or Accidental shots can change category. This is how the page check
+   below reaches pictures that were sorted before it existed. A picture that cannot be decoded at that moment keeps its
+   old result.
+
+**Pages of paper (handwritten notes, also in dim light).** Text found by its shape works for printed letters in
+even rows; it does not work for handwriting (joined words, a headline line), and the text reader here is English only.
+So a picture is also recognised as a page without reading anything. All of these must hold:
+- **Paper, relative to the picture's own light.** The white level is the brightness of the brightest tenth of the
+  picture. Paper is every colourless pixel within 25 levels of it. It must cover at least half the picture, and the
+  white level must be at least 100, so a dark room is not paper. (The old paper-like share needed brightness 165, which a
+  page in a dim room never reaches; it is still measured and still used by the old rules.)
+- **Smooth.** At least half of that paper has almost no local variation (standard deviation under 8 in a 9 x 9 window
+  at 1024 px). Concrete, gravel and cloth fail here.
+- **Almost no colour.** Colourfulness under 15.
+- **Marks on it.** Ink is a pixel clearly darker (25 levels) than the average of its surroundings (33 x 33 window),
+  where those surroundings are paper. It must be between 1% and 15% of the picture and be present in at least 3 of 8
+  horizontal bands, so one dark object on a white wall does not count.
+
+A match makes the picture a **Document** ("Looks like a handwritten or printed page") and makes it worth reading, so a
+printed page in dim light also gets its text read. It comes after the text, code, screenshot and accidental-shot
+checks, so ID documents, receipts and so on keep their priority; a page is also looked at for faces, and a face in it
+means someone holding it up, which stays a photo of a person. A page can only ever move a picture **into** Documents,
+which is never suggested for deletion; it adds no delete suggestion. Known misses: a page that covers less than half
+the frame, coloured paper, and a page under strongly coloured light. Where the numbers come from is in the Lab:
+**Picture category** prints the white level, paper share, smoothness, ink share and bands, and which check failed.
 
 The start screen has a switch to turn sorting off.
 
@@ -263,7 +295,7 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 | Accidental shots | 18 / 24 (75%) | Real photos made dark, smeared or shaken |
 | Greetings & forwards | 13 / 36 (36%) | **Synthetic**. Decorative letters on busy pictures are hard for Tesseract; missed ones stay under "Photos" |
 
-- **Overall:** 346 of 399 (87%).
+- **Overall:** 346 of 399 (87%). These numbers are from before the page check was added. The 399-picture corpus was not available when it was added, so it was not re-run and there are no accuracy figures for it; the page check is covered by `PageTest` (synthetic pages, walls, sky, scenes, a dark room, a lone dark object, rough surfaces, and re-sorting) and by one real handwritten photo, checked by hand. The same goes for the figure on extra reading below.
 - **No wrong deletion suggestions on the test phone.** No everyday photo was put in a deletable category, and no greeting, OTP, payment or ticket was wrongly assigned.
 - **Little extra reading.** Only 8 of 78 everyday photos were sent to the text reader.
 - **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
@@ -325,7 +357,7 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 | Eyes open or closed | For each face: the eyes-open probability, each eye at the 7 positions tried, how much it counts in the score, and the eye patches the model looked at |
 | Sharpness / blur | The focus number used to compare shots, the blur score used for "possibly blurry", and each face's focus |
 | Lighting | Brightness, blown-out and black share, and each penalty that makes up the lighting score |
-| Picture category | Every measurement used for sorting, any code, faces, the text read and its evidence, and the final category |
+| Picture category | Every measurement used for sorting (including the page-of-paper check: white level, paper share, smoothness, ink share and bands, and which check failed), any code, faces, the text read and its evidence, and the final category |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
 | Compress (test copy) | Compresses the picture with the compression tools ([tools README](app/src/main/java/com/storageplanner/tools/README.md)), with the same checks a real run would use, once per way of saving (each HEIC encoder, and WebP), and shows which copy a real run would keep (★). **Treat as** picks the kind: Screenshot becomes lossless WebP, anything else HEIC or WebP. Logs every quality tried with its worst SSIM, PSNR and colour shift, the size before and after, the time taken, and whether a real run would keep the copy. The copies go to their own folder under `Download/StoragePlanner/compressed/`. Every copy is kept, even ones a real run would throw away, so you can see why. Originals are never touched |
@@ -463,7 +495,7 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

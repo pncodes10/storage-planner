@@ -341,6 +341,8 @@ public final class Lab {
                 s.meanLuma, s.contrast, s.colorful, 100 * s.darkFrac, 100 * s.paper, 100 * s.flat, s.sharp));
         o.line(f("  text-like marks %d in %d lines covering %.2f%% (letter height %.1f%% of the picture, big lettering %.0f%% of the width)",
                 s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.textHeight, 100 * s.bigText));
+        o.line(pageLine(s));
+        o.line("  looks like a page of paper? " + (s.page() ? "yes (handwritten or printed page, no text reading needed)" : "no: " + s.pageFail()));
         o.line("  code: " + (f.code == null ? "none" : f.code) + "; faces counted: " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces)));
         boolean read = PhotoCategory.worthReading(f, s);
         o.line("  accidental shot? " + PhotoCategory.accidental(s) + "; worth reading the text? " + read);
@@ -352,6 +354,14 @@ public final class Lab {
         f.category = r.category; f.catDate = r.date; f.textPending = read && v == null;
         tagLines(f, now, o);
         return sh;
+    }
+
+    /** The page-of-paper measurements on one line (the later ones are not measured when an earlier check already failed). */
+    static String pageLine(ImageSignals.S s) {
+        if (s.pagePaper < 0) return "  page check: not measured";
+        String rest = s.smooth < 0 ? "smooth, ink: not measured (an earlier check failed)"
+                : f("smooth %.0f%% of that paper, ink %.1f%% of the picture in %d of 8 bands", 100 * s.smooth, 100 * s.ink, s.inkBands);
+        return f("  page check: white level %.0f, plain paper near it %.1f%%, %s", s.whiteLevel, 100 * s.pagePaper, rest);
     }
 
     /** The tags of this one picture (the blur score and the other whole-scan tags need your whole phone, so they stay unknown here). */

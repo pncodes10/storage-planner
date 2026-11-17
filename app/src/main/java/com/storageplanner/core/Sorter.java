@@ -18,6 +18,16 @@ final class Sorter {
     static final int EDGE = 1024, BIG = 2048, TEXT_EDGE = 1600, FACE_EDGE = 512, GREETING_EDGE = 360;
     static final int MAX_TEXT = 4000;
 
+    /**
+     * Version of the sorting rules. Pictures sorted under an older version are measured and sorted once more at the
+     * next scan (the file is unchanged, but the rules or the measurements are new). Raise it whenever a change
+     * should reach pictures that are already sorted. 1: page-of-paper check.
+     */
+    static final int VERSION = 1;
+
+    /** True when this earlier result for an unchanged picture can be kept as it is. */
+    static boolean current(FileItem p) { return p != null && p.category != null && !p.textPending && p.sortVersion >= VERSION; }
+
     /** Pass-1 measurements of one picture, kept until it is classified. */
     static final class Prep { ImageSignals.S s; double aspect; }
 
@@ -41,7 +51,7 @@ final class Sorter {
         if (code == null && (s.flat >= 0.1 || s.paper >= 0.2)) code = Codes.read(l, w, h, true);
         f.code = code == null ? null : Codes.describe(code[0], code[1]);
         f.faces = -1;
-        if (!PhotoCategory.worthReading(f, s) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);
+        if ((!PhotoCategory.worthReading(f, s) || s.page()) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);   // a page is looked at for faces too: someone holding it up is a person
         Prep p = new Prep();
         p.s = s; p.aspect = dims[0] / (double) Math.max(1, dims[1]);
         return p;
@@ -59,23 +69,35 @@ final class Sorter {
             pr.update("Sorting pictures", k + 1, pics.size());
             FileItem f = pics.get(k);
             FileItem p = Scanner.same(f, opt.previous);
-            if (p != null && p.category != null && !p.textPending) {          // unchanged and fully sorted last time
-                f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces; f.signals = p.signals;
+            if (current(p)) {                                                  // unchanged and fully sorted last time, by the current rules
+                copyOver(p, f);
                 continue;
             }
             Prep m = measured == null ? null : measured.get(f);
             if (m == null) {
                 int[] px;
                 try { px = pf.argb(f.abs, EDGE, dims); } catch (Throwable t) { px = null; }
-                if (px == null) continue;
+                if (px == null) {                                          // cannot be decoded now: keep what the older sort found
+                    if (p != null && p.category != null) copyOver(p, f);
+                    continue;
+                }
                 m = measure(pf, f, px, dims);
             }
             ImageSignals.S s = m.s;
             if (f.quality != null) f.faces = f.quality.faces;          // measured more carefully for near-identical shots
+            // sorted before by older rules: measured again, but a verdict that came from the text or a code stays,
+            // and the text already read is not read again
+            boolean again = p != null && p.category != null && !p.textPending;
+            if (again && !PhotoCategory.PHOTO.equals(p.category) && !PhotoCategory.PEOPLE.equals(p.category) && !PhotoCategory.ACCIDENTAL.equals(p.category)) {
+                copyOver(p, f);
+                f.signals = s; f.sortVersion = VERSION;
+                continue;
+            }
             boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
+            if (again && !(s.page() && p.text == null)) read = false;
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, null, f.faces);
-            f.category = c.category; f.catDate = 0; f.text = null;
-            f.textPending = read;
+            f.category = c.category; f.catDate = again && !read ? p.catDate : 0; f.text = again && !read ? p.text : null;
+            f.textPending = read; f.sortVersion = VERSION;
             if (read) { toRead.add(f); sig.put(f, s); aspect.put(f, new double[]{m.aspect}); }
         }
         // ---- pass 2: read text, screenshots first, then newest first, within the time limit
@@ -125,6 +147,11 @@ final class Sorter {
             String t = TextRules.clean(words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
+    }
+
+    private static void copyOver(FileItem p, FileItem f) {
+        f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces; f.signals = p.signals;
+        f.sortVersion = p.sortVersion; f.textPending = p.textPending;
     }
 
     /** Faces, looked for on a small copy (People vs. other photos only needs to know there is a face). */

@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 4;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture
+    public static final int VERSION = 5;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -112,7 +112,8 @@ public final class ResultStore {
                 out.writeBoolean(f.textPending);
                 out.writeInt(f.faces);
             }
-            if (version >= 4) writeSignals(out, f.signals);
+            if (version >= 4) writeSignals(out, f.signals, version);
+            if (version >= 5) out.writeInt(f.sortVersion);
         }
 
         out.writeInt(r.apps.size());
@@ -201,7 +202,8 @@ public final class ResultStore {
                 f.faces = in.readInt();
                 if (f.faces < -1) throw new IOException("results file damaged (faces)");
             }
-            if (v >= 4) f.signals = readSignals(in);
+            if (v >= 4) f.signals = readSignals(in, v);
+            if (v >= 5) { f.sortVersion = in.readInt(); if (f.sortVersion < 0) throw new IOException("results file damaged (sort version)"); }
             r.files.add(f);
         }
 
@@ -250,21 +252,24 @@ public final class ResultStore {
         for (float x : q.face) out.writeFloat(x);
     }
 
-    private static void writeSignals(DataOutputStream out, ImageSignals.S s) throws IOException {
+    private static void writeSignals(DataOutputStream out, ImageSignals.S s, int version) throws IOException {
         out.writeBoolean(s != null);
         if (s == null) return;
         out.writeDouble(s.meanLuma); out.writeDouble(s.darkFrac); out.writeDouble(s.contrast); out.writeDouble(s.colorful);
         out.writeDouble(s.paper); out.writeDouble(s.flat); out.writeDouble(s.sharp);
         out.writeInt(s.textBlobs); out.writeDouble(s.textArea); out.writeInt(s.textLines); out.writeDouble(s.textHeight); out.writeDouble(s.bigText);
+        if (version >= 5) { out.writeDouble(s.whiteLevel); out.writeDouble(s.pagePaper); out.writeDouble(s.smooth); out.writeDouble(s.ink); out.writeInt(s.inkBands); }
     }
 
-    private static ImageSignals.S readSignals(DataInputStream in) throws IOException {
+    private static ImageSignals.S readSignals(DataInputStream in, int version) throws IOException {
         if (!in.readBoolean()) return null;
         ImageSignals.S s = new ImageSignals.S();
         s.meanLuma = in.readDouble(); s.darkFrac = in.readDouble(); s.contrast = in.readDouble(); s.colorful = in.readDouble();
         s.paper = in.readDouble(); s.flat = in.readDouble(); s.sharp = in.readDouble();
         s.textBlobs = in.readInt(); s.textArea = in.readDouble(); s.textLines = in.readInt(); s.textHeight = in.readDouble(); s.bigText = in.readDouble();
+        if (version >= 5) { s.whiteLevel = in.readDouble(); s.pagePaper = in.readDouble(); s.smooth = in.readDouble(); s.ink = in.readDouble(); s.inkBands = in.readInt(); }
         if (s.textBlobs < 0 || s.textLines < 0) throw new IOException("results file damaged (signals)");
+        if (s.inkBands < -1 || s.inkBands > 8) throw new IOException("results file damaged (signals)");
         return s;
     }
 

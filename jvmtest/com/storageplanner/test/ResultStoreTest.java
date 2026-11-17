@@ -123,14 +123,28 @@ public final class ResultStoreTest {
         ImageSignals.S sg = new ImageSignals.S();
         sg.meanLuma = 101.25; sg.darkFrac = 0.125; sg.contrast = 33.5; sg.colorful = 17.75; sg.paper = 0.0625; sg.flat = 0.5; sg.sharp = 0.375;
         sg.textBlobs = 77; sg.textArea = 0.015625; sg.textLines = 6; sg.textHeight = 0.03125; sg.bigText = 0.25;
-        own.signals = sg;
+        sg.whiteLevel = 161; sg.pagePaper = 0.875; sg.smooth = 0.9375; sg.ink = 0.0234375; sg.inkBands = 7;
+        own.signals = sg; own.sortVersion = 1;
         FileItem none = new FileItem("DCIM/Camera/none.jpg", "/sdcard/DCIM/Camera/none.jpg", 10, 20);
         none.area = "camera"; none.type = "jpeg";
         r.files.add(own); r.files.add(none);
         ResultStore.Saved l4 = ResultStore.read(new ByteArrayInputStream(save(s)));
         FileItem own4 = l4.result.files.get(l4.result.files.size() - 2), none4 = l4.result.files.get(l4.result.files.size() - 1);
-        check("v4 signals kept", own4.signals != null && compareFields("signals", sg, own4.signals) == 12);
-        check("v4 unmeasured stays null", none4.signals == null);
+        check("v5 signals kept (every field, page measurements included)", own4.signals != null && compareFields("signals", sg, own4.signals) == 17);
+        check("v5 sorting version kept", own4.sortVersion == 1 && none4.sortVersion == 0);
+        check("v5 unmeasured stays null", none4.signals == null);
+        // a file saved by the previous app version (format 4): signals load without the page measurements, and the
+        // picture counts as sorted by an older version, so the next scan measures and sorts it again
+        ByteArrayOutputStream b4 = new ByteArrayOutputStream();
+        ResultStore.write(b4, s, 4);
+        ResultStore.Saved l4old = ResultStore.read(new ByteArrayInputStream(b4.toByteArray()));
+        FileItem own4o = l4old.result.files.get(l4old.result.files.size() - 2);
+        check("format 4 file loads: old signals kept, page measurements 'not measured', sort version 0",
+                own4o.signals != null && own4o.signals.meanLuma == sg.meanLuma && own4o.signals.textBlobs == 77 && own4o.signals.whiteLevel == -1
+                && own4o.signals.pagePaper == -1 && own4o.signals.smooth == -1 && own4o.signals.ink == -1 && own4o.signals.inkBands == -1
+                && own4o.sortVersion == 0 && !own4o.signals.page() && own4o.category == null == (own.category == null));
+        check("format 4 file loads for every file", l4old.result.files.size() == r.files.size());
+        check("a damaged ink band count is refused", refusedInkBands(s));
         ByteArrayOutputStream b3 = new ByteArrayOutputStream();
         ResultStore.write(b3, s, 3);
         ResultStore.Saved l3 = ResultStore.read(new ByteArrayInputStream(b3.toByteArray()));
@@ -192,6 +206,16 @@ public final class ResultStoreTest {
         List<String> l = new ArrayList<String>();
         for (Map.Entry<Unit, Option> e : p.chosen.entrySet()) l.add(e.getKey().id + "=" + e.getValue().technique + "/" + e.getValue().saved);
         return l;
+    }
+
+    /** A saved file whose ink band count is out of range (more than 8) must be refused. */
+    static boolean refusedInkBands(ResultStore.Saved s) throws IOException {
+        FileItem x = s.result.files.get(s.result.files.size() - 2);
+        int was = x.signals.inkBands;
+        x.signals.inkBands = 99;
+        byte[] bad = save(s);
+        x.signals.inkBands = was;
+        try { ResultStore.read(new ByteArrayInputStream(bad)); return false; } catch (IOException e) { return true; }
     }
 
     /** read must throw IOException (never anything else), tryRead must return null. */

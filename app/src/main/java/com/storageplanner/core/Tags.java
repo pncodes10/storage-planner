@@ -26,7 +26,7 @@ public final class Tags {
     public static final String SOURCE = "source", AREA = "area", KIND = "kind", SIZE_BYTES = "size_bytes", AGE_DAYS = "age_days",
             WIDTH = "width", HEIGHT = "height", MEGAPIXELS = "megapixels", CATEGORY = "category", TEXT_READ = "text_read",
             FACES = "faces", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share",
-            COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", TEXT_AMOUNT = "text_amount",
+            COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", INK_SHARE = "ink_share", LOOKS_LIKE_PAGE = "looks_like_page", TEXT_AMOUNT = "text_amount",
             DUPLICATE = "duplicate", BURST_EXTRA = "burst_extra", BURST_KEEPER = "burst_keeper", SENT_COPY = "sent_copy",
             BLURRY = "blurry_vs_your_photos", INSTALLER_INSTALLED = "installer_already_installed", INSTALLER_NOT_INSTALLED = "installer_not_installed",
             ID_DOCUMENT = "id_document", EYES_CLOSED = "eyes_closed", SCREENSHOT = "screenshot", CHAT_MEDIA = "chat_media", CAMERA_PHOTO = "camera_photo",
@@ -118,7 +118,9 @@ public final class Tags {
         public int darkShare = UNKNOWN;                 // 0..100: share of nearly black pixels
         public int colourfulness = UNKNOWN;             // 0 (grey) and up; about 15 is a colourful picture, 60+ vivid
         public int graphicShare = UNKNOWN;              // 0..100: share of perfectly flat pixels (screens, graphics)
-        public int paperShare = UNKNOWN;                // 0..100: share of bright, colourless pixels (paper, documents)
+        public int paperShare = UNKNOWN;                // 0..100: share of plain colourless pixels as bright as the picture's own white (paper, also in dim light)
+        public int inkShare = UNKNOWN;                  // 0..100: share clearly darker than the paper around it (pen, print); UNKNOWN when the picture has no plain paper area to look at
+        public Boolean looksLikePage;                   // a photo of a handwritten or printed page; null = not measured
         public String textAmount;                       // AMOUNT_*; null = not measured
         public boolean duplicate, burstExtra, burstKeeper, sentCopy, blurry, installerAlreadyInstalled, installerNotInstalled,
                 idDocument, screenshot, chatMedia, cameraPhoto;
@@ -155,7 +157,9 @@ public final class Tags {
             l.add(num(COLOURFULNESS, "Colourfulness", colourfulness, String.valueOf(colourfulness)));
             l.add(num(GRAPHIC_SHARE, "Flat graphic share", graphicShare, graphicShare + "%"));
             l.add(num(PAPER_SHARE, "Paper-like share", paperShare, paperShare + "%"));
+            l.add(num(INK_SHARE, "Ink share (pen or print on paper)", inkShare, inkShare + "%"));
             l.add(text(TEXT_AMOUNT, "Text in the picture", textAmount));
+            l.add(flag(LOOKS_LIKE_PAGE, "Looks like a page of paper", looksLikePage, null));
             l.add(flag(SCREENSHOT, "Screenshot", screenshot, null));
             l.add(flag(CAMERA_PHOTO, "Camera photo", cameraPhoto, null));
             l.add(flag(CHAT_MEDIA, "Chat or Telegram media", chatMedia, null));
@@ -194,6 +198,7 @@ public final class Tags {
                 case COLOURFULNESS: return colourfulness;
                 case GRAPHIC_SHARE: return graphicShare;
                 case PAPER_SHARE: return paperShare;
+                case INK_SHARE: return inkShare;
                 case SIZE_MB: return sizeMb;
                 case BITS_PER_PIXEL: return bitsPerPixel;
                 case BITRATE_KBPS: return bitrateKbps;
@@ -231,6 +236,7 @@ public final class Tags {
                 case INSTALLER_NOT_INSTALLED: return installerNotInstalled;
                 case ID_DOCUMENT: return idDocument;
                 case EYES_CLOSED: return eyesClosed;
+                case LOOKS_LIKE_PAGE: return looksLikePage;
                 case SCREENSHOT: return screenshot;
                 case CHAT_MEDIA: return chatMedia;
                 case CAMERA_PHOTO: return cameraPhoto;
@@ -273,10 +279,10 @@ public final class Tags {
     private static final Map<String, Type> TYPES = new HashMap<String, Type>();
     static {
         for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, BLUR, BRIGHTNESS, DARK_SHARE, COLOURFULNESS,
-                GRAPHIC_SHARE, PAPER_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE}) TYPES.put(id, Type.NUMBER);
+                GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE}) TYPES.put(id, Type.NUMBER);
         for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
-                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE}) TYPES.put(id, Type.FLAG);
+                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE}) TYPES.put(id, Type.FLAG);
     }
 
     /** The type of the tag with this id; null if there is no such tag. */
@@ -296,7 +302,7 @@ public final class Tags {
         {WIDTH, "px", "width"}, {HEIGHT, "px", "height"}, {MEGAPIXELS, "MP", "size in megapixels"}, {CATEGORY, "", "picture category"},
         {TEXT_READ, "", "text status"}, {FACES, "", "number of faces"}, {HAS_CODE, "", "has a QR code or barcode"}, {BLUR, "of 100", "blur"},
         {BRIGHTNESS, "of 100", "brightness"}, {DARK_SHARE, "%", "dark share"}, {COLOURFULNESS, "", "colourfulness"},
-        {GRAPHIC_SHARE, "%", "flat graphic share"}, {PAPER_SHARE, "%", "paper-like share"}, {TEXT_AMOUNT, "", "amount of text"},
+        {GRAPHIC_SHARE, "%", "flat graphic share"}, {PAPER_SHARE, "%", "paper-like share"}, {INK_SHARE, "%", "ink share"}, {LOOKS_LIKE_PAGE, "", "is a photo of a page of paper"}, {TEXT_AMOUNT, "", "amount of text"},
         {DUPLICATE, "", "is an exact duplicate"}, {BURST_EXTRA, "", "is an extra shot of a burst"}, {BURST_KEEPER, "", "is the best shot of a burst"},
         {SENT_COPY, "", "is a sent copy of a camera photo"}, {BLURRY, "", "is much blurrier than your other photos"},
         {INSTALLER_INSTALLED, "", "is an installer for an app that is already installed"}, {INSTALLER_NOT_INSTALLED, "", "is an installer for an app that is not installed"},
@@ -421,7 +427,11 @@ public final class Tags {
             t.darkShare = pct(s.darkFrac);
             t.colourfulness = (int) Math.round(s.colorful);
             t.graphicShare = pct(s.flat);
-            t.paperShare = pct(s.paper);
+            if (s.pagePaper >= 0) {                  // measured by this version of the app; older measurements have no page check
+                t.paperShare = pct(s.pagePaper);
+                t.looksLikePage = s.page();
+                if (s.ink >= 0) t.inkShare = pct(s.ink);
+            }
             // thresholds as in the sorter: "lots" is what makes a picture a page of text, "some" is what is worth reading
             t.textAmount = s.textBlobs >= 60 && s.textLines >= 4 ? AMOUNT_LOTS : s.wordy() ? AMOUNT_SOME : AMOUNT_NONE;
         }

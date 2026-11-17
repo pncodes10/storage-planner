@@ -113,6 +113,17 @@ public final class TagsTest {
         s.meanLuma = 127.5; s.darkFrac = 0.2; s.colorful = 23.4; s.flat = 0.35; s.paper = 0.07; s.textBlobs = 5;
         m.signals = s;
         Tags.T t1 = Tags.of(m, none, NOW);
+        check("pictures measured before the page check: paper, ink and page are unknown (not the old absolute share)", t1.paperShare == Tags.UNKNOWN
+                && t1.inkShare == Tags.UNKNOWN && t1.looksLikePage == null && !t1.get(Tags.LOOKS_LIKE_PAGE).known && !t1.get(Tags.INK_SHARE).known);
+        s.whiteLevel = 160; s.pagePaper = 0.07; s.smooth = -1; s.ink = -1; s.inkBands = -1;       // measured, but stopped at an early check
+        t1 = Tags.of(m, none, NOW);
+        check("paper share is the relative page paper share; ink unknown when not measured; not a page", t1.paperShare == 7 && t1.inkShare == Tags.UNKNOWN
+                && Boolean.FALSE.equals(t1.looksLikePage) && Tags.of(m, none, NOW).get(Tags.LOOKS_LIKE_PAGE).value.equals("no"));
+        s.whiteLevel = 161; s.pagePaper = 0.93; s.smooth = 0.9; s.ink = 0.027; s.inkBands = 7; s.colorful = 5;
+        t1 = Tags.of(m, none, NOW);
+        check("page: paper 93, ink 3, looks like a page", t1.paperShare == 93 && t1.inkShare == 3 && Boolean.TRUE.equals(t1.looksLikePage)
+                && Boolean.TRUE.equals(t1.flagTag(Tags.LOOKS_LIKE_PAGE)) && t1.numTag(Tags.INK_SHARE) == 3 && t1.numTag(Tags.PAPER_SHARE) == 93);
+        s.colorful = 23.4; s.pagePaper = 0.07; t1 = Tags.of(m, none, NOW);
         check("brightness 127.5/255 = 50", t1.brightness == 50);
         check("dark share 20", t1.darkShare == 20);
         check("colourfulness 23", t1.colourfulness == 23);
@@ -219,7 +230,7 @@ public final class TagsTest {
         boolean ids = true;
         java.util.Set<String> seen = new java.util.HashSet<String>();
         for (Tags.Entry en : all1.all()) ids &= seen.add(en.id) && en.id.matches("[a-z_]+") && en.label.length() > 0;
-        check("39 unique lower_snake ids", ids && seen.size() == 39 && all1.get(Tags.BLUR) != null);
+        check("41 unique lower_snake ids", ids && seen.size() == 41 && all1.get(Tags.BLUR) != null);
         boolean typed = true;                                   // every listed id has a type, and the typed accessors agree with it
         for (Tags.Entry en : all1.all()) {
             Tags.Type ty = Tags.typeOf(en.id);

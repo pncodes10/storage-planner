@@ -8,6 +8,19 @@ package com.storageplanner.core;
 public final class ImageSignals {
     private ImageSignals() {}
 
+    // Page-of-paper thresholds (see S.page). Paper is judged against the picture's own white level, so a page in
+    // dim light still counts. A miss only ever means "kept as a photo", a match only ever moves a picture into Documents.
+    public static final double PAGE_WHITE_MIN = 100;       // white level; below this the room is too dark to call anything paper
+    public static final int PAGE_BAND = 25;                // paper = within this many levels of the white level
+    public static final double PAGE_MIN_SHARE = 0.5;       // paper must cover at least this much of the picture
+    public static final double PAGE_COLOUR_MAX = 15;       // colourfulness below this
+    public static final double PAGE_SMOOTH_MIN = 0.5;      // share of the paper with local luma std-dev below SMOOTH_SD
+    public static final double SMOOTH_SD = 8;
+    public static final double INK_MIN = 0.01, INK_MAX = 0.15;   // share of the picture
+    public static final int INK_BANDS_MIN = 3;             // of 8 horizontal bands
+    static final double INK_BAND_SHARE = 0.003;            // a band has ink when this much of it is ink
+    static final int INK_DROP = 25;                        // ink = this much darker than the local average
+
     /** Measurements of one picture (all scale-free). */
     public static final class S {
         public double meanLuma, darkFrac;   // average brightness 0..255; share of pixels darker than 25
@@ -21,6 +34,32 @@ public final class ImageSignals {
         public int textLines;               // rough number of text lines
         public double textHeight;           // median character height, fraction of the picture height
         public double bigText;              // widest row of large letters (>= 3% of the height), fraction of the width
+        // A page of paper (handwritten or printed), judged against the picture's own light. -1 = not measured (pictures
+        // sorted before this existed, or the later checks skipped because an earlier one already failed).
+        public double whiteLevel = -1;      // brightness of the brightest tenth of the picture (90th percentile of luma)
+        public double pagePaper = -1;       // share of colourless pixels within PAGE_BAND of the white level
+        public double smooth = -1;          // share of that paper that has almost no local variation
+        public double ink = -1;             // share of the picture that is clearly darker than its surroundings (pen strokes, print)
+        public int inkBands = -1;           // how many of the 8 horizontal bands have ink in them
+
+        /** Why this is not a page of paper, in a few words; null when it is one. */
+        public String pageFail() {
+            if (pagePaper < 0) return "not measured";
+            if (whiteLevel < PAGE_WHITE_MIN) return "too dark (white level " + Math.round(whiteLevel) + " < " + PAGE_WHITE_MIN + ")";
+            if (pagePaper < PAGE_MIN_SHARE) return "not enough plain paper (" + pct(pagePaper) + "% < " + pct(PAGE_MIN_SHARE) + "%)";
+            if (colorful >= PAGE_COLOUR_MAX) return "too colourful (" + Math.round(colorful) + " >= " + Math.round(PAGE_COLOUR_MAX) + ")";
+            if (smooth < PAGE_SMOOTH_MIN) return "paper not smooth enough (" + pct(smooth) + "% < " + pct(PAGE_SMOOTH_MIN) + "%)";
+            if (ink < INK_MIN) return "no pen strokes or print (ink " + pct1(ink) + "% < " + pct1(INK_MIN) + "%)";
+            if (ink > INK_MAX) return "too much dark (ink " + pct1(ink) + "% > " + pct1(INK_MAX) + "%)";
+            if (inkBands < INK_BANDS_MIN) return "marks not spread over the page (" + inkBands + " of 8 bands < " + INK_BANDS_MIN + ")";
+            return null;
+        }
+
+        /** A photo of a page of paper, handwritten or printed: plain smooth paper, no colour, marks spread over it. */
+        public boolean page() { return pageFail() == null; }
+
+        private static String pct(double x) { return String.valueOf(Math.round(100 * x)); }
+        private static String pct1(double x) { return String.format(java.util.Locale.US, "%.1f", 100 * x); }
 
         /** Enough text to be worth reading (the text reader is the slow part). */
         public boolean wordy() { return textBlobs >= 25 && textArea >= 0.004; }
@@ -31,13 +70,15 @@ public final class ImageSignals {
         int n = w * h;
         int[] l = new int[n];
         double sum = 0, sq = 0, rg = 0, rg2 = 0, yb = 0, yb2 = 0; int dark = 0, paper = 0;
+        int[] hist = new int[256], histPlain = new int[256];     // luma of all pixels, and of the colourless ones
         for (int i = 0; i < n; i++) {
             int p = argb[i], r = (p >> 16) & 255, g = (p >> 8) & 255, b = p & 255;
             int y = (299 * r + 587 * g + 114 * b) / 1000;
             l[i] = y; sum += y; sq += (double) y * y;
             if (y < 25) dark++;
             int mx = Math.max(r, Math.max(g, b)), mn = Math.min(r, Math.min(g, b));
-            if (y >= 165 && mx - mn <= 40) paper++;
+            hist[y]++;
+            if (mx - mn <= 40) { histPlain[y]++; if (y >= 165) paper++; }
             double a = r - g, c = 0.5 * (r + g) - b;
             rg += a; rg2 += a * a; yb += c; yb2 += c * c;
         }
@@ -55,7 +96,9 @@ public final class ImageSignals {
             }
         s.flat = flat / (double) Math.max(1, (w - 2) * (h - 2));
         s.sharp = PhotoQuality.sharpness(l, w, h);
-        text(l, w, h, s);
+        long[][] in = integral(l, w, h);
+        text(l, w, h, s, in);
+        page(argb, l, w, h, in, hist, histPlain, s);
         return s;
     }
 
@@ -71,7 +114,10 @@ public final class ImageSignals {
     }
 
     // ------------------------------------------------------------------ text: rows of character-sized blobs
-    static void text(int[] l, int w, int h, S s) {
+    static void text(int[] l, int w, int h, S s) { text(l, w, h, s, integral(l, w, h)); }
+
+    /** Integral images of luma and luma squared: {sums, sums of squares}, each (w+1) x (h+1). */
+    static long[][] integral(int[] l, int w, int h) {
         long[] ii = new long[(w + 1) * (h + 1)], ii2 = new long[(w + 1) * (h + 1)];
         for (int y = 0; y < h; y++) {
             long rs = 0, rs2 = 0;
@@ -81,6 +127,11 @@ public final class ImageSignals {
                 ii2[(y + 1) * (w + 1) + x + 1] = ii2[y * (w + 1) + x + 1] + rs2;
             }
         }
+        return new long[][]{ii, ii2};
+    }
+
+    private static void text(int[] l, int w, int h, S s, long[][] in) {
+        long[] ii = in[0], ii2 = in[1];
         int rad = Math.max(8, Math.max(w, h) / 64);
         byte[] ink = new byte[w * h];                     // 1 = darker than surroundings, 2 = brighter
         for (int y = 0; y < h; y++)
@@ -206,6 +257,51 @@ public final class ImageSignals {
         int lines = 0, gap = Math.max(2, nh > 0 ? hs[nh / 2] / 2 : 4), last = -1000;
         for (int y = 0; y < h; y++) if (row[y]) { if (y - last > gap) lines++; last = y; }
         s.textLines = lines;
+    }
+
+    // ------------------------------------------------------------------ page of paper (no text reading)
+    private static void page(int[] argb, int[] l, int w, int h, long[][] in, int[] hist, int[] histPlain, S s) {
+        int n = w * h, acc = 0, white = 255;
+        for (int v = 0; v < 256; v++) { acc += hist[v]; if (acc >= 0.9 * n) { white = v; break; } }
+        s.whiteLevel = white;
+        int lo = Math.max(0, white - PAGE_BAND), plain = 0;
+        for (int v = lo; v < 256; v++) plain += histPlain[v];
+        s.pagePaper = plain / (double) n;
+        // the cheap checks first: most pictures stop here and cost nothing more
+        if (white < PAGE_WHITE_MIN || s.pagePaper < PAGE_MIN_SHARE || s.colorful >= PAGE_COLOUR_MAX) return;
+        s.smooth = 0; s.ink = 0; s.inkBands = 0;
+        long[] ii = in[0], ii2 = in[1];
+        int w1 = w + 1, r4 = Math.max(2, Math.max(w, h) / 256), r16 = Math.max(8, Math.max(w, h) / 64);
+        int smoothPaper = 0, paperPx = 0, inkPx = 0;
+        int[] band = new int[8], bandPx = new int[8];
+        for (int y = 0; y < h; y++) {
+            int b = Math.min(7, y * 8 / h), ya = Math.max(0, y - r4), yb = Math.min(h, y + r4 + 1), yc = Math.max(0, y - r16), yd = Math.min(h, y + r16 + 1);
+            bandPx[b] += w;
+            for (int x = 0; x < w; x++) {
+                int i = y * w + x, v = l[i];
+                int xa = Math.max(0, x - r4), xb = Math.min(w, x + r4 + 1);
+                if (v >= lo) {
+                    int p = argb[i], mx = Math.max((p >> 16) & 255, Math.max((p >> 8) & 255, p & 255)), mn = Math.min((p >> 16) & 255, Math.min((p >> 8) & 255, p & 255));
+                    if (mx - mn <= 40) {
+                        paperPx++;
+                        long a = (long) (xb - xa) * (yb - ya);
+                        long sm = ii[yb * w1 + xb] - ii[ya * w1 + xb] - ii[yb * w1 + xa] + ii[ya * w1 + xa];
+                        long sm2 = ii2[yb * w1 + xb] - ii2[ya * w1 + xb] - ii2[yb * w1 + xa] + ii2[ya * w1 + xa];
+                        double m = sm / (double) a, var = sm2 / (double) a - m * m;
+                        if (var < SMOOTH_SD * SMOOTH_SD) smoothPaper++;
+                        continue;
+                    }
+                }
+                if (v >= lo) continue;
+                // darker than the surroundings, and the surroundings are paper (not the edge of a big dark object)
+                int xc = Math.max(0, x - r16), xd = Math.min(w, x + r16 + 1);
+                double m = (ii[yd * w1 + xd] - ii[yc * w1 + xd] - ii[yd * w1 + xc] + ii[yc * w1 + xc]) / (double) ((long) (xd - xc) * (yd - yc));
+                if (v < m - INK_DROP && m >= white - 45) { inkPx++; band[b]++; }
+            }
+        }
+        s.smooth = paperPx == 0 ? 0 : smoothPaper / (double) paperPx;
+        s.ink = inkPx / (double) n;
+        for (int b = 0; b < 8; b++) if (band[b] >= INK_BAND_SHARE * bandPx[b]) s.inkBands++;
     }
 
     private static int find(int[] p, int x) {
