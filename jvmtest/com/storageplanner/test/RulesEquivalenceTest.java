@@ -1,0 +1,202 @@
+package com.storageplanner.test;
+
+import com.storageplanner.core.*;
+
+import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Random;
+
+/**
+ * The rule engine with the built-in rules must give exactly the units the old hard-coded UnitBuilder gave
+ * (LegacyUnitBuilder, a copy from before the engine): same units in the same order, and for every option the
+ * same action, technique, saved bytes, risk, exact flag and reason. Compared on many random scans that put files
+ * just below, at and just above every threshold, and on the virtual phone when its folder is given.
+ * Usage: RulesEquivalenceTest [virtual phone folder]
+ */
+public final class RulesEquivalenceTest {
+    static final long NOW = 1792000000000L, DAY = 86400000L;
+    static int units, options, files, scans, bad;
+
+    static final String[] AREAS = {"camera", "screenshot", "pictures", "movies", "download", "music", "document", "trash", "thumbnails", "temp",
+        "residue", "ext_cache", "ext_data", "wa_image", "wa_sent", "wa_video", "wa_sent_video", "wa_voice", "wa_doc", "wa_status", "wa_sticker",
+        "wa_gif", "wa_old_backup", "wa_other", "telegram_media", "app_obb", "app_media", "user_other"};
+    static final String[] TYPES = {"jpeg", "jpeg", "jpeg", "png", "png", "mp4", "mp4", "mkv", "mp3", "flac", "m4a", "ogg", "pdf", "zip", "webp", "heic", "avif", null};
+    static final String[] CODECS = {null, "video/avc", "video/avc", "video/hevc", "video/mp4v-es", "video/3gpp", "video/av01", "VIDEO/AVC"};
+    static final double[] AGES = {-3, 0, 0.5, 1, 2, 3, 6.99, 7, 8, 30, 89.99, 90, 91, 179.99, 180, 181, 365, 1000};
+
+    static long ageMs(Random rnd, double days) { return Math.round(days * DAY) + rnd.nextInt(3) - 1; }
+
+    static void fail(String s) { bad++; if (bad < 15) System.out.println("FAIL " + s); }
+
+    static void same(Scanner.Result r, int sdk, Estimates est, String where) {
+        LegacyUnitBuilder a = new LegacyUnitBuilder(r, est, sdk);
+        UnitBuilder b = new UnitBuilder(r, est, sdk);
+        scans++; files += r.files.size();
+        if (a.units.size() != b.units.size()) { fail(where + ": unit count " + a.units.size() + " vs " + b.units.size()); return; }
+        for (int i = 0; i < a.units.size(); i++) {
+            Unit x = a.units.get(i), y = b.units.get(i);
+            units++;
+            if (!x.id.equals(y.id) || !x.title.equals(y.title) || !x.kind.equals(y.kind)) { fail(where + ": unit " + i + " " + x.id + " vs " + y.id); continue; }
+            if (x.options.size() != y.options.size()) { fail(where + ": " + x.id + " options " + x.options.size() + " vs " + y.options.size()); continue; }
+            for (int k = 0; k < x.options.size(); k++) {
+                Option p = x.options.get(k), q = y.options.get(k);
+                options++;
+                if (!p.action.equals(q.action) || !p.technique.equals(q.technique) || p.saved != q.saved || p.risk != q.risk || p.exact != q.exact || !p.why.equals(q.why))
+                    fail(where + ": " + x.id + " option " + k + ": " + p.action + "/" + p.technique + "/" + p.saved + "/R" + p.risk + "/" + p.exact + "/" + p.why
+                            + "  vs  " + q.action + "/" + q.technique + "/" + q.saved + "/R" + q.risk + "/" + q.exact + "/" + q.why);
+            }
+        }
+        // the detections are computed by the same code, but compare them too
+        if (!a.det.duplicateOf.equals(b.det.duplicateOf) || !a.det.burstExtraOf.equals(b.det.burstExtraOf) || !a.det.blurry.equals(b.det.blurry)
+                || !a.det.sentCopyOf.equals(b.det.sentCopyOf)) fail(where + ": detections differ");
+    }
+
+    static String summary(List<Unit> us) {
+        StringBuilder b = new StringBuilder();
+        for (Unit u : us) { b.append(u.id).append('|'); for (Option o : u.options) b.append(o.technique).append(o.saved).append(o.why).append(';'); b.append('\n'); }
+        return b.toString();
+    }
+
+    static Scanner.Result scan(Random rnd) {
+        Scanner.Result r = new Scanner.Result();
+        r.now = NOW; r.total = 128L << 30; r.free = 10L << 30;
+        // apps: some installed, installer versions around them
+        String[] pkgs = {"com.a.one", "com.b.two", "com.c.three", "com.d.four", "com.e.five"};
+        for (int i = 0; i < pkgs.length; i++) {
+            if (rnd.nextInt(5) == 0) continue;                       // not installed
+            AppItem a = new AppItem(pkgs[i], "App " + i);
+            a.versionCode = 10 + rnd.nextInt(3); a.codeBytes = 1000000L * rnd.nextInt(500); a.dataBytes = 1000000L * rnd.nextInt(500);
+            a.cacheBytes = rnd.nextInt(4) == 0 ? 0 : 1000000L * rnd.nextInt(100);
+            a.lastUsed = NOW - (long) (rnd.nextDouble() * 200 * DAY); a.firstInstall = NOW - 400 * DAY;
+            a.hasLauncher = rnd.nextInt(6) != 0; a.isGame = rnd.nextBoolean(); a.isSystem = rnd.nextInt(8) == 0; a.isEssential = rnd.nextInt(8) == 0;
+            r.apps.add(a);
+        }
+        int n = 150 + rnd.nextInt(250);
+        List<String> shas = new ArrayList<String>();
+        for (int i = 0; i < 12; i++) shas.add("sha" + i);
+        List<FileItem> cam = new ArrayList<FileItem>();
+        for (int i = 0; i < n; i++) {
+            String area = AREAS[rnd.nextInt(rnd.nextInt(3) == 0 ? AREAS.length : 8)];
+            FileItem f;
+            double age = AGES[rnd.nextInt(AGES.length)] + (rnd.nextInt(4) == 0 ? rnd.nextDouble() * 5 : 0);
+            long size;
+            switch (rnd.nextInt(6)) { case 0: size = 0; break; case 1: size = 999999 + rnd.nextInt(3); break; case 2: size = 1 + rnd.nextInt(3000); break;
+                default: size = 1000 + (long) (rnd.nextDouble() * rnd.nextInt(60) * 1000000); }
+            String type = TYPES[rnd.nextInt(TYPES.length)];
+            if (area.equals("camera") && rnd.nextInt(3) > 0) type = "jpeg";
+            if (area.equals("screenshot") && rnd.nextInt(3) > 0) type = "png";
+            if (area.equals("music") && rnd.nextInt(3) > 0) type = rnd.nextBoolean() ? "mp3" : "m4a";
+            String name = (rnd.nextInt(10) == 0 ? "Screenshot_" : "f") + i + (type == null ? "" : "." + type);
+            f = new FileItem(area + "/" + (rnd.nextInt(30) == 0 ? "long/deep/folder/" : "") + name, "/sdcard/" + name, size, NOW - ageMs(rnd, age));
+            f.area = area; f.type = type;
+            if (rnd.nextInt(3) > 0) {                                  // picture size and bits per pixel around 0.5 and 1.0
+                f.width = 400 + rnd.nextInt(5) * 1000; f.height = 300 + rnd.nextInt(4) * 700;
+            }
+            if (rnd.nextInt(8) == 0) f.pkg = "com.res." + rnd.nextInt(5);
+            if (rnd.nextInt(3) == 0) f.sha256 = shas.get(rnd.nextInt(shas.size()));
+            f.faces = rnd.nextInt(4) == 0 ? rnd.nextInt(4) : -1;
+            if (rnd.nextInt(4) == 0) {
+                f.category = rnd.nextInt(5) == 0 ? PhotoCategory.ID : PhotoCategory.ALL[rnd.nextInt(PhotoCategory.ALL.length)];
+                if (rnd.nextInt(3) > 0) f.catDate = NOW - ageMs(rnd, new double[] {-2, 0, 3, 6.99, 7, 7.0001, 8, 40, 200}[rnd.nextInt(9)]);
+                if (rnd.nextInt(3) == 0) f.catDate = f.catDate / DAY * DAY;       // UTC midnight like a date read from text
+            }
+            if (type != null && type.equals("apk")) f.apkPackage = null;
+            if (rnd.nextInt(10) == 0) { f.apkPackage = pkgs[rnd.nextInt(pkgs.length)]; f.apkVersion = 9 + rnd.nextInt(5); f.type = rnd.nextBoolean() ? "zip" : null; }
+            if (f.type != null && (f.type.equals("mp4") || f.type.equals("mkv") || area.equals("music") || rnd.nextInt(6) == 0)) {
+                f.vcodec = CODECS[rnd.nextInt(CODECS.length)];
+                if (f.width <= 0 && rnd.nextInt(5) > 0) { f.width = 1920; f.height = 1080; }
+                if (area.equals("music") || f.type.equals("mp3") || f.type.equals("m4a") || f.type.equals("flac")) {
+                    f.bitrate = new long[] {0, 1, 999, 128000, 255999, 256000, 320000, 1411000}[rnd.nextInt(8)];
+                    if (rnd.nextInt(6) > 0) f.vcodec = null;
+                } else {
+                    double bppf = new double[] {0.01, 0.059, 0.06, 0.119, 0.12, 0.27, 0.5}[rnd.nextInt(7)];
+                    f.bitrate = rnd.nextInt(8) == 0 ? 0 : (long) (bppf * Math.max(1, f.width) * Math.max(1, f.height) * 30) + rnd.nextInt(3) - 1;
+                }
+            }
+            // size to land bits per pixel on a threshold
+            if (f.width > 0 && rnd.nextInt(2) == 0) {
+                double bpp = new double[] {0.1, 0.4999, 0.5, 0.5001, 1.0, 0.9999, 1.0001, 3}[rnd.nextInt(8)];
+                FileItem g = new FileItem(f.rel, f.abs, (long) Math.ceil(bpp * f.width * f.height / 8.0) + (rnd.nextInt(3) - 1), f.mtime);
+                g.area = f.area; g.type = f.type; g.sha256 = f.sha256; g.width = f.width; g.height = f.height; g.pkg = f.pkg; g.faces = f.faces;
+                g.category = f.category; g.catDate = f.catDate; g.apkPackage = f.apkPackage; g.apkVersion = f.apkVersion;
+                g.vcodec = f.vcodec; g.bitrate = f.bitrate;
+                f = g;
+            }
+            r.files.add(f);
+            if (area.equals("camera") && rnd.nextInt(2) == 0) { cam.add(f); }
+        }
+        // camera photos with features: bursts, blur, sent copies of them
+        long base = NOW - 100 * DAY;
+        int c = 0;
+        for (int g = 0; g < 4 + rnd.nextInt(10); g++) {
+            long ph = rnd.nextLong(); int w = rnd.nextBoolean() ? 4000 : 3000, h = w == 4000 ? 3000 : 4000;
+            boolean withQ = rnd.nextInt(2) == 0;
+            for (int k = 0; k < 1 + rnd.nextInt(5); k++) {
+                FileItem p = new FileItem("DCIM/Camera/IMG_" + (c++) + ".jpg", "/sdcard/DCIM/Camera/x", 2000000 + rnd.nextInt(3000000),
+                        base + g * 3600000L * 5 + k * 60000L * (1 + rnd.nextInt(5)));
+                p.area = "camera"; p.type = "jpeg"; p.width = w; p.height = h;
+                p.hasPhash = true; p.phash = ph ^ (1L << rnd.nextInt(60)) ^ (rnd.nextInt(4) == 0 ? (1L << rnd.nextInt(60)) : 0);
+                p.sharp = rnd.nextInt(8) == 0 ? 0.5 : 5 + rnd.nextDouble() * 100;
+                if (withQ) p.quality = quality(rnd);
+                r.files.add(p);
+                if (rnd.nextInt(3) == 0) {                              // the chat's compressed copy of it
+                    FileItem s = new FileItem("WhatsApp/Sent/IMG-" + (c++) + ".jpg", "/sdcard/WA", 200000, NOW - 50 * DAY);
+                    s.area = "wa_sent"; s.type = "jpeg"; s.hasPhash = true; s.phash = p.phash ^ (rnd.nextInt(3) == 0 ? 0 : 0xFFL);
+                    s.width = w / 4; s.height = h / 4 + (rnd.nextInt(4) == 0 ? 40 : 0);
+                    r.files.add(s);
+                }
+            }
+        }
+        for (int k = 0; k < 20; k++) {                                  // lots of other camera photos so the median sharpness is stable
+            FileItem p = new FileItem("DCIM/Camera/O_" + k + ".jpg", "/sdcard/o", 3000000, NOW - 300 * DAY - k * 7200000L);
+            p.area = "camera"; p.type = "jpeg"; p.width = 4000; p.height = 3000; p.hasPhash = true; p.phash = rnd.nextLong(); p.sharp = 40 + rnd.nextDouble() * 60;
+            r.files.add(p);
+        }
+        return r;
+    }
+
+    static PhotoQuality.Q quality(Random rnd) {
+        PhotoQuality.Q q = new PhotoQuality.Q();
+        q.faces = rnd.nextInt(4); q.openFaces = q.faces == 0 ? 0 : rnd.nextInt(q.faces + 1);
+        q.face = new float[q.faces * 5];
+        for (int i = 0; i < q.faces; i++) { q.face[i * 5] = 0.5f; q.face[i * 5 + 1] = 0.5f; q.face[i * 5 + 2] = 0.1f; q.face[i * 5 + 3] = rnd.nextFloat(); q.face[i * 5 + 4] = 0.9f; }
+        q.eyes = q.faces == 0 ? -1 : rnd.nextDouble(); q.faceSharp = q.faces == 0 ? -1 : rnd.nextDouble() * 100;
+        q.faceLuma = q.faces == 0 ? -1 : rnd.nextDouble() * 255;
+        q.sharp = rnd.nextDouble() * 100; q.meanLuma = rnd.nextDouble() * 255; q.clipHi = rnd.nextDouble() * 0.1; q.clipLo = rnd.nextDouble() * 0.1;
+        return q;
+    }
+
+    public static void main(String[] args) {
+        Estimates[] ests = {new Estimates(), new Estimates()};
+        ests[1].cameraPhoto = 0.5; ests[1].chatImage = 0.33; ests[1].screenshotLossless = 0.17;
+        ests[1].photoSource = "measured on 12 of your photos"; ests[1].chatSource = "measured on 5 of your chat images"; ests[1].screenshotSource = "measured";
+        for (int seed = 0; seed < 400; seed++) {
+            Random rnd = new Random(seed);
+            same(scan(rnd), new int[] {33, 34, 35}[seed % 3], ests[seed % 2], "random scan " + seed);
+        }
+        System.out.println("  random scans: " + scans + ", " + files + " files, " + units + " units, " + options + " options compared");
+        // teeth: with any one built-in rule switched off the result must differ from the old code somewhere (so every rule was exercised)
+        int untested = 0;
+        for (Rule rule : RuleSet.defaults().rules) {
+            boolean differs = false;
+            for (int seed = 0; seed < 80 && !differs; seed++) {
+                Scanner.Result r = scan(new Random(seed));
+                RuleSet rs = RuleSet.defaults();
+                rs.find(rule.id).enabled = false;
+                differs = !summary(new LegacyUnitBuilder(r, ests[0], 34).units).equals(summary(new UnitBuilder(r, ests[0], 34, rs).units));
+            }
+            if (!differs) { untested++; fail("rule " + rule.id + " is never exercised by the random scans"); }
+        }
+        System.out.println("  every one of the " + RuleSet.defaults().rules.size() + " built-in rules changes the result when switched off: " + (untested == 0));
+        if (args.length > 0 && new File(args[0]).isDirectory()) {
+            JvmPlatform pf = new JvmPlatform(args[0]);
+            Scanner.Result r = Scanner.scan(pf, new Scanner.Progress() {
+                public void update(String s, int d, int t) {} public boolean cancelled() { return false; } });
+            int u0 = units, o0 = options, f0 = files;
+            same(r, pf.sdkInt(), new Estimates(), "virtual phone");
+            System.out.println("  virtual phone: " + (files - f0) + " files, " + (units - u0) + " units, " + (options - o0) + " options compared");
+        } else System.out.println("  (no virtual phone folder given)");
+        System.out.println(bad == 0 ? "RulesEquivalenceTest: all " + options + " options in " + units + " units identical" : "RulesEquivalenceTest: " + bad + " DIFFERENCES");
+    }
+}

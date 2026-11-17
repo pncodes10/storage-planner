@@ -388,6 +388,25 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 - **Screenshots:** measured with lossless WebP.
 - **Video:** a conservative 45% for high-bitrate H.264.
 
+## Rules (new)
+
+The suggestions for single files are now **rules**, and you will be able to add your own. A rule is a list of conditions that must **all** be true, plus one action. Each condition tests one tag of a file (see Tags: `age_days`, `source`, `category`, `faces`, `blur`, `brightness`, `size_mb`, ...) and can be turned around with NOT. If you need "or", write two rules. The actions are delete, re-encode (photo, lossless image, video, audio) and keep. For example:
+
+- `source = chat image (received)` AND `category = greeting` AND `age_days > 3` AND NOT `faces > 0` -> delete
+- `camera_photo = yes` AND `blur > 70` AND `brightness < 20` -> delete
+- `faces > 0` -> keep (never touch pictures with people)
+
+**Unknown means no.** If a tag was never measured for a file (faces in a screenshot, blur with too few camera photos, a date that was not read), the condition is false, also when it has NOT. So `NOT faces > 0` does not match a picture whose faces were never checked.
+
+**Today's suggestions are built-in rules** (`BuiltInRules`: thumbnails, temp files, exact duplicates, bursts, old payments, re-encoding of camera photos, ...). With no rules of your own the plan is exactly the one the app made before; a test compares the two on tens of thousands of files. A built-in rule can be switched off or have its numbers changed (for example greetings after 3 days instead of 7). Apps and app caches are still decided in code, not by rules.
+
+**Limits on your rules**, enforced in the core and not only on screen:
+- A delete from your rule is always R4: it needs your confirmation. A re-encode is always R2. Its technique is shown as "My rule: name".
+- A keep rule removes every suggestion for the files it matches, built-in ones included.
+- ID documents never get a delete suggestion from any rule; only an identical extra copy may go.
+
+Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned). A rule that names a tag this version does not know is loaded switched off. The rule editor with a live preview, and saving your rules in the app, come next; for now the app uses the built-in rules.
+
 ## Build it yourself
 
 **Android Studio:** open this folder, let it sync (AGP 8.5, JDK 17), then **Build → Build APK(s)**. The project has no dependencies beyond the Android framework.
@@ -410,7 +429,8 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
-  - **UnitBuilder:** options.
+  - **UnitBuilder:** options (finds duplicates, bursts, blur, sent copies, then lets the rules decide per file; apps are decided in code).
+  - **Rule / RuleSet / BuiltInRules:** the rule engine: conditions on tags, the built-in rules, the user's rules and their text format.
   - **Planner:** tiered planner.
   - **Report:** output.
   - **ResultStore:** versioned binary format for saved results (with checksum).
@@ -423,7 +443,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

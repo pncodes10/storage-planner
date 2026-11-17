@@ -219,7 +219,38 @@ public final class TagsTest {
         boolean ids = true;
         java.util.Set<String> seen = new java.util.HashSet<String>();
         for (Tags.Entry en : all1.all()) ids &= seen.add(en.id) && en.id.matches("[a-z_]+") && en.label.length() > 0;
-        check("31 unique lower_snake ids", ids && seen.size() == 31 && all1.get(Tags.BLUR) != null);
+        check("39 unique lower_snake ids", ids && seen.size() == 39 && all1.get(Tags.BLUR) != null);
+        boolean typed = true;                                   // every listed id has a type, and the typed accessors agree with it
+        for (Tags.Entry en : all1.all()) {
+            Tags.Type ty = Tags.typeOf(en.id);
+            typed &= ty != null && (ty == Tags.Type.FLAG) == en.flag;
+            if (ty == Tags.Type.NUMBER) typed &= (all1.numTag(en.id) >= 0) == en.known;
+            if (ty == Tags.Type.TEXT) typed &= (all1.textTag(en.id) != null) == en.known;
+            if (ty == Tags.Type.FLAG) typed &= (all1.flagTag(en.id) != null) == en.known;
+        }
+        check("every tag has a type; the typed readers match known/unknown", typed && Tags.typeOf("nonsense") == null);
+
+        // ---- tags added for the rule engine
+        FileItem big = file("DCIM/Camera/big.jpg", "camera", "jpeg", 3000000, 10);
+        big.width = 2000; big.height = 1500; big.vcodec = "video/avc"; big.bitrate = 12345678; big.apkPackage = "com.x";
+        Tags.T bt = Tags.of(big, ctx, NOW);
+        check("file_type, size_mb, bits_per_pixel, video_codec, bitrate_kbps, apk_package",
+                "jpeg".equals(bt.fileType) && Math.abs(bt.sizeMb - 3.0) < 1e-9 && Math.abs(bt.bitsPerPixel - Estimates.bpp(big)) < 1e-12
+                && "video/avc".equals(bt.videoCodec) && Math.abs(bt.bitrateKbps - 12345.678) < 1e-6 && "com.x".equals(bt.apkPackage));
+        FileItem bare = file("x/y.bin", "user_other", null, 100, 1);
+        Tags.T nt = Tags.of(bare, ctx, NOW);
+        check("no type, picture size, codec, bitrate, date: all unknown (never 0)",
+                nt.fileType == null && nt.bitsPerPixel == Tags.UNKNOWN && nt.videoCodec == null && nt.bitrateKbps == Tags.UNKNOWN
+                && nt.dateInPicture == null && nt.daysSinceDate == Tags.UNKNOWN && nt.apkPackage == null);
+        FileItem tk = file("Pictures/ticket.jpg", "pictures", "jpeg", 100, 30);
+        tk.category = PhotoCategory.TICKET; tk.catDate = NOW - 10 * DAY;
+        Tags.T tt = Tags.of(tk, ctx, NOW);
+        check("date read in a picture: flag yes and days since", Boolean.TRUE.equals(tt.dateInPicture) && Math.abs(tt.daysSinceDate - 10) < 1e-9);
+        tk.catDate = 0;
+        tt = Tags.of(tk, ctx, NOW);
+        check("sorted picture with no date: flag no, days unknown", Boolean.FALSE.equals(tt.dateInPicture) && tt.daysSinceDate == Tags.UNKNOWN);
+        tk.catDate = NOW + 5 * DAY;
+        check("a date still ahead counts as 0 days, not unknown", Tags.of(tk, ctx, NOW).daysSinceDate == 0);
         boolean shownOk = true;
         for (Tags.Entry en : all1.shown()) shownOk &= en.known && (!en.flag || en.on);
         check("shown() has only known tags, and yes/no tags only when yes", shownOk);

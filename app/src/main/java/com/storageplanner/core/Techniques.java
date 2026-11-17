@@ -97,6 +97,9 @@ public final class Techniques {
 
     public static Info info(String technique) {
         Info i = INFO.get(technique);
+        if (i == null && technique != null && technique.startsWith(Rule.USER_PREFIX))
+            return new Info("Files that match a rule you wrote. Nothing here is chosen for you without your confirmation.",
+                "Look at each one, then delete it or re-encode it with your gallery or file manager.");
         return i != null ? i : new Info("", "");
     }
 }

@@ -11,8 +11,7 @@ import java.util.Set;
 
 /**
  * Tags: a flat, read-only set of named facts about one file ("source = chat image (received)", "blur = 85",
- * "faces = 2"). They are what user-written rules will test later. Nothing here decides anything; the planner's
- * rules (UnitBuilder) are unchanged and read the same measurements directly.
+ * "faces = 2"). They are what the rules (Rule, BuiltInRules) test. Nothing here decides anything.
  *
  * Every tag has a stable lower_snake id (the constants below, for the rule engine) and a plain label (for
  * screens). A value that was not measured is UNKNOWN (-1 for numbers, null for yes/no and text), never a fake 0:
@@ -30,7 +29,10 @@ public final class Tags {
             COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", TEXT_AMOUNT = "text_amount",
             DUPLICATE = "duplicate", BURST_EXTRA = "burst_extra", BURST_KEEPER = "burst_keeper", SENT_COPY = "sent_copy",
             BLURRY = "blurry_vs_your_photos", INSTALLER_INSTALLED = "installer_already_installed", INSTALLER_NOT_INSTALLED = "installer_not_installed",
-            ID_DOCUMENT = "id_document", EYES_CLOSED = "eyes_closed", SCREENSHOT = "screenshot", CHAT_MEDIA = "chat_media", CAMERA_PHOTO = "camera_photo";
+            ID_DOCUMENT = "id_document", EYES_CLOSED = "eyes_closed", SCREENSHOT = "screenshot", CHAT_MEDIA = "chat_media", CAMERA_PHOTO = "camera_photo",
+            SIZE_MB = "size_mb", FILE_TYPE = "file_type", BITS_PER_PIXEL = "bits_per_pixel", VIDEO_CODEC = "video_codec",
+            BITRATE_KBPS = "bitrate_kbps", DATE_IN_PICTURE = "date_in_picture", DAYS_SINCE_DATE = "days_since_date_in_picture",
+            APK_PACKAGE = "apk_package";
 
     public static final int UNKNOWN = -1;
 
@@ -123,6 +125,14 @@ public final class Tags {
         public String duplicateOf, burstKeptShot, sentCopyOf;      // the other file, by path
         public Boolean eyesClosed;                      // null unless the photo was compared in a burst (quality measured)
         public String installerFor;                     // package of an installer file
+        public double sizeMb = UNKNOWN;                 // size in decimal MB, like Android Settings
+        public String fileType;                         // as read from the first bytes: jpeg, png, mp4, ...; null = not known
+        public double bitsPerPixel = UNKNOWN;           // file size in bits per picture pixel; UNKNOWN without picture dimensions
+        public String videoCodec;                       // video codec mime (video/avc, ...); null = not read
+        public double bitrateKbps = UNKNOWN;            // video or audio bitrate in kbit/s; UNKNOWN = not read
+        public Boolean dateInPicture;                   // a date was read in the picture; null = not sorted
+        public double daysSinceDate = UNKNOWN;          // days since that date (0 if it lies ahead); UNKNOWN without a date
+        public String apkPackage;                       // package inside an .apk file
 
         /** All tags in a fixed order, unknown ones included (for rules and tests). */
         public List<Entry> all() {
@@ -158,7 +168,75 @@ public final class Tags {
             l.add(flag(INSTALLER_NOT_INSTALLED, "Installer, app not installed", installerNotInstalled, installerFor));
             l.add(flag(ID_DOCUMENT, "ID document", idDocument, null));
             l.add(flag(EYES_CLOSED, "Someone has eyes closed", eyesClosed, null));
+            l.add(num(SIZE_MB, "Size in MB", sizeMb, String.format(Locale.US, "%.1f MB", sizeMb)));
+            l.add(text(FILE_TYPE, "File type", fileType));
+            l.add(num(BITS_PER_PIXEL, "Bits per pixel", bitsPerPixel, String.format(Locale.US, "%.2f", bitsPerPixel)));
+            l.add(text(VIDEO_CODEC, "Video codec", videoCodec));
+            l.add(num(BITRATE_KBPS, "Bitrate (kbit/s)", bitrateKbps, String.format(Locale.US, "%.0f kbit/s", bitrateKbps)));
+            l.add(flag(DATE_IN_PICTURE, "Date read in the picture", dateInPicture, null));
+            l.add(num(DAYS_SINCE_DATE, "Days since the date in the picture", daysSinceDate, String.format(Locale.US, "%.0f days", daysSinceDate)));
+            l.add(text(APK_PACKAGE, "Installer for package", apkPackage));
             return l;
+        }
+
+        /** Number tag by id (the rule engine); UNKNOWN (-1) when not measured or when the id is not a number tag. */
+        public double numTag(String id) {
+            switch (id) {
+                case SIZE_BYTES: return sizeBytes;
+                case AGE_DAYS: return ageDays;
+                case WIDTH: return width;
+                case HEIGHT: return height;
+                case MEGAPIXELS: return megapixels;
+                case FACES: return faces;
+                case BLUR: return blur;
+                case BRIGHTNESS: return brightness;
+                case DARK_SHARE: return darkShare;
+                case COLOURFULNESS: return colourfulness;
+                case GRAPHIC_SHARE: return graphicShare;
+                case PAPER_SHARE: return paperShare;
+                case SIZE_MB: return sizeMb;
+                case BITS_PER_PIXEL: return bitsPerPixel;
+                case BITRATE_KBPS: return bitrateKbps;
+                case DAYS_SINCE_DATE: return daysSinceDate;
+                default: return UNKNOWN;
+            }
+        }
+
+        /** Text tag by id (the rule engine); null when not known. For category this is the id (see PhotoCategory). */
+        public String textTag(String id) {
+            switch (id) {
+                case SOURCE: return source;
+                case AREA: return area;
+                case KIND: return kind;
+                case CATEGORY: return category;
+                case TEXT_READ: return textRead;
+                case TEXT_AMOUNT: return textAmount;
+                case FILE_TYPE: return fileType;
+                case VIDEO_CODEC: return videoCodec;
+                case APK_PACKAGE: return apkPackage;
+                default: return null;
+            }
+        }
+
+        /** Yes/no tag by id (the rule engine); null when not known. */
+        public Boolean flagTag(String id) {
+            switch (id) {
+                case HAS_CODE: return hasCode;
+                case DUPLICATE: return duplicate;
+                case BURST_EXTRA: return burstExtra;
+                case BURST_KEEPER: return burstKeeper;
+                case SENT_COPY: return sentCopy;
+                case BLURRY: return blurry;
+                case INSTALLER_INSTALLED: return installerAlreadyInstalled;
+                case INSTALLER_NOT_INSTALLED: return installerNotInstalled;
+                case ID_DOCUMENT: return idDocument;
+                case EYES_CLOSED: return eyesClosed;
+                case SCREENSHOT: return screenshot;
+                case CHAT_MEDIA: return chatMedia;
+                case CAMERA_PHOTO: return cameraPhoto;
+                case DATE_IN_PICTURE: return dateInPicture;
+                default: return null;
+            }
         }
 
         /** What a screen shows: every tag that is known; yes/no tags only when they are yes. */
@@ -188,6 +266,21 @@ public final class Tags {
         }
         @Override public String toString() { return label + ": " + value; }
     }
+
+    /** What kind of value a tag has. */
+    public enum Type { NUMBER, TEXT, FLAG }
+
+    private static final Map<String, Type> TYPES = new HashMap<String, Type>();
+    static {
+        for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, BLUR, BRIGHTNESS, DARK_SHARE, COLOURFULNESS,
+                GRAPHIC_SHARE, PAPER_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE}) TYPES.put(id, Type.NUMBER);
+        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE}) TYPES.put(id, Type.TEXT);
+        for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
+                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE}) TYPES.put(id, Type.FLAG);
+    }
+
+    /** The type of the tag with this id; null if there is no such tag. */
+    public static Type typeOf(String id) { return id == null ? null : TYPES.get(id); }
 
     private static Entry text(String id, String label, String v) { return new Entry(id, label, v == null ? "not measured" : v, v != null, false, false); }
     private static Entry num(String id, String label, double v, String shown) { return new Entry(id, label, v < 0 ? "not measured" : shown, v >= 0, false, false); }
@@ -243,6 +336,14 @@ public final class Tags {
         }
         t.idDocument = PhotoCategory.ID.equals(f.category);
         if (f.quality != null) t.eyesClosed = f.quality.faces > 0 && f.quality.openFaces < f.quality.faces;
+        t.sizeMb = f.size / 1e6;
+        t.fileType = f.type;
+        if (f.width > 0 && f.height > 0) t.bitsPerPixel = Estimates.bpp(f);
+        t.videoCodec = f.vcodec;
+        if (f.bitrate > 0) t.bitrateKbps = f.bitrate / 1000.0;
+        t.apkPackage = f.apkPackage;
+        if (f.category != null) t.dateInPicture = f.catDate > 0;
+        if (f.catDate > 0) t.daysSinceDate = Math.max(0, (now - f.catDate) / 86400000.0);
         t.screenshot = PhotoCategory.isScreenshot(f);
         t.chatMedia = f.area != null && (f.area.startsWith("wa_") || "telegram_media".equals(f.area));
         t.cameraPhoto = "camera".equals(f.area) && IMAGE.equals(t.kind);
