@@ -88,6 +88,51 @@ public final class Session {
         replan();
     }
 
+    private static boolean rebuilding, rebuildAgain;
+    private static final List<Runnable> rebuildWaiters = new ArrayList<Runnable>();
+
+    /**
+     * The rules changed: builds the units again from the scan result already in memory (no new scan), keeps the kept and
+     * accepted decisions, and plans again. The work runs on a thread; {@code done} (may be null) runs on the main thread
+     * after the new plan is in Session. Asking again while it runs makes it run once more afterwards with the newest rules.
+     * Call on the main thread.
+     */
+    public static void rebuild(Context c, Runnable done) {
+        final Context app = c.getApplicationContext();
+        if (done != null) rebuildWaiters.add(done);
+        if (result == null || est == null || ub == null) { finishRebuild(); return; }
+        if (rebuilding) { rebuildAgain = true; return; }
+        rebuilding = true; rebuildAgain = false;
+        final Scanner.Result r = result; final Estimates e = est; final int sd = sdk;
+        final com.storageplanner.core.RuleSet rules = RulesStore.get(app);
+        final int v = RulesStore.version();
+        new Thread(new Runnable() {
+            public void run() {
+                UnitBuilder b = null;
+                try { b = new UnitBuilder(r, e, sd, rules); } catch (Throwable t) { b = null; }
+                final UnitBuilder fb = b;
+                AnalysisState.UI.post(new Runnable() {
+                    public void run() {
+                        rebuilding = false;
+                        if (fb != null && result == r) set(r, fb, e, targetUsed, appStats, sdk);      // not if a newer scan arrived meanwhile
+                        if (rebuildAgain || RulesStore.version() != v) { rebuildAgain = false; rebuild(app, null); }
+                        else finishRebuild();
+                    }
+                });
+            }
+        }, "rebuild-plan").start();
+    }
+
+    /** True while rebuild() is working. */
+    public static boolean rebuilding() { return rebuilding; }
+
+    private static void finishRebuild() {
+        List<Runnable> w = new ArrayList<Runnable>(rebuildWaiters);
+        rebuildWaiters.clear();
+        for (Runnable r : w) r.run();
+        MainActivity.planChanged();
+    }
+
     private static void link(Map<String, String> m) {
         for (Map.Entry<String, String> e : m.entrySet()) {
             List<String> l = copiesOf.get(e.getValue());
@@ -222,11 +267,18 @@ public final class Session {
         return p != null ? "planned" : null;
     }
 
-    public static boolean isAccepted(Unit u) { return accepted.containsKey(u.id) && !kept.contains(u.id); }
+    /**
+     * The user approved this unit and the approval still means something: the option it names still exists (a rule can be
+     * switched off or changed later; the approval then stays saved, is ignored by the plan, and comes back if the option does).
+     */
+    public static boolean isAccepted(Unit u) {
+        String t = accepted.get(u.id);
+        return t != null && !kept.contains(u.id) && Review.optionFor(u, t) != null;
+    }
 
     public static int acceptedInResults() {
         int n = 0;
-        for (String id : accepted.keySet()) if (unitById.containsKey(id) && !kept.contains(id)) n++;
+        for (String id : accepted.keySet()) { Unit u = unitById.get(id); if (u != null && isAccepted(u)) n++; }
         return n;
     }
 
@@ -235,7 +287,7 @@ public final class Session {
         List<Unit> out = new ArrayList<Unit>();
         for (Map.Entry<Unit, Option> e : plan.chosen.entrySet()) {
             Unit u = e.getKey();
-            if (kept.contains(u.id) || accepted.containsKey(u.id)) continue;
+            if (kept.contains(u.id) || isAccepted(u)) continue;
             if (technique != null && !e.getValue().technique.equals(technique)) continue;
             out.add(u);
         }

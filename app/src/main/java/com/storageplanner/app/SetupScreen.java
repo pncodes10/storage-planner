@@ -102,6 +102,11 @@ public final class SetupScreen extends Screen {
         lab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(20);
         L.addView(row, rl);
+        Button rules = Ui.button(a, "Your rules", false);
+        rules.setContentDescription("Your rules: see why files are suggested, switch rules off, change them or add your own");
+        rules.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new RulesScreen(a)); } });
+        LinearLayout.LayoutParams rulesl = new LinearLayout.LayoutParams(-2, -2); rulesl.topMargin = dp(10);
+        L.addView(rules, rulesl);
         LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
         L.addView(lab, labl);
         Ui.add(L, Ui.text(a, "Runs in the background. You can switch apps; you'll get a notification when your plan is ready.", 14, Ui.text2, false), 8);

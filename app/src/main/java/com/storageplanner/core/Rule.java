@@ -251,6 +251,13 @@ public final class Rule {
         return true;
     }
 
+    /** The risk tier of the options this rule makes in the plan (user rules: R4 for a delete, R2 for a re-encode), or -1 for a keep rule. */
+    public int effectiveRisk() {
+        if (action == null || action == Action.KEEP) return -1;
+        if (builtIn) return risk;
+        return action == Action.DELETE ? Option.R4 : Option.R2;
+    }
+
     /** A copy that can be edited without touching the original. */
     public Rule copy() {
         Rule r = new Rule();

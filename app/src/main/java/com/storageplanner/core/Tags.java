@@ -282,6 +282,110 @@ public final class Tags {
     /** The type of the tag with this id; null if there is no such tag. */
     public static Type typeOf(String id) { return id == null ? null : TYPES.get(id); }
 
+    // ------------------------------------------------------------------ listing (for the rule editor and for wording rules)
+    /** One tag as the rule editor needs it: id, label for screens, type, unit of its numbers, and a short phrase for sentences. */
+    public static final class Info {
+        public final String id, label, unit, phrase;
+        public final Type type;
+        Info(String id, String label, Type type, String unit, String phrase) { this.id = id; this.label = label; this.type = type; this.unit = unit; this.phrase = phrase; }
+    }
+
+    // id -> {unit, phrase}; a yes/no phrase starts with "is" or "has" so it can be turned around ("is not a screenshot")
+    private static final String[][] WORDS = {
+        {SOURCE, "", "source"}, {AREA, "", "storage area"}, {KIND, "", "kind"}, {SIZE_BYTES, "bytes", "size"}, {AGE_DAYS, "days", "age"},
+        {WIDTH, "px", "width"}, {HEIGHT, "px", "height"}, {MEGAPIXELS, "MP", "size in megapixels"}, {CATEGORY, "", "picture category"},
+        {TEXT_READ, "", "text status"}, {FACES, "", "number of faces"}, {HAS_CODE, "", "has a QR code or barcode"}, {BLUR, "of 100", "blur"},
+        {BRIGHTNESS, "of 100", "brightness"}, {DARK_SHARE, "%", "dark share"}, {COLOURFULNESS, "", "colourfulness"},
+        {GRAPHIC_SHARE, "%", "flat graphic share"}, {PAPER_SHARE, "%", "paper-like share"}, {TEXT_AMOUNT, "", "amount of text"},
+        {DUPLICATE, "", "is an exact duplicate"}, {BURST_EXTRA, "", "is an extra shot of a burst"}, {BURST_KEEPER, "", "is the best shot of a burst"},
+        {SENT_COPY, "", "is a sent copy of a camera photo"}, {BLURRY, "", "is much blurrier than your other photos"},
+        {INSTALLER_INSTALLED, "", "is an installer for an app that is already installed"}, {INSTALLER_NOT_INSTALLED, "", "is an installer for an app that is not installed"},
+        {ID_DOCUMENT, "", "is an ID document"}, {EYES_CLOSED, "", "has someone with eyes closed"}, {SCREENSHOT, "", "is a screenshot"},
+        {CHAT_MEDIA, "", "is chat or Telegram media"}, {CAMERA_PHOTO, "", "is a camera photo"}, {SIZE_MB, "MB", "size"},
+        {FILE_TYPE, "", "file type"}, {BITS_PER_PIXEL, "", "bits per pixel"}, {VIDEO_CODEC, "", "video codec"}, {BITRATE_KBPS, "kbit/s", "bitrate"},
+        {DATE_IN_PICTURE, "", "has a date read in the picture"}, {DAYS_SINCE_DATE, "days", "time since the date in the picture"},
+        {APK_PACKAGE, "", "installer for package"}};
+
+    private static List<Info> LIST;
+
+    /** Every tag in the order of T.all(), with its type, unit and phrase. Tags that rules cannot test (none today) would be left out. */
+    public static synchronized List<Info> list() {
+        if (LIST == null) {
+            Map<String, String[]> w = new HashMap<String, String[]>();
+            for (String[] x : WORDS) w.put(x[0], x);
+            List<Info> l = new ArrayList<Info>();
+            for (Entry e : new T().all()) {
+                Type ty = typeOf(e.id);
+                String[] x = w.get(e.id);
+                if (ty == null || x == null) continue;
+                l.add(new Info(e.id, e.label, ty, x[1], x[2]));
+            }
+            LIST = java.util.Collections.unmodifiableList(l);
+        }
+        return LIST;
+    }
+
+    /** The listing entry of a tag; null if there is no such tag. */
+    public static Info info(String id) {
+        for (Info i : list()) if (i.id.equals(id)) return i;
+        return null;
+    }
+
+    /** A value a text tag can have: what goes into a rule, and what to show for it. */
+    public static final class Choice {
+        public final String value, label;
+        Choice(String value, String label) { this.value = value; this.label = label; }
+    }
+
+    private static final String[] FILE_TYPES = {"jpeg", "png", "webp", "heic", "avif", "mp4", "mkv", "mp3", "flac", "m4a", "ogg", "pdf", "zip"};
+    private static final String[] AREAS = {"camera", "screenshot", "pictures", "movies", "download", "music", "document", "trash", "thumbnails", "temp",
+        "residue", "ext_cache", "ext_data", "wa_image", "wa_sent", "wa_video", "wa_sent_video", "wa_voice", "wa_doc", "wa_status", "wa_sticker", "wa_gif",
+        "wa_old_backup", "wa_other", "telegram_media", "app_obb", "app_media", "user_other"};
+
+    /**
+     * Values the app itself knows for a text tag (source, area, kind, category, text status, text amount, file type); empty for tags
+     * with free values (video codec, package). The editor adds the values that occur in the scan.
+     */
+    public static List<Choice> choices(String id) {
+        List<Choice> l = new ArrayList<Choice>();
+        if (id == null) return l;
+        switch (id) {
+            case SOURCE: {
+                Set<String> seen = new HashSet<String>();
+                for (String a : AREAS) { String s = SOURCES.get(a); if (s != null && seen.add(s)) l.add(new Choice(s, s)); }
+                if (seen.add("camera video")) l.add(new Choice("camera video", "camera video"));
+                break;
+            }
+            case AREA: for (String a : AREAS) l.add(new Choice(a, valueLabel(AREA, a))); break;
+            case KIND: for (String k : new String[] {IMAGE, VIDEO, AUDIO, DOCUMENT, APK, OTHER}) l.add(new Choice(k, k)); break;
+            case CATEGORY: for (String c : PhotoCategory.ALL) l.add(new Choice(c, PhotoCategory.label(c))); break;
+            case TEXT_READ: for (String c : new String[] {TEXT_HAS, TEXT_NOT_YET, TEXT_NONE}) l.add(new Choice(c, c)); break;
+            case TEXT_AMOUNT: for (String c : new String[] {AMOUNT_NONE, AMOUNT_SOME, AMOUNT_LOTS}) l.add(new Choice(c, c)); break;
+            case FILE_TYPE: for (String c : FILE_TYPES) l.add(new Choice(c, c)); break;
+            default: break;
+        }
+        return l;
+    }
+
+    /** What to show for a value of a text tag: the name of a picture category, the name of a storage area, else the value itself. */
+    public static String valueLabel(String id, String value) {
+        if (CATEGORY.equals(id)) { for (String c : PhotoCategory.ALL) if (c.equalsIgnoreCase(value)) return PhotoCategory.label(c); }
+        if (AREA.equals(id)) { String s = SOURCES.get(value); if (s != null) return s; }
+        return value;
+    }
+
+    /** The values a text tag has in this scan, sorted (category: ids). Lets the editor offer what the user's phone really has. */
+    public static List<String> occurring(String id, Scanner.Result r, Context ctx, long now) {
+        java.util.TreeSet<String> out = new java.util.TreeSet<String>();
+        if (typeOf(id) != Type.TEXT) return new ArrayList<String>();
+        for (FileItem f : r.files) {
+            String v = of(f, ctx, now).textTag(id);
+            if (v != null && v.length() > 0) out.add(v);
+            if (out.size() >= 200) break;
+        }
+        return new ArrayList<String>(out);
+    }
+
     private static Entry text(String id, String label, String v) { return new Entry(id, label, v == null ? "not measured" : v, v != null, false, false); }
     private static Entry num(String id, String label, double v, String shown) { return new Entry(id, label, v < 0 ? "not measured" : shown, v >= 0, false, false); }
     private static Entry flag(String id, String label, Boolean v, String detail) {

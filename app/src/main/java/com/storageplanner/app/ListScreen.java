@@ -76,7 +76,7 @@ public final class ListScreen extends Screen {
         } else if (kind == ACCEPTED) {
             List<String> ids = new ArrayList<String>(Session.accepted.keySet());
             Collections.sort(ids);
-            for (String id : ids) { Unit u = Session.unitById.get(id); if (u != null && !Session.kept.contains(id)) rows.add(Row.forUnit(u)); }
+            for (String id : ids) { Unit u = Session.unitById.get(id); if (u != null && Session.isAccepted(u)) rows.add(Row.forUnit(u)); }
         } else {
             List<String> ids = new ArrayList<String>(Session.kept);
             Collections.sort(ids);

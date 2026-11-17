@@ -84,10 +84,15 @@ public final class OverviewScreen extends Screen {
                 + "\n• Videos: high-bitrate H.264 assumed to shrink 45% as HEVC (conservative).", 14, Ui.text2, false), 6);
 
         LinearLayout row = Ui.row(a);
+        Button rulesBtn = Ui.button(a, "Your rules", false);
+        rulesBtn.setContentDescription("Your rules: see why files are suggested, switch rules off, change them or add your own");
+        rulesBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new RulesScreen(a)); } });
+        LinearLayout.LayoutParams rules0 = new LinearLayout.LayoutParams(-1, -2); rules0.topMargin = dp(16);
+        content.addView(rulesBtn, rules0);
         Button labBtn = Ui.button(a, "Algorithm Lab (debug)", false);
         labBtn.setContentDescription("Algorithm Lab: try the picture algorithms on pictures you pick, with a log for debugging");
         labBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
-        LinearLayout.LayoutParams lab0 = new LinearLayout.LayoutParams(-1, -2); lab0.topMargin = dp(16);
+        LinearLayout.LayoutParams lab0 = new LinearLayout.LayoutParams(-1, -2); lab0.topMargin = dp(8);
         content.addView(labBtn, lab0);
         Button save = Ui.button(a, "Save report", true);
         save.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.saveReport(); } });

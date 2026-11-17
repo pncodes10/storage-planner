@@ -43,7 +43,8 @@ final class AnalysisRunner {
             if (!AnalysisState.cancelled && measure) Calibrator.run(r, est, pr);
             if (AnalysisState.cancelled) { o.cancelled = true; o.message = "Cancelled."; return o; }
             pr.update("Planning", 0, 0);
-            final UnitBuilder ub = new UnitBuilder(r, est, pf.sdkInt());
+            final int rulesVersion = RulesStore.version();
+            final UnitBuilder ub = new UnitBuilder(r, est, pf.sdkInt(), RulesStore.get(app));
 
             final ResultStore.Saved s = new ResultStore.Saved();
             s.result = r; s.est = est; s.targetUsed = (long) (targetGb * 1e9);
@@ -58,6 +59,7 @@ final class AnalysisRunner {
                     try {
                         Session.loadKept(app);
                         Session.set(s.result, ub, s.est, s.targetUsed, s.appStats, s.sdk);
+                        if (RulesStore.version() != rulesVersion) Session.rebuild(app, null);       // the rules were saved while the scan ran
                         saved[0] = Session.plan.saved();
                     } finally { set.countDown(); }
                 }

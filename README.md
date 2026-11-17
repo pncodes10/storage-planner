@@ -405,7 +405,26 @@ The suggestions for single files are now **rules**, and you will be able to add 
 - A keep rule removes every suggestion for the files it matches, built-in ones included.
 - ID documents never get a delete suggestion from any rule; only an identical extra copy may go.
 
-Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned). A rule that names a tag this version does not know is loaded switched off. The rule editor with a live preview, and saving your rules in the app, come next; for now the app uses the built-in rules.
+Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned). A rule that names a tag this version does not know is loaded switched off.
+
+### The Rules screen
+
+Open **Your rules** from the start screen or from the overview (next to the Algorithm Lab button). Your own rules come first, then the built-in ones. Each row says in words what the rule looks for ("Picture category is Greetings & forwards, age more than 7 days and is chat or Telegram media"), what it does and its risk, and, once you have analysed your storage, how many files and how much space it matches right now. Scanning is not repeated: the counts and the plan come from the scan already on the phone.
+
+- **Switch a rule off or on** with its switch. A rule that is off suggests nothing; a rule that cannot run (it names a tag this version does not know) stays off and says why.
+- **Change a built-in rule:** tap it. Its name, action and conditions are fixed, but its numbers can change (greetings after 3 days instead of 7). **Reset to default** appears on a changed rule, in the list and in the editor.
+- **Add a rule:** tap **Add a rule**. Give it a name, pick what it does (Delete, Compress photo, Compress screenshot (lossless), Compress video, Compress music, or Keep), and add conditions. Each condition is a tag (shown by its plain label, such as "Age in days" or "Picture category"), a comparison that fits the tag (more than, at least, less than, is, is not, is one of; yes or no for yes/no tags), a value (a number with its unit, or a choice from the values the app knows plus the ones your scan has), and an optional NOT. All conditions must be true; for "or", write two rules.
+- **Live preview:** under the form, "Matches 143 files, 1.2 GB" and a grid of the largest matching files update about a third of a second after each change. Tap a file to see its details, including every tag. It also says how many of the matches another rule already suggests, how many are ID documents (left out of a delete), and, for a compress rule, how many a built-in compress rule claims first (only the first compressing rule that matches a file counts). Without a scan the editor still works; it just says "Analyse your storage to see what this rule matches".
+- **Delete a rule** from its row or from its editor; the button asks you to tap it a second time.
+
+When you save, the rules are stored on the phone (`rules.txt` in the app's private storage, written so that a crash cannot leave half a file; no file means the built-in rules) and the plan is rebuilt from the scan in memory. Your kept and approved decisions stay. An approval that named a suggestion that no longer exists (you switched that rule off) is ignored and not counted, and it comes back if the suggestion does. Each later analysis uses the saved rules.
+
+**Safety limits the screen adds** (the core enforces the ones in the first list above as well):
+- A rule needs a name that none of your other rules has (the name is how its suggestions are grouped; saving is refused for a duplicate, in any letter case), at least one condition, and every condition filled in.
+- A delete rule needs at least one condition that says more than the kind of file. "Kind is image" or "File type is jpeg" alone is refused, so a rule cannot delete every picture.
+- A delete rule that matches more than a quarter of all your scanned files shows a warning in words, and Save changes to **Save anyway**: you have to tap it a second time.
+- A delete from your rule is still always "Your call": nothing happens without your confirmation, and the app never deletes anything itself.
+- Saved reports list the technique of each suggestion, so a rule of yours appears there as "My rule: name".
 
 ## Build it yourself
 
@@ -425,7 +444,8 @@ Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned
   - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
   - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
-  - **Tags:** the named facts about every file (source, kind, age, blur, brightness, faces, duplicate, ...) shown on the details page.
+  - **Tags:** the named facts about every file (source, kind, age, blur, brightness, faces, duplicate, ...) shown on the details page, and a listing of them (label, type, unit) for the rule editor.
+  - **Rule / RuleSet / BuiltInRules / RuleText:** the rule engine, the built-in rules, matches and checks for the Rules screen, and rules in words.
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
@@ -443,7 +463,7 @@ Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

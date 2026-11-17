@@ -125,8 +125,9 @@ public final class MainActivity extends Activity {
             public void run() {
                 ResultStore.Saved s = ResultFiles.load(app);
                 UnitBuilder ub = null;
+                final int rulesVersion = RulesStore.version();
                 if (s != null) {
-                    try { ub = new UnitBuilder(s.result, s.est, s.sdk); } catch (Throwable t) { ub = null; }
+                    try { ub = new UnitBuilder(s.result, s.est, s.sdk, RulesStore.get(app)); } catch (Throwable t) { ub = null; }
                 }
                 final ResultStore.Saved fs = s; final UnitBuilder fub = ub;
                 AnalysisState.UI.post(new Runnable() {
@@ -136,6 +137,7 @@ public final class MainActivity extends Activity {
                             try {
                                 Session.mode = fs.mode == Session.MODE_SAFE ? Session.MODE_SAFE : Session.MODE_TARGET;
                                 Session.set(fs.result, fub, fs.est, fs.targetUsed, fs.appStats, fs.sdk);
+                                if (RulesStore.version() != rulesVersion) Session.rebuild(app, null);    // the rules were saved while the results loaded
                             } catch (Throwable t) { Session.result = null; Session.ub = null; Session.plan = null; }
                         }
                         MainActivity m = current;
@@ -176,6 +178,7 @@ public final class MainActivity extends Activity {
             com.storageplanner.core.FileItem f = Session.fileByRel.get(d.substring(7));
             return f != null ? new ViewerScreen(this, f) : null;
         }
+        if (d.equals("rules")) return new RulesScreen(this);
         if (d.equals("lab")) return new LabScreen(this);
         if (d.equals("videolab")) return new VideoLabScreen(this);
         if (d.equals("ziplab")) return new ZipLabScreen(this);
@@ -213,6 +216,12 @@ public final class MainActivity extends Activity {
     }
 
     private Screen top() { return stack.get(stack.size() - 1); }
+
+    /** The plan was rebuilt (rules changed): the screen on top shows it. */
+    static void planChanged() {
+        MainActivity m = current;
+        if (m != null && !m.stack.isEmpty()) m.top().refresh();
+    }
 
     public void push(Screen s) {
         if (!stack.isEmpty()) top().onHide();

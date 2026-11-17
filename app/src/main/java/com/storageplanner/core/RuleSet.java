@@ -103,15 +103,9 @@ public final class RuleSet {
         }
 
         private static void emit(Unit u, Rule r, FileItem f, Tags.T t, Tags.Context ctx, Estimates est, long now) {
-            boolean del = r.action == Action.DELETE;
-            Saving sv = r.saving == null ? Saving.defaultFor(r.action) : r.saving;
-            int risk = r.risk;
-            String tech = r.technique;
-            if (!r.builtIn) {                                    // limits for the user's own rules
-                sv = del ? Saving.FILE_SIZE : (sv == Saving.FILE_SIZE ? Saving.defaultFor(r.action) : sv);
-                risk = del ? Option.R4 : Option.R2;
-                tech = Rule.USER_PREFIX + r.name;
-            }
+            Saving sv = effectiveSaving(r);
+            int risk = r.effectiveRisk();
+            String tech = r.builtIn ? r.technique : Rule.USER_PREFIX + r.name;
             long saved = sv.of(f, est);
             if (saved <= 0) return;
             String why;
@@ -120,6 +114,13 @@ public final class RuleSet {
             else why = fill(r.why, f, t, ctx, est, now);
             u.add(new Option(r.action.option, tech, saved, risk, sv.exact(), why));
         }
+    }
+
+    /** How the saving of a rule is counted. Limits for the user's own rules: a delete saves the whole file; a re-encode never counts whole files. */
+    static Saving effectiveSaving(Rule r) {
+        Saving sv = r.saving == null ? Saving.defaultFor(r.action) : r.saving;
+        if (r.builtIn) return sv;
+        return r.action == Action.DELETE ? Saving.FILE_SIZE : (sv == Saving.FILE_SIZE ? Saving.defaultFor(r.action) : sv);
     }
 
     /**
@@ -163,6 +164,168 @@ public final class RuleSet {
             case "screenshot_source": return est.screenshotSource;
             default: return null;
         }
+    }
+
+    // ------------------------------------------------------------------ editing
+    /** A rule set that can be changed without touching this one (the rules screen edits a copy and saves it when the user is done). */
+    public RuleSet copy() {
+        RuleSet s = new RuleSet();
+        for (Rule r : rules) s.rules.add(r.copy());
+        s.warnings.addAll(warnings);
+        return s;
+    }
+
+    /** Puts an edited rule back: replaces the rule with the same id, or adds it at the end (a user rule without an id gets a new one). */
+    public void put(Rule r) {
+        if (r.id == null || r.id.length() == 0) r.id = freeId();
+        for (int i = 0; i < rules.size(); i++) if (rules.get(i).id.equals(r.id)) { rules.set(i, r); return; }
+        rules.add(r);
+    }
+
+    /** Removes a rule of the user; a built-in rule can only be switched off. */
+    public boolean remove(String id) {
+        for (int i = 0; i < rules.size(); i++)
+            if (rules.get(i).id.equals(id)) {
+                if (rules.get(i).builtIn) return false;
+                rules.remove(i);
+                return true;
+            }
+        return false;
+    }
+
+    /** Puts a built-in rule back to what the app ships (conditions and on). */
+    public boolean reset(String id) {
+        for (Rule d : BuiltInRules.all())
+            if (d.id.equals(id))
+                for (int i = 0; i < rules.size(); i++) if (rules.get(i).id.equals(id)) { rules.set(i, d); return true; }
+        return false;
+    }
+
+    /** True for a built-in rule that is switched off or has other numbers than the app ships. */
+    public static boolean changed(Rule r) {
+        if (!r.builtIn) return false;
+        for (Rule d : BuiltInRules.all())
+            if (d.id.equals(r.id)) {
+                if (d.enabled != r.enabled || d.when.size() != r.when.size()) return true;
+                for (int i = 0; i < d.when.size(); i++) if (!d.when.get(i).toText().equals(r.when.get(i).toText())) return true;
+                return false;
+            }
+        return false;
+    }
+
+    public static final int MAX_NAME = 60;
+    /** Tags that only say what format a file has: a delete rule with nothing else would hit every file of that format. */
+    private static boolean formatOnly(Condition c) { return c.tag.equals(Tags.KIND) || c.tag.equals(Tags.FILE_TYPE); }
+
+    /**
+     * Why a rule cannot be saved, in words for the user; empty if it can. The rule is one of this set (same id) or a new one.
+     * A user rule needs a name that no other rule of the user has (the name is how its suggestions are grouped), at least one
+     * condition that makes sense, and, if it deletes, a condition that says more than the format of the file.
+     */
+    public List<String> problems(Rule r) {
+        List<String> out = new ArrayList<String>();
+        if (r.action == null) { out.add("Choose what the rule does."); return out; }
+        if (!r.builtIn) {
+            String n = r.name == null ? "" : r.name.trim();
+            if (n.length() == 0) out.add("Give the rule a name.");
+            else if (n.length() > MAX_NAME) out.add("The name is too long (at most " + MAX_NAME + " letters).");
+            else for (Rule o : rules)
+                if (!o.builtIn && !o.id.equals(r.id) && o.name != null && o.name.trim().equalsIgnoreCase(n)) { out.add("You already have a rule with this name. Choose another."); break; }
+        }
+        if (r.when.isEmpty()) out.add("Add at least one condition.");
+        for (Condition c : r.when) {
+            String p = c.problem();
+            if (p != null) out.add("\"" + RuleText.condition(c) + "\": " + p + ".");
+        }
+        if (!r.builtIn && r.action == Action.DELETE && !r.when.isEmpty()) {
+            boolean more = false;
+            for (Condition c : r.when) if (!formatOnly(c)) more = true;
+            if (!more) out.add("A delete rule needs a condition that says more than the kind of file, such as its age, where it comes from or its category.");
+        }
+        return out;
+    }
+
+    // ------------------------------------------------------------------ matches (the rules screen and the live preview)
+    /** A delete rule that matches more than this share of all files is called broad: the editor warns in words. */
+    public static final double BROAD_SHARE = 0.25;
+
+    /** What one rule does to this scan. */
+    public static final class Matches {
+        public int total;           // files in the scan
+        public int count;           // files the rule would act on
+        public long bytes;          // their size
+        public long saved;          // what it would free (delete: the size; compress: an estimate; keep: the size it protects)
+        public int idProtected;     // ID documents a delete rule matches but is never allowed to touch
+        public int alsoSuggested;   // of the files above, those another rule already gives an option (keep rule: suggestions it would remove)
+        public int overridden;      // compress rule: files an earlier re-encode rule already claims (only the first match counts)
+        public final List<FileItem> files = new ArrayList<FileItem>();    // the largest first, at most the limit asked for
+
+        public boolean broad(Rule r) {
+            return r != null && r.action == Action.DELETE && !r.builtIn && total > 0 && count > BROAD_SHARE * total;
+        }
+    }
+
+    /** Applies the rails every rule runs under, and counts the file if the rule would act on it. */
+    private static boolean hit(Matches m, Rule r, FileItem f, Tags.T t, Estimates est) {
+        if (!r.matches(t)) return false;
+        if (r.action == Action.DELETE && t.idDocument) { m.idProtected++; return false; }     // the ID document rail
+        long saved = r.action == Action.KEEP ? f.size : effectiveSaving(r).of(f, est);
+        if (saved <= 0) return false;                                                           // no option would be made
+        m.count++; m.bytes += f.size; m.saved += saved;
+        return true;
+    }
+
+    /**
+     * What the rule {@code r} would do to this scan, with the same engine and rails as the planner (a delete never touches an
+     * ID document; a re-encode that saves nothing makes no option). {@code r} may be one of this set (its own entry is then
+     * left out when counting "already suggested") or a rule being written; it counts whether or not it is switched on.
+     * limit = how many matching files to list, largest first.
+     */
+    public Matches matches(Rule r, Scanner.Result res, Tags.Context ctx, Estimates est, long now, int limit) {
+        Matches m = new Matches();
+        m.total = res.files.size();
+        if (r.action == null || r.problem() != null) return m;
+        RuleSet rest = new RuleSet();
+        List<Rule> earlier = new ArrayList<Rule>();           // enabled re-encode rules above r: they win a file first
+        boolean seen = false;
+        for (Rule o : rules) {
+            if (r.id != null && o.id.equals(r.id)) { seen = true; continue; }
+            rest.rules.add(o);
+            if (!seen && r.action.compress() && o.enabled && o.problem() == null && o.action.compress()) earlier.add(o);
+        }
+        Compiled others = rest.compile();
+        List<FileItem> hits = new ArrayList<FileItem>();
+        for (FileItem f : res.files) {
+            Tags.T t = Tags.of(f, ctx, now);
+            if (!hit(m, r, f, t, est)) continue;
+            hits.add(f);
+            for (Rule e : earlier) if (e.matches(t)) { m.overridden++; break; }
+            Unit u = Unit.forFile(f);
+            others.apply(u, f, t, ctx, est, now);
+            if (!u.options.isEmpty()) m.alsoSuggested++;
+        }
+        java.util.Collections.sort(hits, new java.util.Comparator<FileItem>() {
+            public int compare(FileItem a, FileItem b) { return a.size != b.size ? (a.size > b.size ? -1 : 1) : a.rel.compareTo(b.rel); }
+        });
+        for (int i = 0; i < hits.size() && i < limit; i++) m.files.add(hits.get(i));
+        return m;
+    }
+
+    /** One pass over the scan for every rule that can run (also those switched off): rule id -> count, size and saving (no file list). */
+    public Map<String, Matches> tally(Scanner.Result res, Tags.Context ctx, Estimates est, long now) {
+        Map<String, Matches> out = new HashMap<String, Matches>();
+        List<Rule> live = new ArrayList<Rule>();
+        for (Rule r : rules) {
+            Matches m = new Matches();
+            m.total = res.files.size();
+            out.put(r.id, m);
+            if (r.action != null && r.problem() == null) live.add(r);
+        }
+        for (FileItem f : res.files) {
+            Tags.T t = Tags.of(f, ctx, now);
+            for (int i = 0; i < live.size(); i++) hit(out.get(live.get(i).id), live.get(i), f, t, est);
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ text

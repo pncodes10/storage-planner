@@ -164,7 +164,7 @@ public final class DeckScreen extends Screen {
     // ------------------------------------------------------------------ deck
     /** An item is still reviewable if it is in the plan and nobody decided on it meanwhile. */
     private boolean valid(Unit u) {
-        return Session.plan.chosen.containsKey(u) && !Session.kept.contains(u.id) && !Session.accepted.containsKey(u.id);
+        return Session.plan.chosen.containsKey(u) && !Session.kept.contains(u.id) && !Session.isAccepted(u);
     }
 
     private void showCard() {
