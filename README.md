@@ -205,6 +205,20 @@ The overview has a **Your pictures** section. It shows every category with its c
 - ID documents need a second tap before they can be approved.
 - Each picture's details page shows its category, any code, any date found, and the text that was read.
 
+**Tags on every file.** A file's details page now also has a **Tags** section: a plain list of facts about the
+file, such as where it came from (camera photo, screenshot, chat image received or sent, download, ...), its kind,
+size, age (days since it was last *modified*; Android does not say when you last opened it), picture size, category,
+whether text was read, faces, whether it has a QR code or barcode, and, for pictures, brightness, how dark, how
+colourful, how much of it is flat graphics or paper, and how much text. Yes/no facts (exact duplicate, extra shot of a
+burst, best shot of a burst, sent copy of a camera photo, installer of an app that is already installed, ID document,
+someone has eyes closed, and so on) are listed only when they are true. Anything that was not measured is left out,
+never shown as zero: for example faces are not looked for in screenshots. **Blur** (0 to 100, higher is blurrier) is
+compared with your own camera photos, so it needs at least ten of them; it is not a measure against other people's
+photos. Nothing the planner decides has changed: tags only show what it knows. They prepare the ground for rules you
+will be able to write yourself later ("chat image, greeting, older than 3 days, no faces: delete"). The picture
+measurements are saved with the results (results format 4); results saved by older versions still open, and the
+tags that need them appear after the next scan. The Algorithm Lab's **Picture category** run prints the same tags.
+
 As everywhere else, the app deletes nothing itself.
 
 **How it runs.** Everything happens on the phone, during **Analyse**:
@@ -392,6 +406,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
   - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
+  - **Tags:** the named facts about every file (source, kind, age, blur, brightness, faces, duplicate, ...) shown on the details page.
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
 - `app/src/main/assets/faces/`: YuNet's weights converted by `tools/facemodel/export_yunet.py` (MIT licence, in `LICENSE-yunet.txt`).
 - `app/src/main/assets/ocr/`: the offline text reader (tesseract.js 7.0.0, tesseract.js-core 7.0.0, tessdata_fast English; Apache-2.0).
@@ -408,7 +423,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

@@ -30,6 +30,7 @@ final class Sorter {
         if (f.width == 0) { f.width = dims[0]; f.height = dims[1]; }
         ImageSignals.S s = ImageSignals.measure(px, w, h);
         int[] l = luma(px);
+        f.signals = s;                       // kept on the file (saved with the results) for tags; moreText below refines the same object
         if (s.paper >= 0.2 && s.textBlobs < 150 && Math.max(dims[0], dims[1]) > 1100) {     // small print: look again bigger
             int[] d2 = new int[4];
             int[] big;
@@ -59,7 +60,7 @@ final class Sorter {
             FileItem f = pics.get(k);
             FileItem p = Scanner.same(f, opt.previous);
             if (p != null && p.category != null && !p.textPending) {          // unchanged and fully sorted last time
-                f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces;
+                f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces; f.signals = p.signals;
                 continue;
             }
             Prep m = measured == null ? null : measured.get(f);

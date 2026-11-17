@@ -347,8 +347,21 @@ public final class Lab {
         TextRules.Verdict v = null;
         if (read) v = readAndJudge(pf, f, s, prep.aspect, now, o);
         PhotoCategory.Result r = PhotoCategory.classify(f, s, f.code, v, f.faces);
+        f.category = r.category; f.faces = f.faces;
         o.line("  => " + PhotoCategory.label(r.category) + (r.why.isEmpty() ? "" : "  (" + r.why + ")") + (r.date > 0 ? "; date " + Report.day(r.date) : ""));
+        f.category = r.category; f.catDate = r.date; f.textPending = read && v == null;
+        tagLines(f, now, o);
         return sh;
+    }
+
+    /** The tags of this one picture (the blur score and the other whole-scan tags need your whole phone, so they stay unknown here). */
+    static void tagLines(FileItem f, long now, Out o) {
+        Scanner.Result one = new Scanner.Result();
+        one.files.add(f);
+        Tags.Context ctx = Tags.context(one, new UnitBuilder.Detections());
+        StringBuilder b = new StringBuilder();
+        for (Tags.Entry e : Tags.of(f, ctx, now).shown()) b.append(b.length() == 0 ? "" : "; ").append(e.label).append(' ').append(e.value);
+        o.line("  tags: " + b);
     }
 
     static TextRules.Verdict readAndJudge(Platform pf, FileItem f, ImageSignals.S s, double aspect, long now, Out o) {

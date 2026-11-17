@@ -114,6 +114,34 @@ public final class ResultStoreTest {
         check("format 1 file loads (no quality)", oldOk);
         check("format 1 rebuilds units", new UnitBuilder(old.result, old.est, old.sdk).units.size() == a.units.size());
 
+        // ---- picture measurements (format 4): every field of every sorted picture survives
+        int withSig = 0;
+        for (FileItem f : r.files) if (f.signals != null) withSig++;
+        check("fixture has pictures with measurements", withSig > 0);
+        FileItem own = new FileItem("DCIM/Camera/sig.jpg", "/sdcard/DCIM/Camera/sig.jpg", 1234, 5678);
+        own.area = "camera"; own.type = "jpeg";
+        ImageSignals.S sg = new ImageSignals.S();
+        sg.meanLuma = 101.25; sg.darkFrac = 0.125; sg.contrast = 33.5; sg.colorful = 17.75; sg.paper = 0.0625; sg.flat = 0.5; sg.sharp = 0.375;
+        sg.textBlobs = 77; sg.textArea = 0.015625; sg.textLines = 6; sg.textHeight = 0.03125; sg.bigText = 0.25;
+        own.signals = sg;
+        FileItem none = new FileItem("DCIM/Camera/none.jpg", "/sdcard/DCIM/Camera/none.jpg", 10, 20);
+        none.area = "camera"; none.type = "jpeg";
+        r.files.add(own); r.files.add(none);
+        ResultStore.Saved l4 = ResultStore.read(new ByteArrayInputStream(save(s)));
+        FileItem own4 = l4.result.files.get(l4.result.files.size() - 2), none4 = l4.result.files.get(l4.result.files.size() - 1);
+        check("v4 signals kept", own4.signals != null && compareFields("signals", sg, own4.signals) == 12);
+        check("v4 unmeasured stays null", none4.signals == null);
+        ByteArrayOutputStream b3 = new ByteArrayOutputStream();
+        ResultStore.write(b3, s, 3);
+        ResultStore.Saved l3 = ResultStore.read(new ByteArrayInputStream(b3.toByteArray()));
+        boolean v3ok = l3.result.files.size() == r.files.size();
+        for (int i = 0; v3ok && i < r.files.size(); i++) {
+            FileItem x = r.files.get(i), y = l3.result.files.get(i);
+            v3ok = y.signals == null && x.rel.equals(y.rel) && Objects.equals(x.category, y.category) && x.faces == y.faces && x.sharp == y.sharp;
+        }
+        check("format 3 file loads (signals null, the rest intact)", v3ok);
+        r.files.remove(r.files.size() - 1); r.files.remove(r.files.size() - 1);
+
         // ---- determinism: saving the loaded copy gives the same bytes
         check("re-save identical bytes", Arrays.equals(bytes, save(l)));
 
@@ -184,6 +212,12 @@ public final class ResultStoreTest {
             f.setAccessible(true);
             Object u = f.get(x), w = f.get(y);
             if (u instanceof com.storageplanner.core.PhotoQuality.Q || w instanceof com.storageplanner.core.PhotoQuality.Q) {
+                check(what + "." + f.getName() + " presence", (u == null) == (w == null));
+                if (u != null && w != null) n += compareFields(what + "." + f.getName(), u, w);
+                else n++;
+                continue;
+            }
+            if (u instanceof ImageSignals.S || w instanceof ImageSignals.S) {
                 check(what + "." + f.getName() + " presence", (u == null) == (w == null));
                 if (u != null && w != null) n += compareFields(what + "." + f.getName(), u, w);
                 else n++;

@@ -29,6 +29,8 @@ public final class FileItem {
     public String text;           // words read in the picture (lower case); never kept for ID documents
     public boolean textPending;   // worth reading, but not read yet (time limit or no reader)
     public int faces = -1;        // faces found (-1 = not checked)
+    /** Picture measurements (brightness, text, paper, screens, ...) kept from sorting; null = not measured. */
+    public ImageSignals.S signals;
 
     public String apkPackage;     // for .apk files: the package inside
     public long apkVersion;

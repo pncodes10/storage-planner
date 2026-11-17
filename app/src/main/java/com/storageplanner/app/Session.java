@@ -52,11 +52,20 @@ public final class Session {
     /** Pictures that are worth reading but were not read yet (time limit), and whether sorting ran at all. */
     public static int picturesPending, picturesSorted;
 
+    private static com.storageplanner.core.Tags.Context tagContext;
+
+    /** What the file tags need from the whole scan; built on first use, dropped when results change. */
+    public static com.storageplanner.core.Tags.Context tags() {
+        if (tagContext == null && result != null && ub != null) tagContext = com.storageplanner.core.Tags.context(result, ub.det);
+        return tagContext;
+    }
+
     public static boolean hasResults() { return result != null && ub != null && plan != null; }
     public static long used() { return result.total - result.free; }
 
     public static void set(Scanner.Result r, UnitBuilder b, Estimates e, long target, boolean stats, int sdkInt) {
         result = r; ub = b; est = e; targetUsed = target; appStats = stats; sdk = sdkInt;
+        tagContext = null;
         unitById.clear(); fileByRel.clear(); copiesOf.clear();
         for (Unit u : b.units) unitById.put(u.id, u);
         for (FileItem f : r.files) fileByRel.put(f.rel, f);

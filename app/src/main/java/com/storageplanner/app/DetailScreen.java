@@ -60,6 +60,7 @@ public final class DetailScreen extends Screen {
         content.removeAllViews();
         if (row.file != null) fileHeader(row.file); else appHeader();
         flags();
+        if (row.file != null) tags(row.file);
         if (row.file != null) related(row.file);
         actions();
     }
@@ -144,6 +145,18 @@ public final class DetailScreen extends Screen {
         r.addView(v);
         r.setContentDescription(label + ": " + value);
         card.addView(r, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    // ------------------------------------------------------------------ tags
+    /** Every known tag of the file, as words (yes/no tags only when yes); these are what rules will test later. */
+    private void tags(FileItem f) {
+        com.storageplanner.core.Tags.Context ctx = Session.tags();
+        if (ctx == null) return;
+        Ui.add(content, Ui.heading(a, "Tags", 18), 22);
+        Ui.add(content, Ui.text(a, "Facts about this file. Blur is compared with your own camera photos. Anything not measured is left out.", 13, Ui.text2, false), 4);
+        LinearLayout card = Ui.card(a);
+        for (com.storageplanner.core.Tags.Entry e : com.storageplanner.core.Tags.of(f, ctx, Session.result.now).shown()) fact(card, e.label, e.value);
+        addCard(card, 8);
     }
 
     // ------------------------------------------------------------------ flags

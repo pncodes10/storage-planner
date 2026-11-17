@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 3;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories
+    public static final int VERSION = 4;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -112,6 +112,7 @@ public final class ResultStore {
                 out.writeBoolean(f.textPending);
                 out.writeInt(f.faces);
             }
+            if (version >= 4) writeSignals(out, f.signals);
         }
 
         out.writeInt(r.apps.size());
@@ -200,6 +201,7 @@ public final class ResultStore {
                 f.faces = in.readInt();
                 if (f.faces < -1) throw new IOException("results file damaged (faces)");
             }
+            if (v >= 4) f.signals = readSignals(in);
             r.files.add(f);
         }
 
@@ -246,6 +248,24 @@ public final class ResultStore {
         out.writeDouble(q.meanLuma); out.writeDouble(q.clipHi); out.writeDouble(q.clipLo);
         out.writeInt(q.face.length);
         for (float x : q.face) out.writeFloat(x);
+    }
+
+    private static void writeSignals(DataOutputStream out, ImageSignals.S s) throws IOException {
+        out.writeBoolean(s != null);
+        if (s == null) return;
+        out.writeDouble(s.meanLuma); out.writeDouble(s.darkFrac); out.writeDouble(s.contrast); out.writeDouble(s.colorful);
+        out.writeDouble(s.paper); out.writeDouble(s.flat); out.writeDouble(s.sharp);
+        out.writeInt(s.textBlobs); out.writeDouble(s.textArea); out.writeInt(s.textLines); out.writeDouble(s.textHeight); out.writeDouble(s.bigText);
+    }
+
+    private static ImageSignals.S readSignals(DataInputStream in) throws IOException {
+        if (!in.readBoolean()) return null;
+        ImageSignals.S s = new ImageSignals.S();
+        s.meanLuma = in.readDouble(); s.darkFrac = in.readDouble(); s.contrast = in.readDouble(); s.colorful = in.readDouble();
+        s.paper = in.readDouble(); s.flat = in.readDouble(); s.sharp = in.readDouble();
+        s.textBlobs = in.readInt(); s.textArea = in.readDouble(); s.textLines = in.readInt(); s.textHeight = in.readDouble(); s.bigText = in.readDouble();
+        if (s.textBlobs < 0 || s.textLines < 0) throw new IOException("results file damaged (signals)");
+        return s;
     }
 
     private static PhotoQuality.Q readQuality(DataInputStream in) throws IOException {
