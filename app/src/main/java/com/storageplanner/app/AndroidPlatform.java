@@ -174,14 +174,14 @@ public final class AndroidPlatform implements Platform {
         o.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(path, o);
         int W = o.outWidth, H = o.outHeight;
-        if (W <= 0 || H <= 0) return null;
+        if (W <= 0 || H <= 0) return lumaFallback(path, dims);
         int sample = 1;
         while (Math.max(W, H) / (sample * 2) >= 1024) sample *= 2;
         o = new BitmapFactory.Options();
         o.inSampleSize = sample;
         o.inPreferredConfig = Bitmap.Config.ARGB_8888;
         Bitmap bm = BitmapFactory.decodeFile(path, o);
-        if (bm == null) return null;
+        if (bm == null) return lumaFallback(path, dims);
         try {
             int rot = 0;
             try {
@@ -212,20 +212,63 @@ public final class AndroidPlatform implements Platform {
         }
     }
 
-    /** Upright ARGB at long edge ~longEdge (never enlarged): power-of-two subsampling, then exact scale. */
+    /** The picture's luma through ImageDecoder (API 28+) when BitmapFactory cannot decode it; null if that fails too. */
+    private int[] lumaFallback(String path, int[] dims) {
+        if (Build.VERSION.SDK_INT < 28) return null;
+        try {
+            int[] px = imageDecoderArgb(path, 1024, dims);
+            if (px == null) return null;
+            int[] l = new int[px.length];
+            for (int i = 0; i < px.length; i++) {
+                int p = px[i];
+                l[i] = (299 * ((p >> 16) & 255) + 587 * ((p >> 8) & 255) + 114 * (p & 255)) / 1000;
+            }
+            return l;
+        } catch (Throwable t) { return null; }
+    }
+
+    private volatile String note;
+
+    /** What the last argb() call fell back on or why it failed (for the Algorithm Lab log). */
+    public String decodeNote() { return note; }
+
+    /**
+     * Upright ARGB at long edge ~longEdge (never enlarged). BitmapFactory first (power-of-two subsampling, then exact
+     * scale); when it cannot decode the file, ImageDecoder (API 28+) is tried, and decodeNote() says which one worked.
+     */
     public int[] argb(String path, int longEdge, int[] dims) {
+        note = null;
+        Throwable err = null;
+        int[] px = null;
+        try { px = bitmapFactoryArgb(path, longEdge, dims); }
+        catch (Throwable t) { err = t; note = "BitmapFactory threw " + t; }
+        if (px != null) return px;
+        if (Build.VERSION.SDK_INT >= 28 && new java.io.File(path).length() > 0) {
+            String why = note == null ? "BitmapFactory could not decode it" : note;
+            try {
+                px = imageDecoderArgb(path, longEdge, dims);
+                if (px != null) { note = why + "; decoded with ImageDecoder instead"; return px; }
+                note = why + "; ImageDecoder gave nothing either";
+            } catch (Throwable t) { note = why + "; ImageDecoder failed too: " + t; }
+        }
+        if (err instanceof RuntimeException) throw (RuntimeException) err;
+        if (err instanceof Error) throw (Error) err;
+        return null;
+    }
+
+    private int[] bitmapFactoryArgb(String path, int longEdge, int[] dims) {
         BitmapFactory.Options o = new BitmapFactory.Options();
         o.inJustDecodeBounds = true;
         BitmapFactory.decodeFile(path, o);
         int W = o.outWidth, H = o.outHeight;
-        if (W <= 0 || H <= 0) return null;
+        if (W <= 0 || H <= 0) { note = "BitmapFactory could not read the picture's size (it reported " + W + " x " + H + ")"; return null; }
         int sample = 1;
         while (Math.max(W, H) / (sample * 2) >= longEdge) sample *= 2;
         o = new BitmapFactory.Options();
         o.inSampleSize = sample;
         o.inPreferredConfig = Bitmap.Config.ARGB_8888;
         Bitmap bm = BitmapFactory.decodeFile(path, o);
-        if (bm == null) return null;
+        if (bm == null) { note = "BitmapFactory read the size (" + W + " x " + H + ") but could not decode the pixels"; return null; }
         try {
             int rot = rotation(path);
             double s = Math.min(1.0, (double) longEdge / Math.max(bm.getWidth(), bm.getHeight()));
@@ -239,6 +282,38 @@ public final class AndroidPlatform implements Platform {
             if (sc != bm) sc.recycle();
             boolean swap = rot == 90 || rot == 270;
             dims[0] = swap ? H : W; dims[1] = swap ? W : H; dims[2] = w; dims[3] = h;
+            return px;
+        } finally {
+            bm.recycle();
+        }
+    }
+
+    /** The same through android.graphics.ImageDecoder (API 28+), which applies the EXIF rotation itself and reads some files BitmapFactory cannot. */
+    private int[] imageDecoderArgb(String path, final int longEdge, int[] dims) throws Exception {
+        final int[] size = new int[2];
+        android.graphics.ImageDecoder.Source src = android.graphics.ImageDecoder.createSource(new java.io.File(path));
+        Bitmap bm = android.graphics.ImageDecoder.decodeBitmap(src, new android.graphics.ImageDecoder.OnHeaderDecodedListener() {
+            public void onHeaderDecoded(android.graphics.ImageDecoder d, android.graphics.ImageDecoder.ImageInfo info, android.graphics.ImageDecoder.Source s) {
+                size[0] = info.getSize().getWidth(); size[1] = info.getSize().getHeight();
+                d.setAllocator(android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE);      // pixels we can read back
+                double sc = Math.min(1.0, (double) longEdge / Math.max(size[0], size[1]));
+                if (sc < 1.0) d.setTargetSize(Math.max(1, (int) Math.round(size[0] * sc)), Math.max(1, (int) Math.round(size[1] * sc)));
+            }
+        });
+        if (bm == null) return null;
+        try {
+            int w = bm.getWidth(), h = bm.getHeight();
+            Bitmap use = bm;
+            if (Math.max(w, h) > longEdge * 1.1) {                                  // the decoder did not scale as asked
+                double sc = (double) longEdge / Math.max(w, h);
+                use = Bitmap.createScaledBitmap(bm, Math.max(1, (int) Math.round(w * sc)), Math.max(1, (int) Math.round(h * sc)), true);
+                w = use.getWidth(); h = use.getHeight();
+            }
+            int[] px = new int[w * h];
+            use.getPixels(px, 0, w, 0, 0, w, h);
+            if (use != bm) use.recycle();
+            boolean turned = size[0] != size[1] && (size[0] >= size[1]) != (bm.getWidth() >= bm.getHeight());     // rotated by the EXIF orientation
+            dims[0] = turned ? size[1] : size[0]; dims[1] = turned ? size[0] : size[1]; dims[2] = w; dims[3] = h;
             return px;
         } finally {
             bm.recycle();

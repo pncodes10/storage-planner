@@ -30,8 +30,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -45,6 +49,10 @@ public final class LabScreen extends Screen {
     private static final String[] AREA_LABEL = {"Camera photo", "Screenshot", "WhatsApp image", "Download"};
 
     private final List<Lab.Pic> pics = new ArrayList<Lab.Pic>();
+    /** Where each picked copy came from (copy path -> the picker's address), so a copy that has gone missing can be made again. */
+    private final Map<String, Uri> sources = new HashMap<String, Uri>();
+    /** Slots being filled by a pick that has not finished (so two quick picks never get the same slot). */
+    private final Set<Integer> reserved = new HashSet<Integer>();
     private int current, area;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -266,7 +274,7 @@ public final class LabScreen extends Screen {
                         ui.post(new Runnable() { public void run() { shown.append(s).append('\n'); out.setText(shown); } });
                     }
                 };
-                try { job.run(o); }
+                try { revive(o); job.run(o); }
                 catch (Throwable t) { LabLog.error(a, label, t); o.line("! " + label + " failed: " + t); }
                 o.line(String.format(Locale.US, "(%s took %d ms)", label, (System.nanoTime() - t0) / 1000000));
                 ui.post(new Runnable() {
@@ -481,28 +489,55 @@ public final class LabScreen extends Screen {
     }
 
     // ------------------------------------------------------------------ picking
-    /** Called by MainActivity with the picker's result: copies each picture into the app's cache (slots p0..p19). */
+    /** The folder for the copies of picked pictures: app storage that Android does not clear (it deletes cache files whenever storage runs low). */
+    private File labDir() {
+        File dir = new File(a.getNoBackupFilesDir(), "lab");
+        if (!dir.isDirectory()) dir.mkdirs();
+        return dir;
+    }
+
+    /** Called by MainActivity with the picker's result: copies each picture into the app's storage (slots p0..p19, reused). */
     void picked(final List<Uri> uris) {
         if (uris.isEmpty()) return;
+        // slots are chosen here, on the screen's own thread, from what is really in use: never from a count, which a failed copy
+        // or a pick that has not finished would make wrong
+        final List<Integer> slots = new ArrayList<Integer>();
+        List<String> used = new ArrayList<String>();
+        for (Lab.Pic p : pics) used.add(p.path);
+        for (int i = 0; i < uris.size(); i++) {
+            if (pics.size() + reserved.size() >= MAX) break;
+            int slot = Lab.freeSlot(used, reserved, MAX);
+            if (slot < 0) break;
+            reserved.add(slot);
+            slots.add(slot);
+        }
+        if (slots.isEmpty()) { a.toast("At most " + MAX + " pictures."); return; }
         spinner.setVisibility(View.VISIBLE);
         worker.execute(new Runnable() {
             public void run() {
                 final List<Lab.Pic> got = new ArrayList<Lab.Pic>();
-                File dir = new File(a.getCacheDir(), "lab");
-                if (!dir.isDirectory()) dir.mkdirs();
-                int slot = pics.size();
-                for (Uri u : uris) {
-                    if (slot >= MAX) break;
-                    try { got.add(copy(u, dir, slot++)); }
-                    catch (Throwable t) { LabLog.error(a, "copying " + u, t); }
+                final List<Uri> from = new ArrayList<Uri>();
+                File dir = labDir();
+                File old = new File(a.getCacheDir(), "lab");           // where earlier versions put the copies: Android may already have emptied it
+                File[] left = old.listFiles();
+                if (left != null) for (File x : left) x.delete();
+                String failed = null;
+                for (int i = 0; i < slots.size(); i++) {
+                    Uri u = uris.get(i);
+                    try { got.add(copy(u, dir, slots.get(i))); from.add(u); }
+                    catch (Throwable t) { LabLog.error(a, "copying " + u, t); failed = String.valueOf(t.getMessage()); }
                 }
+                final String why = failed;
                 ui.post(new Runnable() {
                     public void run() {
                         spinner.setVisibility(View.GONE);
+                        for (int i = 0; i < got.size(); i++) sources.put(got.get(i).path, from.get(i));
                         pics.addAll(got);
-                        current = pics.size() - got.size();
+                        reserved.removeAll(slots);                     // the pictures now hold their slots
+                        current = Math.max(0, pics.size() - got.size());
                         showPics();
-                        if (uris.size() > got.size()) a.toast((uris.size() - got.size()) + " picture(s) could not be opened (at most " + MAX + ").");
+                        if (uris.size() > got.size()) a.toast((uris.size() - got.size()) + " picture(s) could not be copied" + (why != null ? " (" + why + ")" : "")
+                                + " or were over the limit of " + MAX + ".");
                     }
                 });
             }
@@ -521,20 +556,52 @@ public final class LabScreen extends Screen {
                 if (mi >= 0 && !c.isNull(mi)) modified = c.getLong(mi);
             }
         } finally { c.close(); }
-        String ext = FileKind.ext(name);
-        File dst = new File(dir, "p" + slot + "." + (ext.isEmpty() ? "jpg" : ext));
-        InputStream in = a.getContentResolver().openInputStream(u);
-        if (in == null) throw new Exception("cannot open");
-        FileOutputStream out = new FileOutputStream(dst, false);
-        try {
-            byte[] buf = new byte[1 << 16]; int n;
-            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-        } finally { in.close(); out.close(); }
+        File dst = new File(dir, Lab.slotName(slot, FileKind.ext(name)));
+        for (String other : Lab.otherCopies(dir.list(), slot, dst.getName())) new File(dir, other).delete();      // an older picture of this slot with another extension
+        write(u, dst, size);
         long taken = exifTime(dst);
         Lab.Pic p = new Lab.Pic(dst.getAbsolutePath(), name, size >= 0 ? size : dst.length(), modified > 0 ? modified : taken > 0 ? taken : dst.lastModified());
         p.area = AREAS[area];
         LabLog.line(a, String.format(Locale.US, "picked %s -> %s (%d bytes, modified %d, EXIF taken %d)", name, dst.getName(), p.size, modified, taken));
         return p;
+    }
+
+    /** Copies the picker's stream into dst: to a temporary file first and checked against the size the picker reported, so a half-written copy is never used. */
+    private void write(Uri u, File dst, long size) throws Exception {
+        File tmp = new File(dst.getParentFile(), "p" + Lab.slotOf(dst.getPath()) + ".part");
+        InputStream in = a.getContentResolver().openInputStream(u);
+        if (in == null) throw new Exception("cannot open");
+        FileOutputStream out = new FileOutputStream(tmp, false);
+        try {
+            byte[] buf = new byte[1 << 16]; int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        } finally { in.close(); out.close(); }
+        if (size >= 0 && tmp.length() != size) { long got = tmp.length(); tmp.delete(); throw new Exception("copied " + got + " of " + size + " bytes"); }
+        if (dst.exists() && !dst.delete()) { tmp.delete(); throw new Exception("cannot replace " + dst.getName()); }
+        if (!tmp.renameTo(dst)) { tmp.delete(); throw new Exception("cannot save " + dst.getName()); }
+    }
+
+    /**
+     * Before a run: every picked picture must still be there. A copy that has gone missing or has the wrong size (Android clears
+     * app files when storage is low) is made again from where it was picked; if that is not possible the log says so plainly.
+     */
+    private void revive(Lab.Out o) {
+        for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) {
+            File f = new File(p.path);
+            boolean ok = f.isFile() && f.length() > 0 && (p.size < 0 || f.length() == p.size);
+            if (ok) continue;
+            Uri u = sources.get(p.path);
+            if (u == null) {
+                o.line("! " + p.name + ": the file is gone or changed (" + p.path + "); it was not picked here, so it cannot be copied again");
+                continue;
+            }
+            try {
+                write(u, f, p.size);
+                o.line("note: " + p.name + ": the copy in the app's storage was " + (f.exists() ? "not complete" : "missing") + "; copied it again from where it was picked");
+            } catch (Throwable t) {
+                o.line("! " + p.name + ": the copy in the app's storage is missing and could not be made again (" + t + "); pick the picture again");
+            }
+        }
     }
 
     private static long exifTime(File f) {

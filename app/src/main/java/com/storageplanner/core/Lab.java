@@ -30,18 +30,127 @@ public final class Lab {
         public final List<String> patchLabels = new ArrayList<String>();
     }
 
+    // ------------------------------------------------------------------ files the Lab makes of picked pictures
+    // A picked picture is copied into the app's own storage as p<slot>.<ext>; the slots (0..max-1) are reused. These small
+    // rules are here, not in the screen, so they are tested on the desktop.
+
+    /** The slot in a copy's file name (p<slot>.<ext>); -1 if the path is not one of those copies. */
+    public static int slotOf(String path) {
+        String n = path.substring(path.lastIndexOf('/') + 1);
+        int dot = n.indexOf('.');
+        if (n.length() < 2 || n.charAt(0) != 'p' || dot < 2) return -1;
+        try { return Integer.parseInt(n.substring(1, dot)); } catch (NumberFormatException e) { return -1; }
+    }
+
+    /** The lowest slot below max that no picked picture uses and nobody has reserved; -1 if all are taken. */
+    public static int freeSlot(java.util.Collection<String> usedPaths, java.util.Collection<Integer> reserved, int max) {
+        java.util.Set<Integer> taken = new java.util.HashSet<Integer>(reserved);
+        for (String p : usedPaths) taken.add(slotOf(p));
+        for (int i = 0; i < max; i++) if (!taken.contains(i)) return i;
+        return -1;
+    }
+
+    /** File name of a slot's copy; the extension is kept (the decoder and the log show it) but only if it is plain letters and digits. */
+    public static String slotName(int slot, String ext) {
+        String e = ext == null ? "" : ext.toLowerCase(Locale.ROOT);
+        if (!e.matches("[a-z0-9]{1,5}")) e = "jpg";
+        return "p" + slot + "." + e;
+    }
+
+    /** Files in the folder that belong to this slot but are not the copy being written (an older picture with another extension, a half-written copy). */
+    public static List<String> otherCopies(String[] names, int slot, String keep) {
+        List<String> r = new ArrayList<String>();
+        if (names == null) return r;
+        for (String n : names) if (!n.equals(keep) && slotOf(n) == slot) r.add(n);
+        return r;
+    }
+
     static final class Img { int[] px, l; int w, h, ow, oh; long ms; }
 
-    static Img load(Platform pf, String path, int edge, Out o) {
+    static Img load(Platform pf, Pic p, int edge, Out o) {
         long t0 = System.nanoTime();
         int[] d = new int[4];
-        int[] px = pf.argb(path, edge, d);
-        if (px == null) { o.line("  ! could not decode the picture at " + edge + " px"); return null; }
+        int[] px = decode(pf, p.path, p.size, edge, d, "the picture", o);
+        if (px == null) return null;
         Img m = new Img();
         m.px = px; m.l = Sorter.luma(px); m.w = d[2]; m.h = d[3]; m.ow = d[0]; m.oh = d[1];
         m.ms = (System.nanoTime() - t0) / 1000000;
         o.line(f("  decoded %d x %d (original %d x %d, upright) in %d ms", m.w, m.h, m.ow, m.oh, m.ms));
         return m;
+    }
+
+    /**
+     * The one place where the Lab decodes a picture, for every tool. Returns the ARGB pixels, or null after writing why
+     * not: file facts, the first bytes, and what the phone's decoder said. A decode that only worked through a fallback
+     * says so. pickedSize is the size the picker reported (-1 = unknown); what names the picture in the message.
+     */
+    static int[] decode(Platform pf, String path, long pickedSize, int edge, int[] dims, String what, Out o) {
+        int[] px = null; Throwable err = null;
+        try { px = pf.argb(path, edge, dims); } catch (Throwable t) { err = t; }
+        if (px != null) {
+            String note = pf.decodeNote();
+            if (note != null) o.line("  note: " + note);
+            return px;
+        }
+        o.line("  ! could not decode " + what + " at " + edge + " px");
+        for (String l : whyNot(pf, path, pickedSize, err)) o.line("    " + l);
+        return null;
+    }
+
+    /** Why a file did not decode, in plain lines for the log. */
+    static List<String> whyNot(Platform pf, String path, long pickedSize, Throwable err) {
+        List<String> r = new ArrayList<String>();
+        java.io.File file = new java.io.File(path);
+        r.add("file: " + path);
+        if (!file.exists()) {
+            r.add("the file is not there (missing or deleted)");
+            if (path.contains("/cache/") || slotOf(path) >= 0) r.add("this was a copy the Lab made in the app's storage (Android deletes app cache files when storage runs low). Pick the picture again");
+        } else if (file.isDirectory()) {
+            r.add("this is a folder, not a file");
+        } else if (!file.canRead()) {
+            r.add("the file exists (" + file.length() + " bytes) but this app may not read it");
+        } else {
+            long len = file.length();
+            r.add("the file exists, " + len + " bytes, readable");
+            if (len == 0) r.add("it is empty: the copy or the download did not finish");
+            else {
+                if (pickedSize >= 0 && pickedSize != len) r.add("the picker reported " + pickedSize + " bytes but " + len + " are here: the copy is incomplete or the file changed");
+                String type = Classifier.magic(path, len);
+                r.add("first bytes: " + firstBytes(path) + " -> looks like " + type);
+                String ext = ext(path);
+                if (!type.equals("jpeg") && !type.equals("png") && !type.equals("webp") && !type.equals("heic") && !type.equals("avif"))
+                    r.add("this is not a picture format the app reads (" + type + ")");
+                else if (!ext.isEmpty() && !sameKind(ext, type)) r.add("the name ends in ." + ext + " but the bytes say " + type);
+                if (type.equals("heic") || type.equals("avif")) r.add(type.toUpperCase(Locale.ROOT) + " needs a decoder for it on this phone");
+            }
+        }
+        String note = pf == null ? null : pf.decodeNote();
+        if (note != null) r.add("decoder: " + note);
+        if (err != null) r.add("error: " + err);
+        return r;
+    }
+
+    private static String ext(String path) {
+        int i = path.lastIndexOf('.');
+        return i < 0 || path.indexOf('/', i) >= 0 ? "" : path.substring(i + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private static boolean sameKind(String ext, String type) {
+        if (ext.equals("jpg") || ext.equals("jpeg") || ext.equals("jpe") || ext.equals("jfif")) return type.equals("jpeg");
+        if (ext.equals("heif")) return type.equals("heic");
+        return ext.equals(type);
+    }
+
+    static String firstBytes(String path) {
+        java.io.InputStream in = null;
+        try {
+            in = new java.io.FileInputStream(path);
+            byte[] b = new byte[16]; int n = in.read(b);
+            StringBuilder s = new StringBuilder();
+            for (int i = 0; i < Math.max(0, n); i++) s.append(i == 0 ? "" : " ").append(String.format(Locale.US, "%02x", b[i] & 0xff));
+            return n <= 0 ? "(none)" : s.toString();
+        } catch (java.io.IOException e) { return "(unreadable: " + e.getMessage() + ")"; }
+        finally { if (in != null) try { in.close(); } catch (java.io.IOException ignored) {} }
     }
 
     static String f(String fmt, Object... a) { return String.format(Locale.US, fmt, a); }
@@ -72,7 +181,7 @@ public final class Lab {
     public static Shown faces(Platform pf, Pic p, Out o) {
         o.line("FACE DETECTION (as used to pick the best shot) — " + p.name);
         Shown sh = new Shown();
-        Img m = load(pf, p.path, Scanner.QUALITY_EDGE, o);
+        Img m = load(pf, p, Scanner.QUALITY_EDGE, o);
         if (m == null) return sh;
         long t0 = System.nanoTime();
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
@@ -108,7 +217,7 @@ public final class Lab {
         Shown best = new Shown();
         int bestN = -1;
         for (int edge : new int[]{640, 1280, 2048}) {
-            Img m = load(pf, p.path, edge, o);
+            Img m = load(pf, p, edge, o);
             if (m == null) continue;
             for (int deg : edge == 1280 ? new int[]{0, -20, -10, 10, 20} : new int[]{0}) {
                 int[] px = deg == 0 ? m.px : rotate(m.px, m.w, m.h, deg);
@@ -159,7 +268,7 @@ public final class Lab {
     public static Shown eyes(Platform pf, Pic p, Out o) {
         o.line("EYES OPEN OR CLOSED — " + p.name);
         Shown sh = new Shown();
-        Img m = load(pf, p.path, Scanner.QUALITY_EDGE, o);
+        Img m = load(pf, p, Scanner.QUALITY_EDGE, o);
         if (m == null) return sh;
         float[] raw = pf.faces(p.path, m.px, m.w, m.h);
         if (raw == null) { o.line("  ! the face detector is not available on this phone"); return sh; }
@@ -204,10 +313,10 @@ public final class Lab {
     public static Shown sharpness(Platform pf, Pic p, Out o) {
         o.line("SHARPNESS — " + p.name);
         Shown sh = new Shown();
-        Img m = load(pf, p.path, Scanner.QUALITY_EDGE, o);
+        Img m = load(pf, p, Scanner.QUALITY_EDGE, o);
         if (m == null) return sh;
         o.line(f("  focus (used to compare near-identical shots): %.3f   [90th percentile of Laplacian variance / variance, 64 px tiles, 1280 px]", PhotoQuality.sharpness(m.l, m.w, m.h)));
-        Img k = load(pf, p.path, Sorter.EDGE, o);
+        Img k = load(pf, p, Sorter.EDGE, o);
         if (k != null) {
             o.line(f("  blur score (used for 'possibly blurry' and when shots were not measured): %.1f   [90th percentile Laplacian variance, 1024 px]",
                     ImageFeatures.sharpness(k.l, k.w, k.h)));
@@ -228,7 +337,7 @@ public final class Lab {
 
     public static Shown lighting(Platform pf, Pic p, Out o) {
         o.line("LIGHTING — " + p.name);
-        Img m = load(pf, p.path, Scanner.QUALITY_EDGE, o);
+        Img m = load(pf, p, Scanner.QUALITY_EDGE, o);
         if (m == null) return new Shown();
         PhotoQuality.Q q = PhotoQuality.analyse(m.l, m.w, m.h, pf.faces(p.path, m.px, m.w, m.h));
         double hi = 8 * Math.max(0, q.clipHi - 0.005), lo = 6 * Math.max(0, q.clipLo - 0.01),
@@ -245,7 +354,7 @@ public final class Lab {
 
     // ------------------------------------------------------------------ the full score and the best shot
     public static PhotoQuality.Q quality(Platform pf, Pic p, Out o) {
-        Img m = load(pf, p.path, Scanner.QUALITY_EDGE, o);
+        Img m = load(pf, p, Scanner.QUALITY_EDGE, o);
         if (m == null) return null;
         long t0 = System.nanoTime();
         PhotoQuality.Q q = PhotoQuality.analyse(m.l, m.w, m.h, pf.faces(p.path, m.px, m.w, m.h));
@@ -261,11 +370,16 @@ public final class Lab {
         Shown sh = new Shown();
         if (pics.size() < 2) { o.line("  pick at least two pictures"); return sh; }
         List<PhotoQuality.Q> qs = new ArrayList<PhotoQuality.Q>();
+        List<String> failed = new ArrayList<String>();
         for (Pic p : pics) {
             o.line(" " + p.name);
             PhotoQuality.Q q = quality(pf, p, o);
-            if (q == null) { o.line("  ! cannot rank: this picture could not be measured (the app would then keep the one with the highest blur score)"); return sh; }
-            qs.add(q);
+            if (q == null) failed.add(p.name); else qs.add(q);        // go on: every picture that cannot be measured gets its reason in the log
+        }
+        if (!failed.isEmpty()) {
+            o.line("  ! cannot rank: " + failed.size() + " of " + pics.size() + " pictures could not be measured (" + String.join(", ", failed)
+                    + "); the app would then keep the one with the highest blur score");
+            return sh;
         }
         double[][] t = PhotoQuality.terms(qs);
         double[] s = PhotoQuality.scores(qs);
@@ -290,14 +404,16 @@ public final class Lab {
         o.line("NEAR-DUPLICATE CHECK (" + pics.size() + " pictures)");
         if (pics.size() < 2) { o.line("  pick at least two pictures"); return; }
         long[] h = new long[pics.size()]; int[][] dims = new int[pics.size()][];
+        int failed = 0;
         for (int i = 0; i < pics.size(); i++) {
             o.line(" " + pics.get(i).name);
-            Img m = load(pf, pics.get(i).path, Sorter.EDGE, o);
-            if (m == null) return;
+            Img m = load(pf, pics.get(i), Sorter.EDGE, o);
+            if (m == null) { failed++; continue; }
             h[i] = ImageFeatures.phash(m.l, m.w, m.h);
             dims[i] = new int[]{m.ow, m.oh};
             o.line(f("  perceptual hash %016x", h[i]));
         }
+        if (failed > 0) { o.line("  ! cannot compare: " + failed + " of " + pics.size() + " pictures could not be decoded (reasons above)"); return; }
         o.line("  rule: same size, taken within " + UnitBuilder.BURST_WINDOW_MS / 60000 + " min, hash differs in <= " + UnitBuilder.NEAR_DUP_BITS
                 + " of 63 bits (WhatsApp copy of a camera photo: <= " + UnitBuilder.SENT_MATCH_BITS + " bits, same shape)");
         for (int i = 0; i < pics.size(); i++)
@@ -318,6 +434,11 @@ public final class Lab {
         for (int i = 0; i < pics.size(); i++) {
             long t0 = System.nanoTime();
             hs[i] = Scanner.fullHash(pics.get(i).path);
+            if (hs[i] == null) {
+                o.line("  ! " + pics.get(i).name + ": could not read the file");
+                for (String l : whyNot(null, pics.get(i).path, pics.get(i).size, null)) o.line("    " + l);
+                continue;
+            }
             o.line(f("  %s: %d bytes, SHA-256 %s (%d ms)", pics.get(i).name, pics.get(i).size, hs[i], (System.nanoTime() - t0) / 1000000));
         }
         boolean any = false;
@@ -332,7 +453,7 @@ public final class Lab {
         Shown sh = new Shown();
         FileItem f = new FileItem(p.area.equals("screenshot") ? "Pictures/Screenshots/" + p.name : "Lab/" + p.name, p.path, p.size, p.mtime);
         f.area = p.area; f.type = p.name.toLowerCase(Locale.ROOT).endsWith(".png") ? "png" : "jpeg";
-        Img m = load(pf, p.path, Sorter.EDGE, o);
+        Img m = load(pf, p, Sorter.EDGE, o);
         if (m == null) return sh;
         int[] d = {m.ow, m.oh, m.w, m.h};
         Sorter.Prep prep = Sorter.measure(pf, f, m.px, d);
@@ -376,8 +497,8 @@ public final class Lab {
 
     static TextRules.Verdict readAndJudge(Platform pf, FileItem f, ImageSignals.S s, double aspect, long now, Out o) {
         int[] d = new int[4];
-        int[] px = pf.argb(f.abs, Sorter.TEXT_EDGE, d);
-        if (px == null) { o.line("  ! could not decode for reading"); return null; }
+        int[] px = decode(pf, f.abs, f.size, Sorter.TEXT_EDGE, d, "the picture for reading", o);
+        if (px == null) return null;
         long t0 = System.nanoTime();
         TextRules.Words w = pf.readText(f.abs, px, d[2], d[3]);
         long ms = (System.nanoTime() - t0) / 1000000;
@@ -395,7 +516,7 @@ public final class Lab {
     public static void codes(Platform pf, Pic p, Out o) {
         o.line("QR CODE / BARCODE — " + p.name);
         for (int edge : new int[]{Sorter.EDGE, Sorter.BIG}) {
-            Img m = load(pf, p.path, edge, o);
+            Img m = load(pf, p, edge, o);
             if (m == null) continue;
             for (boolean thorough : new boolean[]{false, true}) {
                 long t0 = System.nanoTime();
@@ -411,12 +532,12 @@ public final class Lab {
         o.line("READ TEXT — " + p.name + " (treated as " + p.area + ")");
         FileItem f = new FileItem("Lab/" + p.name, p.path, p.size, p.mtime);
         f.area = p.area;
-        Img m = load(pf, p.path, Sorter.EDGE, o);
+        Img m = load(pf, p, Sorter.EDGE, o);
         if (m == null) return;
         ImageSignals.S s = ImageSignals.measure(m.px, m.w, m.h);
         readAndJudge(pf, f, s, m.ow / (double) Math.max(1, m.oh), now, o);
         int[] d = new int[4];
-        int[] small = pf.argb(p.path, Sorter.GREETING_EDGE, d);
+        int[] small = decode(pf, p.path, p.size, Sorter.GREETING_EDGE, d, "the small copy for the greeting check", o);
         if (small != null) {
             TextRules.Words w2 = pf.readText(p.path, small, d[2], d[3]);
             if (w2 != null) o.line("  small copy (" + d[2] + " x " + d[3] + ", the greeting check): " + TextRules.clean(w2));

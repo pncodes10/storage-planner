@@ -27,6 +27,12 @@ public interface Platform {
     int[] argb(String path, int longEdge, int[] dims);
 
     /**
+     * What the last argb() or luma() call had to fall back on or what went wrong inside it, in one line for the Algorithm Lab
+     * (for example "the usual decoder could not open it, the second one did"); null when there is nothing to say.
+     */
+    String decodeNote();
+
+    /**
      * Faces in a decoded picture (from argb), in the picture's pixels, Faces.F floats per face
      * {x between the eyes, y, eye distance, score 0..1, eye-on-the-left x, y, other eye x, y}.
      * Empty array if none; null if detection is unavailable.

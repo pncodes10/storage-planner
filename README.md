@@ -378,7 +378,15 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 5. **Log.**
    - Every line, with the phone model, Android and WebView versions and the app version, is written to a log in the app's private storage.
    - **Save log** copies it to `Download/StoragePlanner/lab-log-<time>.txt`, **Share log** sends that copy, **Copy log** puts it on the clipboard so you can paste it into a message (a very long log is cut to its newest 200,000 characters, with a note), and **Clear log** starts a new one.
-   - Picked pictures are copied into the app's cache (20 slots, reused); the originals are not touched.
+   - Picked pictures are copied into the app's own storage, not its cache (20 slots, reused; the originals are not touched). Android deletes cache files whenever storage runs low, which would leave the Lab pointing at a picture that is gone. Each copy is written to a temporary file, checked against the size the picker reported, and only then given its name. A slot is the lowest one no picked picture uses (never counted from how many pictures there are), a pick that has not finished keeps its slots, and an older copy of the same slot with another extension is removed. Before every run the Lab checks that each copy is still there and the right size; if not, it copies it again from where it was picked and says so in the log.
+   - **When a picture does not decode, the log says why**, for every tool (faces, eyes, sharpness, lighting, codes, category, reading text, best shot, near-duplicate and exact-duplicate checks), not just "could not decode". For example:
+     ```
+     ! could not decode the picture at 1280 px
+       file: .../lab/p0.jpg
+       the file is not there (missing or deleted)
+       this was a copy the Lab made in the app's storage (Android deletes app cache files when storage runs low). Pick the picture again
+     ```
+     The lines that can appear: whether the file exists, its size and whether it can be read; the size the picker reported; the first 16 bytes and the type they show (read from the bytes, not the name), with a note when the name and the bytes disagree (a HEIC saved as .jpg) or the file is not a picture; what the phone's decoder reported (for example that it could not read the picture's size); and any error. On Android 9 and later, a picture that BitmapFactory cannot decode is tried with ImageDecoder, and the log says `note: ... decoded with ImageDecoder instead`. The group checks go on to the next picture instead of stopping at the first one that fails, so each failing picture gets its reason.
 
 The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the scan's numbers. `LabTest` runs every tool on real pictures on the desktop.
 
@@ -495,7 +503,7 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

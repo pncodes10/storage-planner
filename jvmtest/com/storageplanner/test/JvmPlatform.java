@@ -89,6 +89,8 @@ public final class JvmPlatform implements Platform {
         } catch (Exception e) { return null; }
     }
 
+    public String decodeNote() { return null; }
+
     public int[] argb(String path, int longEdge, int[] dims) {
         try {
             BufferedImage im = ImageIO.read(new File(path));
