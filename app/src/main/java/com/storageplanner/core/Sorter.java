@@ -22,9 +22,9 @@ final class Sorter {
      * Version of the sorting rules. Pictures sorted under an older version are measured and sorted once more at the
      * next scan (the file is unchanged, but the rules or the measurements are new). Raise it whenever a change
      * should reach pictures that are already sorted. 1: page-of-paper check. 2: eyes open on every photo with a face,
-     * cards and papers held up are read (ID cards).
+     * cards and papers held up are read (ID cards). 3: focus ignores sensor grain (night skies), glare share.
      */
-    static final int VERSION = 2;
+    static final int VERSION = 3;
 
     /** True when this earlier result for an unchanged picture can be kept as it is. */
     static boolean current(FileItem p) { return p != null && p.category != null && !p.textPending && p.sortVersion >= VERSION; }

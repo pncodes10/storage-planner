@@ -208,7 +208,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 **Tags on every file.** A file's details page now also has a **Tags** section: a plain list of facts about the
 file, such as where it came from (camera photo, screenshot, chat image received or sent, download, ...), its kind,
 size, age (days since it was last *modified*; Android does not say when you last opened it), picture size, category,
-whether text was read, faces, faces with eyes open, whether it has a QR code or barcode, and, for pictures, brightness, how dark, how
+whether text was read, faces, faces with eyes open, whether it has a QR code or barcode, and, for pictures, brightness, how dark, how much glare, how
 colourful, how much of it is flat graphics, how much is paper (judged against the picture's own light), how much is
 ink (pen or print on that paper), whether it looks like a page of paper, and how much text. Yes/no facts (exact duplicate, extra shot of a
 burst, best shot of a burst, sent copy of a camera photo, installer of an app that is already installed, ID document,
@@ -283,6 +283,26 @@ sorted photo with a face, on the 1024 px picture, with the same rules for which 
 "Faces with eyes open" (`eyes_open`, a number) and "Someone has eyes closed" (`eyes_closed`), which rules can test.
 Results format 6 saves it. Pictures sorted by an older version are measured once more at the next scan (sorting
 version 2), so the tags and the ID-card check reach them too.
+
+**Night shots: grain is not detail, and a glare tag.** The focus measure used to see the sensor grain in a night
+photo's black sky as fine detail, so a soft night shot scored as sharp (a night street photo scored 2.2, sharper
+than daylight photos). Focus now measures the grain in the picture's own empty patches (tiles that vary less than
+a luma variance of 25, when there are at least 3) and takes it off every patch, and leaves those empty patches
+out. A picture with no empty patches (texture everywhere) is scored as before. This changes the focus used for
+"accidental shot" (shaken) and for picking the best of near-identical shots; saved similar-shot measurements from
+before are dropped and measured again (results format 7).
+
+A new number tag, **"Glare share"** (`glare_share`, %), is the share of the picture that is bright and within 5% of
+the long edge of a blown-out spot (luma 245+): the halo and streaks around headlights and lamps. "Bright" means at least
+40 levels brighter than the picture's median and at least 100. A night photo into headlights
+measured 19%; three daylight and indoor photos measured 0-1%. A blown-out sky counts too, so pair it with darkness.
+Nothing is deleted on glare alone: no built-in rule uses it. A rule you can add yourself:
+
+> Camera photo is yes, Faces = 0, Dark share ≥ 20, Glare share ≥ 10 → delete
+
+On the four real photos tried it matched only the night shot. It can also match night photos you want to keep
+(a lit skyline, fireworks), and the limits come from one night photo, so try it on yours in the Lab first.
+Sorting version 3 measures every picture once more at the next scan so the tag and the new focus reach them.
 
 The start screen has a switch to turn sorting off.
 

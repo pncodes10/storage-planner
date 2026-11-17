@@ -238,6 +238,7 @@ public final class PageTest {
 
         resort();
 
+        nightChecks();
         System.out.println(checks - fails + "/" + checks + " page checks pass");
         if (fails > 0) System.exit(1);
     }
@@ -312,4 +313,59 @@ public final class PageTest {
         if (k != null) for (File x : k) deleteAll(x);
         f.delete();
     }
+
+    // ---- a night street: black sky full of sensor grain, a lit band below, blown-out headlights with halos
+    static int[] night(long seed, boolean lights, double blur) {
+        java.util.Random r = new java.util.Random(seed);
+        double[] y = new double[W * H];
+        for (int py = 0; py < H; py++)
+            for (int px = 0; px < W; px++) {
+                double v = py < H / 2 ? 6 : 40 + ((px / 24 + py / 24) % 2 == 0 ? 50 : 0);     // dark sky; a checked road and cars
+                y[py * W + px] = v;
+            }
+        if (blur > 0) y = boxBlur(y, (int) blur);
+        int[] out = new int[W * H];
+        for (int i = 0; i < out.length; i++) {
+            double v = y[i] + r.nextGaussian() * 2.3;                                          // grain, as a phone's night shot has
+            out[i] = rgb(v, v, v);
+        }
+        if (lights)
+            for (int k = 0; k < 4; k++) {
+                int cx = 100 + 120 * k, cy = H / 2 + 40;
+                for (int py = Math.max(0, cy - 80); py < Math.min(H, cy + 80); py++)
+                    for (int px = Math.max(0, cx - 80); px < Math.min(W, cx + 80); px++) {
+                        double d = Math.hypot(px - cx, py - cy), v = d < 10 ? 255 : 255 - 2.2 * d;
+                        int old = out[py * W + px] & 255;
+                        if (v > old) out[py * W + px] = rgb(v, v, v);
+                    }
+            }
+        return out;
+    }
+
+    static double[] boxBlur(double[] y, int rad) {
+        double[] o = new double[y.length];
+        for (int py = 0; py < H; py++)
+            for (int px = 0; px < W; px++) {
+                double s = 0; int n = 0;
+                for (int dy = -rad; dy <= rad; dy++) for (int dx = -rad; dx <= rad; dx++) {
+                    int qx = px + dx, qy = py + dy;
+                    if (qx >= 0 && qy >= 0 && qx < W && qy < H) { s += y[qy * W + qx]; n++; }
+                }
+                o[py * W + px] = s / n;
+            }
+        return o;
+    }
+
+    static void nightChecks() {
+        ImageSignals.S sharp = ImageSignals.measure(night(1, false, 0), W, H), soft = ImageSignals.measure(night(1, false, 4), W, H);
+        check("night: grain in the black sky is not detail (sharp " + f(sharp.sharp) + " > 2 x blurred " + f(soft.sharp) + ")", sharp.sharp > 2 * soft.sharp);
+        check("night: a blurred night shot scores as shaken (focus " + f(soft.sharp) + " < 0.12)", soft.sharp < 0.12);
+        ImageSignals.S lit = ImageSignals.measure(night(2, true, 0), W, H);
+        check("night: headlights give glare (" + f(lit.glare) + " >= 0.05)", lit.glare >= 0.05);
+        check("night: no lights, no glare", sharp.glare == 0);
+        ImageSignals.S page = ImageSignals.measure(paper(200, 3, 7), W, H);
+        check("a page of paper has no glare (" + f(page.glare) + ")", page.glare < 0.01);
+    }
+
+    static String f(double v) { return String.format(java.util.Locale.US, "%.3f", v); }
 }

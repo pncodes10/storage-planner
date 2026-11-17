@@ -25,7 +25,7 @@ public final class Tags {
     // ---- ids (stable; rules refer to them)
     public static final String SOURCE = "source", AREA = "area", KIND = "kind", SIZE_BYTES = "size_bytes", AGE_DAYS = "age_days",
             WIDTH = "width", HEIGHT = "height", MEGAPIXELS = "megapixels", CATEGORY = "category", TEXT_READ = "text_read",
-            FACES = "faces", EYES_OPEN = "eyes_open", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share",
+            FACES = "faces", EYES_OPEN = "eyes_open", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share", GLARE_SHARE = "glare_share",
             COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", INK_SHARE = "ink_share", LOOKS_LIKE_PAGE = "looks_like_page", TEXT_AMOUNT = "text_amount",
             DUPLICATE = "duplicate", BURST_EXTRA = "burst_extra", BURST_KEEPER = "burst_keeper", SENT_COPY = "sent_copy",
             BLURRY = "blurry_vs_your_photos", INSTALLER_INSTALLED = "installer_already_installed", INSTALLER_NOT_INSTALLED = "installer_not_installed",
@@ -117,6 +117,7 @@ public final class Tags {
         public int blur = UNKNOWN;                      // 0..100, higher = blurrier than your other camera photos
         public int brightness = UNKNOWN;                // 0..100
         public int darkShare = UNKNOWN;                 // 0..100: share of nearly black pixels
+        public int glareShare = UNKNOWN;                // 0..100: share lit up around blown-out lights (ImageSignals.glare)
         public int colourfulness = UNKNOWN;             // 0 (grey) and up; about 15 is a colourful picture, 60+ vivid
         public int graphicShare = UNKNOWN;              // 0..100: share of perfectly flat pixels (screens, graphics)
         public int paperShare = UNKNOWN;                // 0..100: share of plain colourless pixels as bright as the picture's own white (paper, also in dim light)
@@ -156,6 +157,7 @@ public final class Tags {
             l.add(num(BLUR, "Blur (vs your photos)", blur, blur + " of 100"));
             l.add(num(BRIGHTNESS, "Brightness", brightness, brightness + " of 100"));
             l.add(num(DARK_SHARE, "Dark share", darkShare, darkShare + "%"));
+            l.add(num(GLARE_SHARE, "Glare share", glareShare, glareShare + "%"));
             l.add(num(COLOURFULNESS, "Colourfulness", colourfulness, String.valueOf(colourfulness)));
             l.add(num(GRAPHIC_SHARE, "Flat graphic share", graphicShare, graphicShare + "%"));
             l.add(num(PAPER_SHARE, "Paper-like share", paperShare, paperShare + "%"));
@@ -198,6 +200,7 @@ public final class Tags {
                 case BLUR: return blur;
                 case BRIGHTNESS: return brightness;
                 case DARK_SHARE: return darkShare;
+                case GLARE_SHARE: return glareShare;
                 case COLOURFULNESS: return colourfulness;
                 case GRAPHIC_SHARE: return graphicShare;
                 case PAPER_SHARE: return paperShare;
@@ -281,7 +284,7 @@ public final class Tags {
 
     private static final Map<String, Type> TYPES = new HashMap<String, Type>();
     static {
-        for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, COLOURFULNESS,
+        for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, GLARE_SHARE, COLOURFULNESS,
                 GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE}) TYPES.put(id, Type.NUMBER);
         for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
@@ -304,7 +307,7 @@ public final class Tags {
         {SOURCE, "", "source"}, {AREA, "", "storage area"}, {KIND, "", "kind"}, {SIZE_BYTES, "bytes", "size"}, {AGE_DAYS, "days", "age"},
         {WIDTH, "px", "width"}, {HEIGHT, "px", "height"}, {MEGAPIXELS, "MP", "size in megapixels"}, {CATEGORY, "", "picture category"},
         {TEXT_READ, "", "text status"}, {FACES, "", "number of faces"}, {EYES_OPEN, "", "number of faces with eyes open"}, {HAS_CODE, "", "has a QR code or barcode"}, {BLUR, "of 100", "blur"},
-        {BRIGHTNESS, "of 100", "brightness"}, {DARK_SHARE, "%", "dark share"}, {COLOURFULNESS, "", "colourfulness"},
+        {BRIGHTNESS, "of 100", "brightness"}, {DARK_SHARE, "%", "dark share"}, {GLARE_SHARE, "%", "glare share"}, {COLOURFULNESS, "", "colourfulness"},
         {GRAPHIC_SHARE, "%", "flat graphic share"}, {PAPER_SHARE, "%", "paper-like share"}, {INK_SHARE, "%", "ink share"}, {LOOKS_LIKE_PAGE, "", "is a photo of a page of paper"}, {TEXT_AMOUNT, "", "amount of text"},
         {DUPLICATE, "", "is an exact duplicate"}, {BURST_EXTRA, "", "is an extra shot of a burst"}, {BURST_KEEPER, "", "is the best shot of a burst"},
         {SENT_COPY, "", "is a sent copy of a camera photo"}, {BLURRY, "", "is much blurrier than your other photos"},
@@ -428,6 +431,7 @@ public final class Tags {
         if (s != null) {
             t.brightness = pct(s.meanLuma / 255.0);
             t.darkShare = pct(s.darkFrac);
+            if (s.glare >= 0) t.glareShare = pct(s.glare);
             t.colourfulness = (int) Math.round(s.colorful);
             t.graphicShare = pct(s.flat);
             if (s.pagePaper >= 0) {                  // measured by this version of the app; older measurements have no page check

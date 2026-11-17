@@ -126,6 +126,10 @@ public final class TagsTest {
         s.colorful = 23.4; s.pagePaper = 0.07; t1 = Tags.of(m, none, NOW);
         check("brightness 127.5/255 = 50", t1.brightness == 50);
         check("dark share 20", t1.darkShare == 20);
+        check("glare not measured (sorted before glare existed) = unknown", t1.glareShare == Tags.UNKNOWN && !t1.get(Tags.GLARE_SHARE).known);
+        s.glare = 0.194; t1 = Tags.of(m, none, NOW);
+        check("glare share 19", t1.glareShare == 19 && t1.numTag(Tags.GLARE_SHARE) == 19 && Tags.typeOf(Tags.GLARE_SHARE) == Tags.Type.NUMBER);
+        s.glare = 0; check("no glare = 0 (known)", Tags.of(m, none, NOW).glareShare == 0 && Tags.of(m, none, NOW).get(Tags.GLARE_SHARE).known);
         check("colourfulness 23", t1.colourfulness == 23);
         check("graphic share 35, paper 7", t1.graphicShare == 35 && t1.paperShare == 7);
         check("text amount none", Tags.AMOUNT_NONE.equals(t1.textAmount));
@@ -241,7 +245,7 @@ public final class TagsTest {
         boolean ids = true;
         java.util.Set<String> seen = new java.util.HashSet<String>();
         for (Tags.Entry en : all1.all()) ids &= seen.add(en.id) && en.id.matches("[a-z_]+") && en.label.length() > 0;
-        check("42 unique lower_snake ids", ids && seen.size() == 42 && all1.get(Tags.BLUR) != null);
+        check("43 unique lower_snake ids", ids && seen.size() == 43 && all1.get(Tags.BLUR) != null);
         boolean typed = true;                                   // every listed id has a type, and the typed accessors agree with it
         for (Tags.Entry en : all1.all()) {
             Tags.Type ty = Tags.typeOf(en.id);

@@ -41,6 +41,9 @@ public final class ImageSignals {
         public double smooth = -1;          // share of that paper that has almost no local variation
         public double ink = -1;             // share of the picture that is clearly darker than its surroundings (pen strokes, print)
         public int inkBands = -1;           // how many of the 8 horizontal bands have ink in them
+        // Glare: share of the picture lit up around blown-out lights (headlights, lamps, flare streaks, a blown-out sky).
+        // -1 = not measured (pictures sorted before this existed).
+        public double glare = -1;
 
         /** Why this is not a page of paper, in a few words; null when it is one. */
         public String pageFail() {
@@ -99,7 +102,44 @@ public final class ImageSignals {
         long[][] in = integral(l, w, h);
         text(l, w, h, s, in);
         page(argb, l, w, h, in, hist, histPlain, s);
+        s.glare = glare(l, w, h, hist);
         return s;
+    }
+
+    public static final int GLARE_CORE = 245;          // blown out: luma at least this
+    public static final double GLARE_REACH = 0.05;     // of the long edge: how far around a blown-out spot glare is looked for
+    public static final int GLARE_LIFT = 40;           // glare is at least this much brighter than the picture's median
+    public static final int GLARE_MIN = 100;           // and at least this bright
+
+    /**
+     * Share of the picture that is bright and near a blown-out spot: the halo and streaks around lights. A night
+     * photo into headlights scores about 12%, ordinary daylight photos and paper about 0-1%. A blown-out sky counts
+     * too, so pair it with darkness to find night shots spoiled by flare.
+     */
+    static double glare(int[] l, int w, int h, int[] hist) {
+        int n = w * h, median = 0;
+        for (int c = 0, i = 0; i < 256; i++) { c += hist[i]; if (c * 2 >= n) { median = i; break; } }
+        int lv = Math.max(GLARE_MIN, median + GLARE_LIFT);
+        int[] core = new int[(w + 1) * (h + 1)];            // integral image of blown-out pixels
+        boolean any = false;
+        for (int y = 0; y < h; y++) {
+            int rs = 0;
+            for (int x = 0; x < w; x++) {
+                if (l[y * w + x] >= GLARE_CORE) { rs++; any = true; }
+                core[(y + 1) * (w + 1) + x + 1] = core[y * (w + 1) + x + 1] + rs;
+            }
+        }
+        if (!any) return 0;
+        int r = Math.max(1, (int) Math.round(GLARE_REACH * Math.max(w, h))), cnt = 0;
+        for (int y = 0; y < h; y++) {
+            int y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+            for (int x = 0; x < w; x++) {
+                if (l[y * w + x] < lv) continue;
+                int x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+                if (core[y1 * (w + 1) + x1] - core[y0 * (w + 1) + x1] - core[y1 * (w + 1) + x0] + core[y0 * (w + 1) + x0] > 0) cnt++;
+            }
+        }
+        return cnt / (double) n;
     }
 
     /**

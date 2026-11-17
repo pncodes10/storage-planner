@@ -451,8 +451,8 @@ public final class Lab {
         int[] d = {m.ow, m.oh, m.w, m.h};
         Sorter.Prep prep = Sorter.measure(pf, f, m.px, d);
         ImageSignals.S s = prep.s;
-        o.line(f("  brightness %.0f, contrast %.1f, colourful %.1f, dark %.1f%%, paper-like %.1f%%, flat (screen) %.1f%%, focus %.3f",
-                s.meanLuma, s.contrast, s.colorful, 100 * s.darkFrac, 100 * s.paper, 100 * s.flat, s.sharp));
+        o.line(f("  brightness %.0f, contrast %.1f, colourful %.1f, dark %.1f%%, glare %.1f%%, paper-like %.1f%%, flat (screen) %.1f%%, focus %.3f",
+                s.meanLuma, s.contrast, s.colorful, 100 * s.darkFrac, 100 * s.glare, 100 * s.paper, 100 * s.flat, s.sharp));
         o.line(f("  text-like marks %d in %d lines covering %.2f%% (letter height %.1f%% of the picture, big lettering %.0f%% of the width)",
                 s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.textHeight, 100 * s.bigText));
         o.line(pageLine(s));

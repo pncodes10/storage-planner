@@ -119,7 +119,15 @@ public final class PhotoQuality {
      * tile's own variance, over tiles with real texture (variance at least 10% of the median tile's); the 90th
      * percentile. A brighter or darker copy of the same photo scores about the same, a blurred one lower, and
      * flat sky or walls (mostly sensor noise) are ignored.
+     * Sensor grain is not detail: in a night photo the grain alone gives every tile a large Laplacian variance, so
+     * the black sky and the dim road looked finely detailed and the photo sharp. The grain is measured where there
+     * is nothing else to see (tiles that vary less than NOISE_VAR; their median Laplacian variance, when at least
+     * MIN_TILES such tiles exist) and taken off every tile, and tiles varying less than NOISE_VAR are left out. A
+     * picture without such empty tiles (texture everywhere) is scored as before.
      */
+    static final double NOISE_VAR = 25;     // luma variance of a tile that is only sensor grain stays below this (std-dev 5)
+    static final int MIN_TILES = 3;
+
     public static double sharpness(int[] l, int w, int h) {
         int tw = w / 64, th = h / 64;
         if (tw == 0 || th == 0) return -1;
@@ -131,12 +139,27 @@ public final class PhotoQuality {
             }
         double[] sv = var.clone(); java.util.Arrays.sort(sv);
         double min = Math.max(4, 0.1 * sv[sv.length / 2]);
+        double grain = grain(lap, var);
+        if (grain > 0) {                                  // a picture with empty areas: leave those out as well
+            int detailed = 0;
+            for (double x : var) if (x >= Math.max(min, NOISE_VAR)) detailed++;
+            if (detailed >= MIN_TILES) min = Math.max(min, NOISE_VAR);
+        }
         double[] v = new double[lap.length]; int n = 0;
-        for (int i = 0; i < lap.length; i++) if (var[i] >= min) v[n++] = lap[i] / var[i];
+        for (int i = 0; i < lap.length; i++) if (var[i] >= min) v[n++] = Math.max(0, lap[i] - grain) / var[i];
         if (n == 0) return 0;
         v = java.util.Arrays.copyOf(v, n);
         java.util.Arrays.sort(v);
         return v[(int) Math.min(n - 1, Math.floor(0.9 * (n - 1) + 0.5))];
+    }
+
+    /** Laplacian variance of sensor grain: the median over tiles with almost nothing in them; 0 with fewer than MIN_TILES such tiles. */
+    static double grain(double[] lap, double[] var) {
+        double[] g = new double[lap.length]; int n = 0;
+        for (int i = 0; i < lap.length; i++) if (var[i] < NOISE_VAR) g[n++] = lap[i];
+        if (n < MIN_TILES) return 0;
+        g = java.util.Arrays.copyOf(g, n); java.util.Arrays.sort(g);
+        return g[n / 2];
     }
 
     /** {Laplacian variance, mean luma, luma variance} in a box (inclusive, clamped away from the border). */

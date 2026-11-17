@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 6;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face
+    public static final int VERSION = 7;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -194,6 +194,7 @@ public final class ResultStore {
             f.apkPackage = pooled(in, pool);
             f.apkVersion = in.readLong();
             if (v >= 2) f.quality = readQuality(in);
+            if (v < 7) f.quality = null;          // measured before focus ignored sensor grain: compare similar shots afresh
             if (v >= 3) {
                 f.category = pooled(in, pool);
                 f.code = str(in);
@@ -264,6 +265,7 @@ public final class ResultStore {
         out.writeDouble(s.paper); out.writeDouble(s.flat); out.writeDouble(s.sharp);
         out.writeInt(s.textBlobs); out.writeDouble(s.textArea); out.writeInt(s.textLines); out.writeDouble(s.textHeight); out.writeDouble(s.bigText);
         if (version >= 5) { out.writeDouble(s.whiteLevel); out.writeDouble(s.pagePaper); out.writeDouble(s.smooth); out.writeDouble(s.ink); out.writeInt(s.inkBands); }
+        if (version >= 7) out.writeDouble(s.glare);
     }
 
     private static ImageSignals.S readSignals(DataInputStream in, int version) throws IOException {
@@ -273,6 +275,8 @@ public final class ResultStore {
         s.paper = in.readDouble(); s.flat = in.readDouble(); s.sharp = in.readDouble();
         s.textBlobs = in.readInt(); s.textArea = in.readDouble(); s.textLines = in.readInt(); s.textHeight = in.readDouble(); s.bigText = in.readDouble();
         if (version >= 5) { s.whiteLevel = in.readDouble(); s.pagePaper = in.readDouble(); s.smooth = in.readDouble(); s.ink = in.readDouble(); s.inkBands = in.readInt(); }
+        if (version >= 7) s.glare = in.readDouble();
+        if (s.glare != s.glare || s.glare > 1 || s.glare < -1) throw new IOException("results file damaged (signals)");
         if (s.textBlobs < 0 || s.textLines < 0) throw new IOException("results file damaged (signals)");
         if (s.inkBands < -1 || s.inkBands > 8) throw new IOException("results file damaged (signals)");
         return s;
