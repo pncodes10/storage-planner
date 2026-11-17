@@ -3,6 +3,7 @@ package com.storageplanner.test;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.ImageSignals;
 import com.storageplanner.core.PhotoCategory;
+import com.storageplanner.core.TextRules;
 import com.storageplanner.core.Scanner;
 
 import java.awt.image.BufferedImage;
@@ -198,6 +199,25 @@ public final class PageTest {
         check("a wall is not worth reading", !PhotoCategory.worthReading(camera(), measure(wall(200, 2.5, 11))));
         check("a sky is not worth reading", !PhotoCategory.worthReading(camera(), measure(sky(13))));
         check("a colourful scene is not worth reading", !PhotoCategory.worthReading(camera(), measure(colourfulScene(14))));
+
+        // a card held up (an ID card): some bright paper and a little print, measured as on the phone; read when it has a face
+        ImageSignals.S card = new ImageSignals.S();
+        card.meanLuma = 136; card.contrast = 60; card.colorful = 27; card.paper = 0.347; card.textBlobs = 10; card.textLines = 2; card.sharp = 1.0;
+        FileItem held = camera(); held.faces = 1;
+        check("a card with a face is worth reading", PhotoCategory.worthReading(held, card));
+        check("the same without a face is not", !PhotoCategory.worthReading(camera(), card));
+        FileItem none = camera(); none.faces = 0;
+        check("faces counted 0: not read either", !PhotoCategory.worthReading(none, card));
+        TextRules.Verdict idText = new TextRules.Verdict(); idText.kind = PhotoCategory.ID; idText.why = "test";
+        TextRules.Verdict greet = new TextRules.Verdict(); greet.kind = PhotoCategory.GREETING; greet.why = "test";
+        TextRules.Verdict words = new TextRules.Verdict(); words.goodWords = 40;
+        check("card + ID text = ID document", PhotoCategory.ID.equals(PhotoCategory.classify(held, card, null, idText, 1).category));
+        check("person + poster text stays People", PhotoCategory.PEOPLE.equals(PhotoCategory.classify(held, card, null, greet, 1).category));
+        check("person + many words stays People", PhotoCategory.PEOPLE.equals(PhotoCategory.classify(held, card, null, words, 1).category));
+        ImageSignals.S letter = new ImageSignals.S();
+        letter.meanLuma = 150; letter.contrast = 50; letter.colorful = 10; letter.paper = 0.3; letter.textBlobs = 16; letter.textLines = 3; letter.sharp = 1.0;
+        check("a letter with three lines of print is worth reading, face or not", PhotoCategory.worthReading(camera(), letter));
+        check("a few marks on a white wall are not", !PhotoCategory.worthReading(held, measure(wall(200, 2.5, 11))));
         int[] faint = paper(200, 1.0, 22);                                  // lightly written page: low contrast overall
         for (int i = 0; i < 6; i++) { int y0 = 150 + i * 140; for (int k = 60; k < 500; k++) dot(faint, k, y0 + (int) (6 * Math.sin(k * 0.3)), 1, rgb(120, 125, 150)); }
         ImageSignals.S fs = measure(faint);

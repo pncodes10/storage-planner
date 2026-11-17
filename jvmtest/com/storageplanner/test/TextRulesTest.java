@@ -38,6 +38,13 @@ public final class TextRulesTest {
         expect("one greeting word on a camera photo is not enough", "Happy", 1.33, true, false, false, null);
         expect("chat", "Ravi online Hi are you coming today 7:42 pm yes will reach by 8 7:43 pm ok see you 7:43 pm Type a message", 0.45, false, true, false, PhotoCategory.CHAT);
         // sensitive documents are recognised first, whatever else the text says
+        // an Aadhaar card held up in a photo, read at an angle (invented details): "India" cut off, "VID:" without a space,
+        // the gender after its Hindi word; and the same card read from a crop, where only the number and gender survive
+        expect("ID card at an angle", "yy, a will Government of = aba sera Ravi Kumar Sharma 01/01/1990 ges/ male wy - 1234 5678 9012 vid: 1234 5678 9012 3456",
+               0.75, true, false, false, PhotoCategory.ID);
+        expect("ID card, number and gender only", "sears Ravi Kumar Sharma 01/01/1990 ges/ MALE 1234 5678 9012", 0.75, true, false, false, PhotoCategory.ID);
+        expect("a blank form's male/female is not an ID", "Application form Name Address Gender male/female Signature Date Phone Email Place", 0.71, false, false, false, null);
+        expect("a government letter alone is not an ID", "Government of Karnataka Department of Health notice to all citizens about the vaccination camp on Sunday at the school", 0.71, false, false, false, null);
         expect("Aadhaar", "Government of India Ravi Kumar DOB: 01/01/1990 Male 1234 5678 9012 Aadhaar Mera Aadhaar Meri Pehchaan", 1.58, false, false, false, PhotoCategory.ID);
         expect("PAN", "INCOME TAX DEPARTMENT GOVT. OF INDIA Permanent Account Number ABCDE1234F Name RAVI KUMAR Date of Birth 01/01/1990", 1.58, false, false, false, PhotoCategory.ID);
         expect("passport", "REPUBLIC OF INDIA Passport No. Z1234567 Nationality INDIAN Date of Birth 01/01/1990 Place of Issue BENGALURU", 1.42, false, false, false, PhotoCategory.ID);

@@ -59,13 +59,11 @@ public final class PhotoQuality {
         q.sharp = sharpness(luma, w, h);
         List<float[]> kept = new ArrayList<float[]>();
         double eyes = 0, fs = 0, fl = 0;
-        double biggest = 0;                                     // people far in the background don't decide the shot
-        if (faces != null)
-            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) if (faces[i + 3] >= MIN_FACE_CONFIDENCE) biggest = Math.max(biggest, faces[i + 2]);
+        double biggest = biggest(faces);                        // people far in the background don't decide the shot
         if (faces != null)
             for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) {
                 double mx = faces[i], my = faces[i + 1], d = faces[i + 2], conf = faces[i + 3];
-                if (conf < MIN_FACE_CONFIDENCE || d < 6 || d < BACKGROUND * biggest || mx < 0 || my < 0 || mx >= w || my >= h) continue;
+                if (!judged(faces, i, w, h, biggest)) continue;
                 double p = EyeState.openProbability(luma, w, h, faces[i + 4], faces[i + 5], faces[i + 6], faces[i + 7]);
                 double[] st = faceStats(luma, w, h, mx, my, d);
                 eyes += p; fs += st[0]; fl += st[1];
@@ -77,6 +75,36 @@ public final class PhotoQuality {
         q.face = new float[q.faces * FACE_FIELDS];
         for (int i = 0; i < q.faces; i++) System.arraycopy(kept.get(i), 0, q.face, i * FACE_FIELDS, FACE_FIELDS);
         return q;
+    }
+
+    /** Eye distance of the biggest face that counts (people far behind it are not judged). */
+    static double biggest(float[] faces) {
+        double b = 0;
+        if (faces != null)
+            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) if (faces[i + 3] >= MIN_FACE_CONFIDENCE) b = Math.max(b, faces[i + 2]);
+        return b;
+    }
+
+    /** Whether face i is judged: confident, eyes at least 6 px apart, not far in the background, inside the picture. */
+    static boolean judged(float[] faces, int i, int w, int h, double biggest) {
+        double mx = faces[i], my = faces[i + 1], d = faces[i + 2];
+        return faces[i + 3] >= MIN_FACE_CONFIDENCE && d >= 6 && d >= BACKGROUND * biggest && mx >= 0 && my >= 0 && mx < w && my < h;
+    }
+
+    /**
+     * Eyes only, for sorting every photo with a face: {faces judged, faces with eyes open}, with the same rules as
+     * analyse(). faces: the detector's output in the pixel space of luma (w x h).
+     */
+    public static int[] eyes(int[] luma, int w, int h, float[] faces) {
+        int n = 0, open = 0;
+        double big = biggest(faces);
+        if (faces != null)
+            for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) {
+                if (!judged(faces, i, w, h, big)) continue;
+                n++;
+                if (EyeState.openProbability(luma, w, h, faces[i + 4], faces[i + 5], faces[i + 6], faces[i + 7]) >= OPEN) open++;
+            }
+        return new int[]{n, open};
     }
 
     /** Face box from the eye position: 2 eye-distances wide, from 0.9 above to 1.4 below the eyes. */

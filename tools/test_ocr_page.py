@@ -4,7 +4,7 @@ else refused with 404. A stand-in for the Android bridge (window.Native) records
 Writes the words JSON the app would receive for each picture to <out>/<n>.json.
 usage: test_ocr_page.py <out dir> <picture>..."""
 import asyncio, os, sys, io, json, re
-from PIL import Image
+from PIL import Image, ImageOps
 from playwright.async_api import async_playwright
 HERE = os.path.dirname(os.path.abspath(__file__)); ASSETS = os.path.join(HERE, '..', 'app', 'src', 'main', 'assets', 'ocr')
 ORIGIN = 'https://appassets.androidplatform.net'
@@ -36,7 +36,7 @@ async def main(out, pics):
         await pg.evaluate('start(2)')
         print('reader ready, workers:', await asyncio.wait_for(ready, 120))
         for i, pic in enumerate(pics, 1):
-            im = Image.open(pic).convert('RGB'); im.thumbnail((1600, 1600))
+            im = ImageOps.exif_transpose(Image.open(pic)).convert('RGB'); im.thumbnail((1600, 1600))   # upright, as the phone decodes it
             buf = io.BytesIO(); im.save(buf, 'JPEG', quality=92); images[str(i)] = buf.getvalue()
             waits[i] = loop.create_future()
             await pg.evaluate(f'read({i})')

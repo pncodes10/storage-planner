@@ -29,6 +29,8 @@ public final class FileItem {
     public String text;           // words read in the picture (lower case); never kept for ID documents
     public boolean textPending;   // worth reading, but not read yet (time limit or no reader)
     public int faces = -1;        // faces found (-1 = not checked)
+    public int eyeFaces = -1;     // faces whose eyes were looked at (big enough, not far in the background); -1 = not looked at
+    public int eyesOpen = -1;     // of those, faces with eyes open; -1 = not looked at
     /** Picture measurements (brightness, text, paper, screens, ...) kept from sorting; null = not measured. */
     public ImageSignals.S signals;
     public int sortVersion;       // Sorter.VERSION in force when this picture was sorted; 0 = sorted by an older app (measure and sort again once)

@@ -146,6 +146,17 @@ public final class TagsTest {
         check("all open = not closed", Boolean.FALSE.equals(Tags.of(e, none, NOW).eyesClosed));
         e.quality.faces = 0; e.quality.openFaces = 0;
         check("no faces = not closed", Boolean.FALSE.equals(Tags.of(e, none, NOW).eyesClosed));
+        check("no faces: eyes-open count unknown", Tags.of(e, none, NOW).eyesOpen == Tags.UNKNOWN);
+        FileItem s2 = new FileItem("DCIM/Camera/s2.jpg", "/x/s2.jpg", 1000, NOW);
+        s2.area = "camera"; s2.type = "jpeg"; s2.faces = 3;
+        check("eyes not looked at: unknown", Tags.of(s2, none, NOW).eyesClosed == null && Tags.of(s2, none, NOW).eyesOpen == Tags.UNKNOWN);
+        s2.eyeFaces = 3; s2.eyesOpen = 3;
+        check("sorter: all three open", Tags.of(s2, none, NOW).eyesOpen == 3 && Boolean.FALSE.equals(Tags.of(s2, none, NOW).eyesClosed));
+        s2.eyesOpen = 2;
+        check("sorter: one closed", Tags.of(s2, none, NOW).eyesOpen == 2 && Boolean.TRUE.equals(Tags.of(s2, none, NOW).eyesClosed));
+        check("eyes-open tag shown", Tags.of(s2, none, NOW).get(Tags.EYES_OPEN).value.equals("2"));
+        s2.faces = 0; s2.eyeFaces = -1; s2.eyesOpen = -1;
+        check("sorter: no faces = not closed", Boolean.FALSE.equals(Tags.of(s2, none, NOW).eyesClosed));
 
         // ---- blur: percentile among your own camera photos
         Scanner.Result r20 = new Scanner.Result();
@@ -230,7 +241,7 @@ public final class TagsTest {
         boolean ids = true;
         java.util.Set<String> seen = new java.util.HashSet<String>();
         for (Tags.Entry en : all1.all()) ids &= seen.add(en.id) && en.id.matches("[a-z_]+") && en.label.length() > 0;
-        check("41 unique lower_snake ids", ids && seen.size() == 41 && all1.get(Tags.BLUR) != null);
+        check("42 unique lower_snake ids", ids && seen.size() == 42 && all1.get(Tags.BLUR) != null);
         boolean typed = true;                                   // every listed id has a type, and the typed accessors agree with it
         for (Tags.Entry en : all1.all()) {
             Tags.Type ty = Tags.typeOf(en.id);

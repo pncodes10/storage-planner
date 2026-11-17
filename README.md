@@ -193,7 +193,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 | Chat screenshots | Screenshot with chat layout and many timestamps | No |
 | Greetings & forwards | A greeting ("Good morning", "Happy Diwali" …) read on an image received in a chat | Yes, if older than a week |
 | Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp | Yes |
-| ID documents (sensitive) | Text: Government of India, Aadhaar, PAN, passport, licence; Aadhaar and PAN number patterns | **Never.** Other suggestions are removed too; only an identical extra copy may go |
+| ID documents (sensitive) | Text: Government of India (also "Government of" with the country cut off), Aadhaar, PAN, passport, licence, VID; Aadhaar and PAN number patterns; the gender written after its Indian-language word ("पुरुष / MALE"). A card held up in a photo is read when it has a face on it (see below) | **Never.** Other suggestions are removed too; only an identical extra copy may go |
 | Other screenshots, Graphics | Everything else from screenshots, downloads and chat apps | No |
 
 **Browsing.**
@@ -208,7 +208,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 **Tags on every file.** A file's details page now also has a **Tags** section: a plain list of facts about the
 file, such as where it came from (camera photo, screenshot, chat image received or sent, download, ...), its kind,
 size, age (days since it was last *modified*; Android does not say when you last opened it), picture size, category,
-whether text was read, faces, whether it has a QR code or barcode, and, for pictures, brightness, how dark, how
+whether text was read, faces, faces with eyes open, whether it has a QR code or barcode, and, for pictures, brightness, how dark, how
 colourful, how much of it is flat graphics, how much is paper (judged against the picture's own light), how much is
 ink (pen or print on that paper), whether it looks like a page of paper, and how much text. Yes/no facts (exact duplicate, extra shot of a
 burst, best shot of a burst, sent copy of a camera photo, installer of an app that is already installed, ID document,
@@ -269,6 +269,21 @@ which is never suggested for deletion; it adds no delete suggestion. Known misse
 the frame, coloured paper, and a page under strongly coloured light. Where the numbers come from is in the Lab:
 **Picture category** prints the white level, paper share, smoothness, ink share and bands, and which check failed.
 
+**Cards held up in a photo (ID cards).** An ID card fills only part of the frame, so it fails the page check, and its
+text was never read. A camera photo is now sent to the text reader when it has some plain bright paper (20%+ of the
+picture), a few marks in lines (8+ marks in 2+ lines), and either a face (the photo on the card) or at least 3 lines
+of print (a letter on a table). When it was sent only because of the face, the text may only make it an **ID
+document**: any other verdict is ignored, so a person standing in front of a poster stays in People. Measured on one
+real Aadhaar card held in a hand: the reader found "Government of", "VID:", the gender and the 12-digit number, and the
+card became an ID document; before, it was never read and stayed in People. Not measured on a set of everyday photos
+(the corpus was not available), so how many more photos get read is not known; the reading time limit still applies.
+
+**Eyes open on every photo with a face.** The eye check that compares near-identical shots now also runs on every
+sorted photo with a face, on the 1024 px picture, with the same rules for which faces count. It gives the tags
+"Faces with eyes open" (`eyes_open`, a number) and "Someone has eyes closed" (`eyes_closed`), which rules can test.
+Results format 6 saves it. Pictures sorted by an older version are measured once more at the next scan (sorting
+version 2), so the tags and the ID-card check reach them too.
+
 The start screen has a switch to turn sorting off.
 
 **The text reader is offline.** It is Tesseract compiled to WebAssembly (tesseract.js 7.0.0, Apache-2.0)
@@ -298,7 +313,7 @@ The app grew from about 0.1 MB to about 5 MB because of these files.
 - **Overall:** 346 of 399 (87%). These numbers are from before the page check was added. The 399-picture corpus was not available when it was added, so it was not re-run and there are no accuracy figures for it; the page check is covered by `PageTest` (synthetic pages, walls, sky, scenes, a dark room, a lone dark object, rough surfaces, and re-sorting) and by one real handwritten photo, checked by hand. The same goes for the figure on extra reading below.
 - **No wrong deletion suggestions on the test phone.** No everyday photo was put in a deletable category, and no greeting, OTP, payment or ticket was wrongly assigned.
 - **Little extra reading.** Only 8 of 78 everyday photos were sent to the text reader.
-- **Text rules on their own** (`TextRulesTest`, 21 cases): each kind, ID documents (Aadhaar, PAN, passport) recognised before anything else, an article that mentions Aadhaar *not* treated as an ID, and date reading.
+- **Text rules on their own** (`TextRulesTest`, 25 cases): each kind, ID documents (Aadhaar, PAN, passport, and an Aadhaar card read at an angle) recognised before anything else, an article that mentions Aadhaar, a blank form's "male/female" and a state government notice *not* treated as an ID, and date reading.
 - **The app's own reader page** (`tools/test_ocr_page.py`, run in Chromium with the app's offline rules): read a real receipt and an OTP screenshot correctly, and made no outside requests.
 
 ## Face detector replaced (new in 1.8)
@@ -351,13 +366,14 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 
 | Button | What it shows |
 |---|---|
-| Run everything | All of the below, plus the group checks when two or more pictures are picked |
+| Run everything | All of the below (Rules instead of Picture category, which it includes), plus the group checks when two or more pictures are picked |
 | Face detection | Exactly what the best-shot check sees (YuNet on the 1280 px picture): every face with both eye positions, eye distance and score, and whether it was counted. Faces are outlined on the picture. Since 1.8 it also lists what Android's old built-in detector finds |
 | Faces: other sizes and tilts | The same detector at 640, 1280 and 2048 px, and with the picture turned ±10° and ±20°. Shows whether face size or a tilted head made it miss a face |
 | Eyes open or closed | For each face: the eyes-open probability, each eye at the 7 positions tried, how much it counts in the score, and the eye patches the model looked at |
 | Sharpness / blur | The focus number used to compare shots, the blur score used for "possibly blurry", and each face's focus |
 | Lighting | Brightness, blown-out and black share, and each penalty that makes up the lighting score |
-| Picture category | Every measurement used for sorting (including the page-of-paper check: white level, paper share, smoothness, ink share and bands, and which check failed), any code, faces, the text read and its evidence, and the final category |
+| Picture category | Every measurement used for sorting (including the page-of-paper check: white level, paper share, smoothness, ink share and bands, and which check failed), whether it looks like a card held up, any code, faces and eyes open, the text read and its evidence, the final category and the tags |
+| Rules: which ones match | Picture category, then every rule (built-in and yours) on this picture: which match and what they would do, the first condition that fails for each built-in rule with this picture's value, every failing condition of your own rules, and the options the plan would get. Tags that need your whole phone (duplicates, bursts, blur, sent copies) are unknown here, so rules testing them do not match |
 | QR code / barcode | Quick and thorough search at two sizes, with the decoded content |
 | Read text | Every word the reader found, with its confidence, and what the text rules decided |
 | Compress (test copy) | Compresses the picture with the compression tools ([tools README](app/src/main/java/com/storageplanner/tools/README.md)), with the same checks a real run would use, once per way of saving (each HEIC encoder, and WebP), and shows which copy a real run would keep (★). **Treat as** picks the kind: Screenshot becomes lossless WebP, anything else HEIC or WebP. Logs every quality tried with its worst SSIM, PSNR and colour shift, the size before and after, the time taken, and whether a real run would keep the copy. The copies go to their own folder under `Download/StoragePlanner/compressed/`. Every copy is kept, even ones a real run would throw away, so you can see why. Originals are never touched |
@@ -368,6 +384,7 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 |---|---|
 | Best shot among them | Each picture's score split into its parts (eyes open, people missing or blinking, face sharpness, overall sharpness, lighting), the winner, and the reasons |
 | Near-duplicate check | Each pair's hash difference, time apart and size, and whether the scan would group them |
+| Rules on each picture | Rules: which ones match, for every picked picture |
 | Exact duplicate check | SHA-256 of each file |
 | Compress all (test copies) | Compress (test copy) for every picked picture |
 

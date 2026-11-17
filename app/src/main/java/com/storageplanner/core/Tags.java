@@ -25,7 +25,7 @@ public final class Tags {
     // ---- ids (stable; rules refer to them)
     public static final String SOURCE = "source", AREA = "area", KIND = "kind", SIZE_BYTES = "size_bytes", AGE_DAYS = "age_days",
             WIDTH = "width", HEIGHT = "height", MEGAPIXELS = "megapixels", CATEGORY = "category", TEXT_READ = "text_read",
-            FACES = "faces", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share",
+            FACES = "faces", EYES_OPEN = "eyes_open", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share",
             COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", INK_SHARE = "ink_share", LOOKS_LIKE_PAGE = "looks_like_page", TEXT_AMOUNT = "text_amount",
             DUPLICATE = "duplicate", BURST_EXTRA = "burst_extra", BURST_KEEPER = "burst_keeper", SENT_COPY = "sent_copy",
             BLURRY = "blurry_vs_your_photos", INSTALLER_INSTALLED = "installer_already_installed", INSTALLER_NOT_INSTALLED = "installer_not_installed",
@@ -112,6 +112,7 @@ public final class Tags {
         public String category;                         // PhotoCategory id; null = not sorted
         public String textRead;                         // TEXT_*; null = not sorted
         public int faces = UNKNOWN;                     // UNKNOWN = not checked; never the same as 0
+        public int eyesOpen = UNKNOWN;                  // faces whose eyes are open; UNKNOWN when the eyes were not looked at
         public Boolean hasCode;                         // null = not sorted
         public int blur = UNKNOWN;                      // 0..100, higher = blurrier than your other camera photos
         public int brightness = UNKNOWN;                // 0..100
@@ -125,7 +126,7 @@ public final class Tags {
         public boolean duplicate, burstExtra, burstKeeper, sentCopy, blurry, installerAlreadyInstalled, installerNotInstalled,
                 idDocument, screenshot, chatMedia, cameraPhoto;
         public String duplicateOf, burstKeptShot, sentCopyOf;      // the other file, by path
-        public Boolean eyesClosed;                      // null unless the photo was compared in a burst (quality measured)
+        public Boolean eyesClosed;                      // null when the eyes were not looked at (no faces, or not sorted by this version yet)
         public String installerFor;                     // package of an installer file
         public double sizeMb = UNKNOWN;                 // size in decimal MB, like Android Settings
         public String fileType;                         // as read from the first bytes: jpeg, png, mp4, ...; null = not known
@@ -150,6 +151,7 @@ public final class Tags {
             l.add(text(CATEGORY, "Picture category", category == null ? null : PhotoCategory.label(category)));      // the id stays in T.category
             l.add(text(TEXT_READ, "Text", textRead));
             l.add(num(FACES, "Faces", faces, String.valueOf(faces)));
+            l.add(num(EYES_OPEN, "Faces with eyes open", eyesOpen, String.valueOf(eyesOpen)));
             l.add(flag(HAS_CODE, "Has QR code or barcode", hasCode, null));
             l.add(num(BLUR, "Blur (vs your photos)", blur, blur + " of 100"));
             l.add(num(BRIGHTNESS, "Brightness", brightness, brightness + " of 100"));
@@ -192,6 +194,7 @@ public final class Tags {
                 case HEIGHT: return height;
                 case MEGAPIXELS: return megapixels;
                 case FACES: return faces;
+                case EYES_OPEN: return eyesOpen;
                 case BLUR: return blur;
                 case BRIGHTNESS: return brightness;
                 case DARK_SHARE: return darkShare;
@@ -278,7 +281,7 @@ public final class Tags {
 
     private static final Map<String, Type> TYPES = new HashMap<String, Type>();
     static {
-        for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, BLUR, BRIGHTNESS, DARK_SHARE, COLOURFULNESS,
+        for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, COLOURFULNESS,
                 GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE}) TYPES.put(id, Type.NUMBER);
         for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
@@ -300,7 +303,7 @@ public final class Tags {
     private static final String[][] WORDS = {
         {SOURCE, "", "source"}, {AREA, "", "storage area"}, {KIND, "", "kind"}, {SIZE_BYTES, "bytes", "size"}, {AGE_DAYS, "days", "age"},
         {WIDTH, "px", "width"}, {HEIGHT, "px", "height"}, {MEGAPIXELS, "MP", "size in megapixels"}, {CATEGORY, "", "picture category"},
-        {TEXT_READ, "", "text status"}, {FACES, "", "number of faces"}, {HAS_CODE, "", "has a QR code or barcode"}, {BLUR, "of 100", "blur"},
+        {TEXT_READ, "", "text status"}, {FACES, "", "number of faces"}, {EYES_OPEN, "", "number of faces with eyes open"}, {HAS_CODE, "", "has a QR code or barcode"}, {BLUR, "of 100", "blur"},
         {BRIGHTNESS, "of 100", "brightness"}, {DARK_SHARE, "%", "dark share"}, {COLOURFULNESS, "", "colourfulness"},
         {GRAPHIC_SHARE, "%", "flat graphic share"}, {PAPER_SHARE, "%", "paper-like share"}, {INK_SHARE, "%", "ink share"}, {LOOKS_LIKE_PAGE, "", "is a photo of a page of paper"}, {TEXT_AMOUNT, "", "amount of text"},
         {DUPLICATE, "", "is an exact duplicate"}, {BURST_EXTRA, "", "is an extra shot of a burst"}, {BURST_KEEPER, "", "is the best shot of a burst"},
@@ -449,7 +452,15 @@ public final class Tags {
             t.installerNotInstalled = !installed;
         }
         t.idDocument = PhotoCategory.ID.equals(f.category);
-        if (f.quality != null) t.eyesClosed = f.quality.faces > 0 && f.quality.openFaces < f.quality.faces;
+        // eyes: measured more carefully for near-identical shots (quality), else by the sorter on every photo with a face
+        // (no faces: nobody has eyes closed, and "faces with eyes open" stays unknown rather than 0)
+        if (f.quality != null) {
+            if (f.quality.faces > 0) t.eyesOpen = f.quality.openFaces;
+            t.eyesClosed = f.quality.faces > 0 && f.quality.openFaces < f.quality.faces;
+        } else if (f.eyeFaces > 0 && f.eyesOpen >= 0) {
+            t.eyesOpen = f.eyesOpen;
+            t.eyesClosed = f.eyesOpen < f.eyeFaces;
+        } else if (f.faces == 0) t.eyesClosed = false;
         t.sizeMb = f.size / 1e6;
         t.fileType = f.type;
         if (f.width > 0 && f.height > 0) t.bitsPerPixel = Estimates.bpp(f);

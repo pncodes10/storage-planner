@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 5;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture
+    public static final int VERSION = 6;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -114,6 +114,7 @@ public final class ResultStore {
             }
             if (version >= 4) writeSignals(out, f.signals, version);
             if (version >= 5) out.writeInt(f.sortVersion);
+            if (version >= 6) { out.writeInt(f.eyeFaces); out.writeInt(f.eyesOpen); }
         }
 
         out.writeInt(r.apps.size());
@@ -204,6 +205,10 @@ public final class ResultStore {
             }
             if (v >= 4) f.signals = readSignals(in, v);
             if (v >= 5) { f.sortVersion = in.readInt(); if (f.sortVersion < 0) throw new IOException("results file damaged (sort version)"); }
+            if (v >= 6) {
+                f.eyeFaces = in.readInt(); f.eyesOpen = in.readInt();
+                if (f.eyeFaces < -1 || f.eyesOpen < -1 || f.eyesOpen > Math.max(0, f.eyeFaces)) throw new IOException("results file damaged (eyes)");
+            }
             r.files.add(f);
         }
 

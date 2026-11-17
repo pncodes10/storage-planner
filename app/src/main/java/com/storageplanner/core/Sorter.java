@@ -21,9 +21,10 @@ final class Sorter {
     /**
      * Version of the sorting rules. Pictures sorted under an older version are measured and sorted once more at the
      * next scan (the file is unchanged, but the rules or the measurements are new). Raise it whenever a change
-     * should reach pictures that are already sorted. 1: page-of-paper check.
+     * should reach pictures that are already sorted. 1: page-of-paper check. 2: eyes open on every photo with a face,
+     * cards and papers held up are read (ID cards).
      */
-    static final int VERSION = 1;
+    static final int VERSION = 2;
 
     /** True when this earlier result for an unchanged picture can be kept as it is. */
     static boolean current(FileItem p) { return p != null && p.category != null && !p.textPending && p.sortVersion >= VERSION; }
@@ -51,7 +52,10 @@ final class Sorter {
         if (code == null && (s.flat >= 0.1 || s.paper >= 0.2)) code = Codes.read(l, w, h, true);
         f.code = code == null ? null : Codes.describe(code[0], code[1]);
         f.faces = -1;
-        if ((!PhotoCategory.worthReading(f, s) || s.page()) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s)) f.faces = faces(pf, f.abs, px, w, h);   // a page is looked at for faces too: someone holding it up is a person
+        f.eyeFaces = -1; f.eyesOpen = -1;
+        // a page or a card is looked at for faces too: someone holding it up is a person, and an ID card has a face on it
+        if ((!PhotoCategory.worthReading(f, s) || s.page() || PhotoCategory.cardCandidate(s)) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s))
+            faces(pf, f, px, w, h, l);
         Prep p = new Prep();
         p.s = s; p.aspect = dims[0] / (double) Math.max(1, dims[1]);
         return p;
@@ -89,12 +93,13 @@ final class Sorter {
             // and the text already read is not read again
             boolean again = p != null && p.category != null && !p.textPending;
             if (again && !PhotoCategory.PHOTO.equals(p.category) && !PhotoCategory.PEOPLE.equals(p.category) && !PhotoCategory.ACCIDENTAL.equals(p.category)) {
+                int ef = f.eyeFaces, eo = f.eyesOpen;                  // just measured: newer than what the older sort kept
                 copyOver(p, f);
-                f.signals = s; f.sortVersion = VERSION;
+                f.signals = s; f.sortVersion = VERSION; f.eyeFaces = ef; f.eyesOpen = eo;
                 continue;
             }
             boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
-            if (again && !(s.page() && p.text == null)) read = false;
+            if (again && !((s.page() || PhotoCategory.cardLike(f, s)) && p.text == null)) read = false;   // read only what the newer checks newly send
             PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, null, f.faces);
             f.category = c.category; f.catDate = again && !read ? p.catDate : 0; f.text = again && !read ? p.text : null;
             f.textPending = read; f.sortVersion = VERSION;
@@ -151,19 +156,38 @@ final class Sorter {
 
     private static void copyOver(FileItem p, FileItem f) {
         f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces; f.signals = p.signals;
-        f.sortVersion = p.sortVersion; f.textPending = p.textPending;
+        f.sortVersion = p.sortVersion; f.textPending = p.textPending; f.eyeFaces = p.eyeFaces; f.eyesOpen = p.eyesOpen;
     }
 
     /** Faces, looked for on a small copy (People vs. other photos only needs to know there is a face). */
     static int faces(Platform pf, String path, int[] px, int w, int h) {
+        FileItem f = new FileItem("", path, 0, 0);
+        faces(pf, f, px, w, h, null);
+        return f.faces;
+    }
+
+    /**
+     * Sets f.faces from a small copy, and, when there are faces and luma (w x h) is given, f.eyeFaces and f.eyesOpen,
+     * judged on the full-size pixels (the eye check needs more detail than finding the face does).
+     */
+    static void faces(Platform pf, FileItem item, int[] px, int w, int h, int[] luma) {
         double s = Math.min(1.0, FACE_EDGE / (double) Math.max(w, h));
         int sw = Math.max(1, (int) (w * s)), sh = Math.max(1, (int) (h * s));
         int[] small = s >= 1.0 ? px : shrink(px, w, h, sw, sh);
+        float[] f;
+        try { f = pf.faces(item.abs, small, sw, sh); } catch (Throwable t) { f = null; }
+        item.faces = f == null ? -1 : Faces.count(f);
+        if (item.faces <= 0 || luma == null) return;
         try {
-            float[] f = pf.faces(path, small, sw, sh);
-            if (f == null) return -1;
-            return Faces.count(f);
-        } catch (Throwable t) { return -1; }
+            double kx = w / (double) sw, ky = h / (double) sh;
+            float[] big = f.clone();
+            for (int i = 0; i + Faces.F - 1 < big.length; i += Faces.F) {
+                big[i] *= kx; big[i + 1] *= ky; big[i + 2] *= kx;
+                big[i + 4] *= kx; big[i + 5] *= ky; big[i + 6] *= kx; big[i + 7] *= ky;
+            }
+            int[] e = PhotoQuality.eyes(luma, w, h, big);
+            item.eyeFaces = e[0]; item.eyesOpen = e[1];
+        } catch (Throwable t) { item.eyeFaces = -1; item.eyesOpen = -1; }
     }
 
     /** Box-filter down-scaling of ARGB pixels. */

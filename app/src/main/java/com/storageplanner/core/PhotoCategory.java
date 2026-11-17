@@ -78,6 +78,7 @@ public final class PhotoCategory {
         Result r = new Result();
         r.code = code;
         boolean shot = isScreenshot(f);
+        if (text != null && sig != null && !ID.equals(text.kind) && onlyForId(f, sig)) text = null;   // a person holding a poster stays a person
         if (text != null && text.kind != null) {
             r.category = text.kind; r.date = text.date;
             r.why = text.why.isEmpty() ? "" : "Text: " + text.why;
@@ -109,6 +110,29 @@ public final class PhotoCategory {
         return s.sharp >= 0 && s.sharp < 0.12 && s.meanLuma > 25;          // shaken: no sharp detail anywhere
     }
 
+    /**
+     * Could be a card or a sheet of paper that fills only part of the photo, with some print on it: plain bright paper
+     * and a few marks in lines. Too little for the page check; the sorter looks for faces on these (an ID card has one).
+     */
+    public static boolean cardCandidate(ImageSignals.S s) {
+        return s.paper >= CARD_PAPER && s.textLines >= 2 && s.textBlobs >= 8;
+    }
+
+    /**
+     * A card or paper held up or lying in a photo, worth reading the text of: an ID card (a face on it), or a letter
+     * or slip with at least three lines of print. f.faces must be set (-1 = not checked counts as no face).
+     */
+    public static boolean cardLike(FileItem f, ImageSignals.S s) {
+        return cardCandidate(s) && (f.faces > 0 || s.textLines >= CARD_LINES && s.textBlobs >= CARD_MARKS);
+    }
+
+    /** Read only because of a face on a card: the text may then only say "ID document"; anything else keeps it a photo of a person. */
+    static boolean onlyForId(FileItem f, ImageSignals.S s) {
+        return f.faces > 0 && cardLike(f, s) && !worthReadingBesidesCard(f, s) && !(s.textLines >= CARD_LINES && s.textBlobs >= CARD_MARKS);
+    }
+    static final double CARD_PAPER = 0.2;
+    static final int CARD_LINES = 3, CARD_MARKS = 12;
+
     public static boolean isScreenshot(FileItem f) {
         String n = f.rel.toLowerCase(Locale.ROOT);
         return "screenshot".equals(f.area) || n.contains("screenshot");
@@ -118,6 +142,11 @@ public final class PhotoCategory {
 
     /** Pictures worth reading the text of: screenshots, downloads, chat images, and photos that show text or paper. */
     public static boolean worthReading(FileItem f, ImageSignals.S s) {
+        if (worthReadingBesidesCard(f, s)) return true;
+        return s != null && !accidental(s) && cardLike(f, s);  // a card or paper held up in a photo (ID cards, letters)
+    }
+
+    static boolean worthReadingBesidesCard(FileItem f, ImageSignals.S s) {
         if (s == null || accidental(s)) return false;
         if (isScreenshot(f) || "download".equals(f.area) || f.area.startsWith("wa_") || "pictures".equals(f.area) || "document".equals(f.area)) return true;
         if (s.flat >= 0.15) return true;                        // paper, screens, printed pages photographed straight

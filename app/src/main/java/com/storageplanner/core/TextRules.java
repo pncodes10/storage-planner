@@ -95,12 +95,16 @@ public final class TextRules {
 
     static final String[] ID = {"government of india", "govt of india", "aadhaar", "aadhar", "unique identification", "income tax department",
             "permanent account number", "republic of india", "passport", "driving licence", "driving license", "election commission",
-            "elector", "voter", "date of birth", "dob", "enrolment no", "vid :", "mera aadhaar", "nationality", "father's name", "uidai"};
+            "elector", "voter", "date of birth", "dob", "enrolment no", "vid :", "vid:", "mera aadhaar", "nationality", "father's name", "uidai"};
 
     static final Pattern AMOUNT = Pattern.compile("(₹|rs\\.?|inr|rm|\\$|€|£)\\s?\\d[\\d,]*(\\.\\d{1,2})?|\\b\\d{1,3}(,\\d{2,3})+(\\.\\d{2})?\\b|\\b\\d+\\.\\d{2}\\b");
     static final Pattern CODE = Pattern.compile("\\b\\d{4,8}\\b");
     static final Pattern TIME = Pattern.compile("\\b\\d{1,2}[:.]\\d{2}\\s?(am|pm)\\b");
     static final Pattern AADHAAR = Pattern.compile("\\b\\d{4}\\s\\d{4}\\s\\d{4}\\b");
+    /** Gender written after the word in an Indian language, as on Aadhaar ("पुरुष / MALE"); not the "male/female" of a blank form. */
+    static final Pattern GENDER = Pattern.compile("(?<!male)/\\s?(male|female)\\b");
+    /** "Government of" with the country cut off or misread (a card photographed at an angle). */
+    static final Pattern GOVT = Pattern.compile("\\b(government|govt\\.?) of\\b");
     static final Pattern PAN = Pattern.compile("\\b[a-z]{5}\\d{4}[a-z]\\b");
 
     static int hits(String t, String[] keys, StringBuilder why) {
@@ -145,7 +149,10 @@ public final class TextRules {
         boolean code = CODE.matcher(t).find();
 
         // sensitive first: an ID document is never treated as anything else
-        int idScore = 3 * id + (AADHAAR.matcher(t).find() ? 3 : 0) + (PAN.matcher(t).find() ? 3 : 0);
+        if (!t.contains("government of india") && !t.contains("govt of india") && GOVT.matcher(t).find()) { id++; wId.append(wId.length() == 0 ? "" : ", ").append("\"government of\""); }
+        boolean gender = GENDER.matcher(t).find();
+        if (gender) wId.append(wId.length() == 0 ? "" : ", ").append("gender");
+        int idScore = 3 * id + (AADHAAR.matcher(t).find() ? 3 : 0) + (PAN.matcher(t).find() ? 3 : 0) + (gender ? 3 : 0);
         if (idScore >= 6 && pay < 2 && tk < 3) return pick(v, PhotoCategory.ID, idScore, wId, t, now);
 
         int[] s = new int[8];

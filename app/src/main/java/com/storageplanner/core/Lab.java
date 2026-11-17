@@ -28,6 +28,7 @@ public final class Lab {
         public float[] faces;                                  // x, y, eye distance (fractions), eyes-open p, confidence
         public final List<int[]> patches = new ArrayList<int[]>();   // ARGB, EyeState.PW x EyeState.PH each
         public final List<String> patchLabels = new ArrayList<String>();
+        public FileItem file;                                  // "Picture category": the picture as the sorter left it
     }
 
     // ------------------------------------------------------------------ files the Lab makes of picked pictures
@@ -456,7 +457,10 @@ public final class Lab {
                 s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.textHeight, 100 * s.bigText));
         o.line(pageLine(s));
         o.line("  looks like a page of paper? " + (s.page() ? "yes (handwritten or printed page, no text reading needed)" : "no: " + s.pageFail()));
-        o.line("  code: " + (f.code == null ? "none" : f.code) + "; faces counted: " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces)));
+        o.line("  code: " + (f.code == null ? "none" : f.code) + "; faces counted: " + (f.faces < 0 ? "not checked" : String.valueOf(f.faces))
+                + (f.eyeFaces > 0 ? "; eyes open on " + f.eyesOpen + " of " + f.eyeFaces + " faces checked" : f.faces > 0 ? "; eyes not checked (faces too small or far in the background)" : ""));
+        o.line("  card or paper held up? " + (PhotoCategory.cardLike(f, s) ? "yes" + (f.faces > 0 ? " (with a face: only an ID document verdict from the text counts)" : " (three or more lines of print)")
+                : "no" + (PhotoCategory.cardCandidate(s) ? " (paper and print, but no face and fewer than 3 lines)" : f(" (needs paper-like 20%%+, 2+ lines, 8+ marks)"))));
         boolean read = PhotoCategory.worthReading(f, s);
         o.line("  accidental shot? " + PhotoCategory.accidental(s) + "; worth reading the text? " + read);
         TextRules.Verdict v = null;
@@ -466,6 +470,59 @@ public final class Lab {
         o.line("  => " + PhotoCategory.label(r.category) + (r.why.isEmpty() ? "" : "  (" + r.why + ")") + (r.date > 0 ? "; date " + Report.day(r.date) : ""));
         f.category = r.category; f.catDate = r.date; f.textPending = read && v == null;
         tagLines(f, now, o);
+        sh.file = f;
+        return sh;
+    }
+
+    // ------------------------------------------------------------------ rules
+    /**
+     * Sorts the picture as "Picture category" does, then runs the rules on it, with the same engine and rails as the plan:
+     * which rules match, why each other one does not (the first condition that fails, with this picture's value), and the
+     * options the plan would get from it. Tags that need the whole phone (duplicates, bursts, blur against your other
+     * photos, sent copies) stay unknown here, and a rule that tests them does not match.
+     */
+    public static Shown rules(Platform pf, Pic p, RuleSet rules, long now, Out o) {
+        Shown sh = category(pf, p, now, o);
+        FileItem f = sh.file;
+        if (f == null) return sh;
+        o.line("RULES — " + p.name + " (" + rules.rules.size() + " rules; duplicates, bursts, blur and sent copies need your whole phone, so rules testing them do not match here)");
+        Scanner.Result one = new Scanner.Result();
+        one.files.add(f);
+        Tags.Context ctx = Tags.context(one, new UnitBuilder.Detections());
+        Tags.T t = Tags.of(f, ctx, now);
+        Estimates est = new Estimates();
+        int off = 0, hits = 0;
+        StringBuilder notBuilt = new StringBuilder();
+        for (Rule r : rules.rules) {
+            String who = (r.builtIn ? "built-in" : "your rule") + " \"" + r.name + "\"";
+            if (!r.enabled) { if (!r.builtIn) o.line("  - " + who + ": switched off"); else off++; continue; }
+            if (r.problem() != null) { o.line("  - " + who + ": not used, " + r.problem()); continue; }
+            if (r.matches(t)) {
+                hits++;
+                String rail = r.action == Rule.Action.DELETE && t.idDocument ? "  (but an ID document is never deleted: only an identical extra copy may go)" : "";
+                o.line("  ✔ " + who + " MATCHES -> " + r.action.text + (r.onlyIfNoOtherOption ? " (only if no other rule gave an option)" : "") + rail);
+                continue;
+            }
+            List<String> why = new ArrayList<String>();
+            for (Rule.Condition c : r.when) {
+                if (c.matches(t)) continue;
+                Tags.Entry e = t.get(c.tag);
+                why.add(RuleText.condition(c) + " — here: " + (e == null ? "no such tag" : e.known ? e.value : "not known"));
+                if (r.builtIn) break;                          // built-in rules: the first failing condition is enough
+            }
+            if (r.builtIn) notBuilt.append("\n    ").append(r.name).append(": ").append(why.isEmpty() ? "no conditions" : why.get(0));
+            else {
+                o.line("  ✘ " + who + " does not match:");
+                for (String w : why) o.line("      " + w);
+            }
+        }
+        if (notBuilt.length() > 0) o.line("  built-in rules that do not match (first failing condition):" + notBuilt);
+        if (off > 0) o.line("  " + off + " built-in rule" + (off == 1 ? " is" : "s are") + " switched off");
+        Unit u = Unit.forFile(f);
+        rules.compile().apply(u, f, t, ctx, est, now);
+        o.line("  => " + hits + " rule" + (hits == 1 ? "" : "s") + " match; the plan would get " + (u.options.isEmpty() ? "no option for it (kept)" : u.options.size() + " option" + (u.options.size() == 1 ? "" : "s") + ":"));
+        for (Option op : u.options)
+            o.line(f("      %s by \"%s\", frees about %.1f MB%s", op.action, op.technique, op.saved / 1e6, op.why == null || op.why.isEmpty() ? "" : " — " + op.why));
         return sh;
     }
 

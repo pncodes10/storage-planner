@@ -176,6 +176,7 @@ public final class LabScreen extends Screen {
         addRun("Sharpness / blur", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.sharpness(pf(), pic(), o)); } });
         addRun("Lighting", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.lighting(pf(), pic(), o)); } });
         addRun("Picture category", false, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.category(pf(), pic(), System.currentTimeMillis(), o)); } });
+        addRun("Rules: which ones match", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.rules(pf(), pic(), RulesStore.get(a).copy(), System.currentTimeMillis(), o); } });
         addRun("QR code / barcode", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.codes(pf(), pic(), o); } });
         addRun("Read text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.text(pf(), pic(), System.currentTimeMillis(), o); } });
         addRun("Compress (test copy)", false, new Job() { public void run(Lab.Out o) throws Exception { compress(pic(), o); } });
@@ -187,6 +188,12 @@ public final class LabScreen extends Screen {
         buttons = groupButtons;
         addRun("Best shot among them", true, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o)); } });
         addRun("Near-duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.nearDuplicates(pf(), new ArrayList<Lab.Pic>(pics), o); } });
+        addRun("Rules on each picture", false, new Job() {
+            public void run(Lab.Out o) throws Exception {
+                com.storageplanner.core.RuleSet rs = RulesStore.get(a).copy();
+                for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) { Lab.rules(pf(), p, rs, System.currentTimeMillis(), o); o.line(""); }
+            }
+        });
         addRun("Exact duplicate check", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.exactDuplicates(new ArrayList<Lab.Pic>(pics), o); } });
         addRun("Compress all (test copies)", false, new Job() {
             public void run(Lab.Out o) throws Exception { for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) compress(p, o); }
@@ -295,7 +302,7 @@ public final class LabScreen extends Screen {
         Lab.sharpness(pf(), p, o);
         Lab.lighting(pf(), p, o);
         Lab.codes(pf(), p, o);
-        Lab.category(pf(), p, System.currentTimeMillis(), o);
+        Lab.rules(pf(), p, RulesStore.get(a).copy(), System.currentTimeMillis(), o);     // the picture category first, then the rules
         if (pics.size() >= 2) {
             Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o);
             Lab.nearDuplicates(pf(), new ArrayList<Lab.Pic>(pics), o);
