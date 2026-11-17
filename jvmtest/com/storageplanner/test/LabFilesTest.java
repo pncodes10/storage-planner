@@ -98,14 +98,11 @@ public final class LabFilesTest {
         }
         check("300 random sessions: never two pictures on one slot, never more than 20", bad == 0);
 
-        // names and stale copies
+        // slot file names
         check("slot of p10.png is 10", Lab.slotOf("/x/cache/lab/p10.png") == 10 && Lab.slotOf("p0.jpg") == 0);
         check("not slot files: pic.jpg, p.jpg, p3, notes.txt", Lab.slotOf("pic.jpg") == -1 && Lab.slotOf("p.jpg") == -1 && Lab.slotOf("p3") == -1 && Lab.slotOf("notes.txt") == -1);
         check("slot name keeps a plain extension, else jpg", Lab.slotName(2, "JPG").equals("p2.jpg") && Lab.slotName(3, "").equals("p3.jpg")
                 && Lab.slotName(4, "../x").equals("p4.jpg") && Lab.slotName(5, "heic").equals("p5.heic") && Lab.slotName(6, "toolongext").equals("p6.jpg"));
-        List<String> stale = Lab.otherCopies(new String[]{"p0.webp", "p0.jpg", "p1.jpg", "p10.png", "p0.part", "notes.txt"}, 0, "p0.jpg");
-        check("stale copies of slot 0: the old webp and the half-written copy, not p10, not the new file", stale.equals(Arrays.asList("p0.webp", "p0.part")));
-        check("no folder listing -> nothing to remove", Lab.otherCopies(null, 0, "p0.jpg").isEmpty());
     }
 
     // ------------------------------------------------------------------ decode failures say why

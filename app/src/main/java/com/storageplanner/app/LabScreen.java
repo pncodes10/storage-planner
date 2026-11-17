@@ -518,9 +518,6 @@ public final class LabScreen extends Screen {
                 final List<Lab.Pic> got = new ArrayList<Lab.Pic>();
                 final List<Uri> from = new ArrayList<Uri>();
                 File dir = labDir();
-                File old = new File(a.getCacheDir(), "lab");           // where earlier versions put the copies: Android may already have emptied it
-                File[] left = old.listFiles();
-                if (left != null) for (File x : left) x.delete();
                 String failed = null;
                 for (int i = 0; i < slots.size(); i++) {
                     Uri u = uris.get(i);
@@ -557,7 +554,6 @@ public final class LabScreen extends Screen {
             }
         } finally { c.close(); }
         File dst = new File(dir, Lab.slotName(slot, FileKind.ext(name)));
-        for (String other : Lab.otherCopies(dir.list(), slot, dst.getName())) new File(dir, other).delete();      // an older picture of this slot with another extension
         write(u, dst, size);
         long taken = exifTime(dst);
         Lab.Pic p = new Lab.Pic(dst.getAbsolutePath(), name, size >= 0 ? size : dst.length(), modified > 0 ? modified : taken > 0 ? taken : dst.lastModified());
@@ -566,19 +562,20 @@ public final class LabScreen extends Screen {
         return p;
     }
 
-    /** Copies the picker's stream into dst: to a temporary file first and checked against the size the picker reported, so a half-written copy is never used. */
+    /**
+     * Copies the picker's stream into dst (overwriting it) and checks the size the picker reported, so a half-written copy is
+     * never used. The Lab removes and renames nothing: the APK audit allows that only in the compression tools. A copy that
+     * comes out short simply stays unused; the next pick or run overwrites it.
+     */
     private void write(Uri u, File dst, long size) throws Exception {
-        File tmp = new File(dst.getParentFile(), "p" + Lab.slotOf(dst.getPath()) + ".part");
         InputStream in = a.getContentResolver().openInputStream(u);
         if (in == null) throw new Exception("cannot open");
-        FileOutputStream out = new FileOutputStream(tmp, false);
+        FileOutputStream out = new FileOutputStream(dst, false);
         try {
             byte[] buf = new byte[1 << 16]; int n;
             while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
         } finally { in.close(); out.close(); }
-        if (size >= 0 && tmp.length() != size) { long got = tmp.length(); tmp.delete(); throw new Exception("copied " + got + " of " + size + " bytes"); }
-        if (dst.exists() && !dst.delete()) { tmp.delete(); throw new Exception("cannot replace " + dst.getName()); }
-        if (!tmp.renameTo(dst)) { tmp.delete(); throw new Exception("cannot save " + dst.getName()); }
+        if (size >= 0 && dst.length() != size) throw new Exception("copied " + dst.length() + " of " + size + " bytes");
     }
 
     /**

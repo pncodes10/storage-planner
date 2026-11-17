@@ -57,14 +57,6 @@ public final class Lab {
         return "p" + slot + "." + e;
     }
 
-    /** Files in the folder that belong to this slot but are not the copy being written (an older picture with another extension, a half-written copy). */
-    public static List<String> otherCopies(String[] names, int slot, String keep) {
-        List<String> r = new ArrayList<String>();
-        if (names == null) return r;
-        for (String n : names) if (!n.equals(keep) && slotOf(n) == slot) r.add(n);
-        return r;
-    }
-
     static final class Img { int[] px, l; int w, h, ow, oh; long ms; }
 
     static Img load(Platform pf, Pic p, int edge, Out o) {
