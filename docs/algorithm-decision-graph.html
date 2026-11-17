@@ -1,0 +1,143 @@
+<title>File Action Decision Graph</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>/* Layout: one reading column; two tall top-to-bottom graphs, each followed by the rule tables it refers to. */
+:root{
+  --bg:#f5f6f9; --surface:#ffffff; --ink:#161b25; --muted:#586172; --line:#cdd3de; --edge:#6a7385; --accent:#3a4ed6;
+  --dec:#a87a00; --dec-bg:#fff5d6;
+  --ret:#18734a; --ret-bg:#e0f2e8; --del:#b3261e; --del-bg:#fbe5e3; --cmp:#1c5cba; --cmp-bg:#e1ecfb; --arc:#6747b3; --arc-bg:#eee8f9;
+  --display:"Space Grotesk",system-ui,sans-serif; --body:"Inter",system-ui,sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#11141b; --surface:#1a1f29; --ink:#e7eaf0; --muted:#9aa3b4; --line:#363d4c; --edge:#8b94a6; --accent:#8e9cff;
+  --dec:#dba926; --dec-bg:#30270e;
+  --ret:#62d39b; --ret-bg:#133224; --del:#ff8d83; --del-bg:#3a1a18; --cmp:#81b1ff; --cmp-bg:#14274a; --arc:#baa4f6; --arc-bg:#2a2146;
+  color-scheme:dark } }
+:root[data-theme="dark"]{
+  --bg:#11141b; --surface:#1a1f29; --ink:#e7eaf0; --muted:#9aa3b4; --line:#363d4c; --edge:#8b94a6; --accent:#8e9cff;
+  --dec:#dba926; --dec-bg:#30270e;
+  --ret:#62d39b; --ret-bg:#133224; --del:#ff8d83; --del-bg:#3a1a18; --cmp:#81b1ff; --cmp-bg:#14274a; --arc:#baa4f6; --arc-bg:#2a2146;
+  color-scheme:dark }
+body{background:var(--bg);color:var(--ink);font:400 16px/1.6 var(--body);padding-block:40px 72px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{max-width:980px;margin:0 auto;display:flex;flex-direction:column;gap:56px}
+header,section{display:flex;flex-direction:column;gap:16px;min-width:0}
+p,h1,h2,h3,ul,ol,figure{margin:0}
+p,.disc li{max-width:68ch}
+.eyebrow{font:500 12px/1.4 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+h1{font:700 clamp(30px,5vw,44px)/1.1 var(--display);letter-spacing:-.02em;text-wrap:balance}
+h2{font:600 24px/1.2 var(--display);letter-spacing:-.01em;text-wrap:balance}
+h3{font:600 16px/1.3 var(--display);margin-top:12px}
+.lede{font-size:18px;color:var(--muted)}
+.lede em{font-style:normal;color:var(--ink);font-weight:500}
+code{font:400 .86em var(--mono);background:color-mix(in srgb,var(--line) 45%,transparent);padding:1px 5px;border-radius:4px}
+.outcomes{list-style:none;padding:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-top:8px}
+.outcomes li{display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:8px;border:1.5px solid;font-size:14px;line-height:1.45}
+.outcomes b{font:600 15px var(--display);letter-spacing:.04em;text-transform:uppercase}
+.outcomes span{color:var(--ink)}
+.oc-ret{background:var(--ret-bg);border-color:var(--ret)} .oc-ret b{color:var(--ret)}
+.oc-del{background:var(--del-bg);border-color:var(--del)} .oc-del b{color:var(--del)}
+.oc-cmp{background:var(--cmp-bg);border-color:var(--cmp)} .oc-cmp b{color:var(--cmp)}
+.oc-arc{background:var(--arc-bg);border-color:var(--arc);border-style:dashed} .oc-arc b{color:var(--arc)}
+.scroll{overflow-x:auto;min-width:0}
+figure{display:flex;flex-direction:column;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px}
+figure svg{display:block;width:100%;min-width:760px;height:auto}
+figcaption,.aside{font-size:14px;color:var(--muted);line-height:1.5}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th{font:500 12px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 12px 8px 0;border-bottom:1px solid var(--line)}
+td{padding:9px 12px 9px 0;border-bottom:1px solid color-mix(in srgb,var(--line) 60%,transparent);vertical-align:top}
+.rules{min-width:560px} .tiers{min-width:520px}
+.rn{font-weight:600;white-space:nowrap}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.tier{display:inline-block;font:500 12px var(--mono);padding:2px 7px;border-radius:5px;border:1px solid var(--line);background:var(--surface)}
+.tier.t0,.tier.t1{color:var(--ret);border-color:var(--ret)} .tier.t2{color:var(--cmp);border-color:var(--cmp)}
+.tier.t3{color:var(--dec);border-color:var(--dec)} .tier.t4{color:var(--del);border-color:var(--del)}
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:24px}
+.notes div{display:flex;flex-direction:column;gap:6px;min-width:0;border-top:2px solid var(--ink);padding-top:10px}
+.notes h3{margin:0} .notes p{font-size:14.5px;color:var(--muted)}
+.disc{padding-left:22px;display:flex;flex-direction:column;gap:10px}
+.disc li::marker{font-family:var(--mono);color:var(--muted)}
+/* graph */
+svg .t{font:400 12px var(--body);fill:var(--ink)}
+svg .tb{font:600 13px var(--body)}
+svg .oc{font:700 13px var(--display);letter-spacing:.08em}
+svg .el{font:500 11.5px var(--mono);fill:var(--muted);paint-order:stroke;stroke:var(--surface);stroke-width:5px;stroke-linejoin:round}
+svg .dim{letter-spacing:.06em;text-transform:uppercase}
+svg .e{fill:none;stroke:var(--edge);stroke-width:1.5}
+svg .ahp,svg .jd{fill:var(--edge)}
+svg .n-box{fill:var(--bg);stroke:var(--line);stroke-width:1.5}
+svg .n-pill{fill:var(--ink);stroke:none} svg .n-pill ~ text{}
+svg .n-strong{stroke:var(--ink);stroke-width:2}
+svg .n-dec{fill:var(--dec-bg);stroke:var(--dec);stroke-width:1.5}
+svg .o-ret{fill:var(--ret-bg);stroke:var(--ret)} svg .o-del{fill:var(--del-bg);stroke:var(--del)}
+svg .o-cmp{fill:var(--cmp-bg);stroke:var(--cmp)} svg .o-arc{fill:var(--arc-bg);stroke:var(--arc);stroke-dasharray:6 4}
+svg .pt{fill:var(--bg)}
+</style>
+<main>
+<header>
+<p class="eyebrow">Storage Planner · current algorithm</p>
+<h1>How one file gets its action</h1>
+<p class="lede">Every file ends up retained, deleted or compressed. The decision runs in two steps: first the rules decide which actions are <em>possible</em> for the file, then the planner picks at most one of them, based on how much space you still need.</p>
+<ul class="outcomes">
+<li class="oc-ret"><b>Retain</b><span>The default. No option, or the plan did not need it.</span></li>
+<li class="oc-del"><b>Delete</b><span>One of 20 rules matched and the planner used it.</span></li>
+<li class="oc-cmp"><b>Compress</b><span>Re-encode to a smaller format, one fixed setting per type.</span></li>
+<li class="oc-arc"><b>Archive</b><span>Not reachable for a file today. Only idle apps are archived.</span></li>
+</ul>
+</header>
+
+<section>
+<h2>Risk tiers</h2>
+<p>Every option carries a tier. The tier is its risk, and also its price in the planner.</p>
+<div class="scroll"><table class="tiers">
+<thead><tr><th>Tier</th><th>Meaning</th><th>Cost</th><th>File actions in it</th></tr></thead>
+<tbody>
+<tr><td><span class="tier t0">R0</span></td><td>Safe: rebuildable or junk</td><td class="num">0</td><td>Delete junk and caches</td></tr>
+<tr><td><span class="tier t1">R1</span></td><td>No loss</td><td class="num">0.5</td><td>Delete duplicates, trash, re-downloadable copies; lossless screenshots</td></tr>
+<tr><td><span class="tier t2">R2</span></td><td>Looks identical</td><td class="num">1</td><td>Re-encode photos, chat images, videos</td></tr>
+<tr><td><span class="tier t3">R3</span></td><td>Small quality trade-off</td><td class="num">3</td><td>Music to 128 kbps</td></tr>
+<tr><td><span class="tier t4">R4</span></td><td>Needs your confirmation</td><td class="num">5</td><td>Delete unique items: bursts, blurry, old screenshots, old downloads</td></tr>
+</tbody></table></div>
+</section>
+
+<section>
+<h2>Step 1 · Which actions are possible</h2>
+<p>Two questions are asked independently, so a file can hold a delete option and a compress option at the same time. Keep is always available and is never written down.</p>
+<figure><div class="scroll"><svg viewBox="0 0 960 905" role="img" aria-label="How a file gets its options: a delete rule and a compress rule are checked independently; ID documents lose the delete option unless they are exact duplicates; files with no option are retained."><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker></defs><rect x="355.0" y="20.0" width="250" height="40" rx="20.0" class="n-pill"/><text x="480" y="44.5" class="t tb pt" text-anchor="middle">One file on shared storage</text><path d="M480,60 L480,96" class="e" marker-end="url(#ah)"/><rect x="200.0" y="98.0" width="560" height="64" rx="8" class="n-box"/><text x="480" y="126.5" class="t tb" text-anchor="middle">Scan</text><text x="480" y="142.5" class="t" text-anchor="middle">folder path → area · first bytes → type · hashes and photo measurements</text><path d="M480,162 L480,190 L250,190 L250,224" class="e" marker-end="url(#ah)"/><path d="M480,190 L710,190 L710,224" class="e" marker-end="url(#ah)"/><polygon points="250,224.0 380.0,270 250,316.0 120.0,270" class="n-dec"/><text x="250" y="266.5" class="t tb" text-anchor="middle">Does a delete rule</text><text x="250" y="282.5" class="t tb" text-anchor="middle">match?</text><polygon points="710,224.0 840.0,270 710,316.0 580.0,270" class="n-dec"/><text x="710" y="266.5" class="t tb" text-anchor="middle">Does a compress rule</text><text x="710" y="282.5" class="t tb" text-anchor="middle">match?</text><text x="250" y="212" class="el dim" text-anchor="middle">question 1</text><text x="710" y="212" class="el dim" text-anchor="middle">question 2</text><path d="M250,316 L250,358" class="e" marker-end="url(#ah)"/><text x="258" y="341" class="el" text-anchor="start">yes</text><path d="M710,316 L710,358" class="e" marker-end="url(#ah)"/><text x="718" y="341" class="el" text-anchor="start">yes</text><rect x="125.0" y="358.0" width="250" height="64" rx="8" class="n-box o-del"/><text x="250" y="386.5" class="t tb" text-anchor="middle">Delete option</text><text x="250" y="402.5" class="t" text-anchor="middle">tier of the lowest-risk rule: R0, R1 or R4</text><rect x="585.0" y="358.0" width="250" height="64" rx="8" class="n-box o-cmp"/><text x="710" y="386.5" class="t tb" text-anchor="middle">Compress option</text><text x="710" y="402.5" class="t" text-anchor="middle">R1 lossless · R2 identical · R3 music</text><path d="M250,422 L250,464" class="e" marker-end="url(#ah)"/><polygon points="250,464.0 380.0,510 250,556.0 120.0,510" class="n-dec"/><text x="250" y="506.5" class="t tb" text-anchor="middle">Sorted as an</text><text x="250" y="522.5" class="t tb" text-anchor="middle">ID document?</text><path d="M380,510 L420,510" class="e" marker-end="url(#ah)"/><text x="400" y="502" class="el" text-anchor="middle">yes</text><rect x="420.0" y="482.0" width="160" height="56" rx="8" class="n-box"/><text x="500" y="506.5" class="t tb" text-anchor="middle">Delete option removed</text><text x="500" y="522.5" class="t" text-anchor="middle">unless exact duplicate</text><path d="M250,556 L250,608" class="e" marker-end="url(#ah)"/><text x="258" y="586" class="el" text-anchor="start">no</text><path d="M500,538 L500,608" class="e" marker-end="url(#ah)"/><path d="M710,422 L710,608" class="e" marker-end="url(#ah)"/><path d="M120,270 L70,270 L70,640 L198,640" class="e" marker-end="url(#ah)"/><text x="78" y="262" class="el" text-anchor="start">no</text><path d="M840,270 L890,270 L890,640 L762,640" class="e" marker-end="url(#ah)"/><text x="882" y="262" class="el" text-anchor="end">no</text><rect x="200.0" y="608.0" width="560" height="64" rx="8" class="n-box"/><text x="480" y="636.5" class="t tb" text-anchor="middle">The file&#x27;s options</text><text x="480" y="652.5" class="t" text-anchor="middle">Keep (always, implicit) + at most one delete + at most one compress</text><path d="M480,672 L480,712" class="e" marker-end="url(#ah)"/><polygon points="480,714.0 610.0,760 480,806.0 350.0,760" class="n-dec"/><text x="480" y="756.5" class="t tb" text-anchor="middle">Anything besides</text><text x="480" y="772.5" class="t tb" text-anchor="middle">Keep?</text><path d="M610,760 L708,760" class="e" marker-end="url(#ah)"/><text x="659" y="752" class="el" text-anchor="middle">no</text><rect x="710.0" y="728.0" width="180" height="64" rx="8" class="n-box o-ret"/><text x="800" y="756.5" class="t tb oc" text-anchor="middle">RETAIN</text><text x="800" y="772.5" class="t" text-anchor="middle">never enters the plan</text><path d="M480,806 L480,848" class="e" marker-end="url(#ah)"/><text x="488" y="831" class="el" text-anchor="start">yes</text><rect x="355.0" y="850.0" width="250" height="40" rx="20.0" class="n-pill"/><text x="480" y="874.5" class="t tb pt" text-anchor="middle">Goes to the planner ↓</text></svg></div>
+<figcaption>Source: <code>Scanner</code>, <code>Classifier</code>, <code>UnitBuilder</code>. A file keeps only one delete option: when several delete rules match, the lowest tier wins.</figcaption></figure>
+
+<h3>Question 1 · Delete rules</h3>
+<div class="scroll"><table class="rules"><thead><tr><th>Tier</th><th>Rule</th><th>Matches when</th></tr></thead><tbody><tr><td><span class="tier t0">R0</span></td><td class="rn">Thumbnail cache</td><td>Inside a <code>.thumbnails</code> folder</td></tr><tr><td><span class="tier t0">R0</span></td><td class="rn">Stale temp file</td><td><code>.pending-</code>, <code>.tmp</code>, <code>.part</code>, <code>.crdownload</code>, older than 1 day</td></tr><tr><td><span class="tier t0">R0</span></td><td class="rn">Leftover of an uninstalled app</td><td>Under <code>Android/obb</code> or <code>Android/media</code> of a package that is not installed</td></tr><tr><td><span class="tier t0">R0</span></td><td class="rn">App&#x27;s external cache</td><td><code>Android/data/&lt;app&gt;/cache</code></td></tr><tr><td><span class="tier t0">R0</span></td><td class="rn">Expired WhatsApp status</td><td>In <code>.Statuses</code>, older than 1 day</td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">Already in trash</td><td>Name starts with <code>.trashed-</code></td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">Telegram media</td><td>Telegram's folders; downloads again from its cloud</td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">Old WhatsApp backup</td><td><code>msgstore-&lt;date&gt;…crypt</code> in <code>Databases</code></td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">Exact duplicate</td><td>Same SHA-256 as another file (4 KB and larger). The copy in the most canonical folder stays: camera first, WhatsApp Sent last</td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">Installer already installed</td><td><code>.apk</code> whose app is installed at the same or a newer version</td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">WhatsApp Sent copy</td><td>Sent image that matches a camera photo: same shape, picture hash within 8 bits</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Installer, app not installed</td><td><code>.apk</code> whose app is missing or older</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Burst near-duplicate</td><td>Camera photos within 10 minutes, same dimensions, picture hash within 10 bits. Every shot except the best one</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Possibly blurry</td><td>Camera photo under 25% of your median sharpness, and not a burst extra</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">One-time code screenshot</td><td>Sorted as OTP, older than 1 day</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Old payment screenshot</td><td>Sorted as payment, older than 90 days</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Expired ticket</td><td>Travel date passed by 7 days, or 180 days old when no date was read</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Greeting image</td><td>Sorted as greeting, in WhatsApp or Telegram, older than 7 days</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Accidental shot</td><td>Sorted as dark, featureless or badly shaken</td></tr><tr><td><span class="tier t4">R4</span></td><td class="rn">Old download</td><td>In <code>Download</code>, untouched 180 days, 1 MB or more, and no other delete rule matched</td></tr></tbody></table></div>
+
+<h3>Question 2 · Compress rules</h3>
+<p>Checked top to bottom; the first match is the file's only compress option.</p>
+<div class="scroll"><table class="rules"><thead><tr><th>Tier</th><th>Rule</th><th>Matches when</th></tr></thead><tbody><tr><td><span class="tier t2">R2</span></td><td class="rn">Camera photo</td><td>JPEG in <code>DCIM</code> or <code>Pictures</code>, at least 1.0 bit per pixel → HEIC/WebP. Saves 45% (or the share measured on your files)</td></tr><tr><td><span class="tier t2">R2</span></td><td class="rn">Chat image</td><td>JPEG in WhatsApp Images, received or sent, at least 0.5 bit per pixel → HEIC/WebP. Saves 25%</td></tr><tr><td><span class="tier t1">R1</span></td><td class="rn">Screenshot</td><td>PNG in <code>Screenshots</code> → lossless WebP. Saves 25%</td></tr><tr><td><span class="tier t2">R2</span></td><td class="rn">Video</td><td>MP4 or MKV in H.264, MPEG-4 or 3GPP → HEVC. Saves 45% at a high bitrate, 25% at a medium one, nothing below that</td></tr><tr><td><span class="tier t3">R3</span></td><td class="rn">Music</td><td>In <code>Music</code>, 256 kbps or more → 128 kbps. Saves 1 − 128 ÷ bitrate</td></tr></tbody></table></div>
+</section>
+
+<section>
+<h2>Step 2 · Which option is picked</h2>
+<p>The need is <b>used space − your target</b>. The planner looks at all files, apps and caches together and picks at most one option per item.</p>
+<figure><div class="scroll"><svg viewBox="0 0 960 1515" role="img" aria-label="How the planner picks one option: your Keep and Approve decisions come first, then the plan mode; in target mode the lowest sufficient tier is used, safe options are always taken, a greedy pass adds the cheapest bytes and a prune pass removes what is not needed."><defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ahp"/></marker></defs><rect x="315.0" y="20.0" width="250" height="40" rx="20.0" class="n-pill"/><text x="440" y="44.5" class="t tb pt" text-anchor="middle">File with at least one option</text><path d="M440,60 L440,92" class="e" marker-end="url(#ah)"/><polygon points="440,94.0 570.0,140 440,186.0 310.0,140" class="n-dec"/><text x="440" y="136.5" class="t tb" text-anchor="middle">Did you tap Keep</text><text x="440" y="152.5" class="t tb" text-anchor="middle">on it?</text><path d="M570,140 L840,140 L840,1423" class="e" marker-end="url(#ah)"/><text x="580" y="132" class="el" text-anchor="start">yes</text><path d="M440,186 L440,220" class="e" marker-end="url(#ah)"/><text x="448" y="208.0" class="el" text-anchor="start">no</text><polygon points="440,222.0 570.0,268 440,314.0 310.0,268" class="n-dec"/><text x="440" y="264.5" class="t tb" text-anchor="middle">Did you approve</text><text x="440" y="280.5" class="t tb" text-anchor="middle">an action for it?</text><path d="M310,268 L287,268" class="e" marker-end="url(#ah)"/><text x="298" y="260" class="el" text-anchor="middle">yes</text><rect x="95.0" y="240.0" width="190" height="56" rx="8" class="n-box"/><text x="190" y="264.5" class="t tb" text-anchor="middle">Locked in</text><text x="190" y="280.5" class="t" text-anchor="middle">the option you approved</text><path d="M95,268 L50,268 L50,1346 L318,1346" class="e" marker-end="url(#ah)"/><path d="M440,314 L440,348" class="e" marker-end="url(#ah)"/><text x="448" y="336.0" class="el" text-anchor="start">no</text><polygon points="440,350.0 570.0,396 440,442.0 310.0,396" class="n-dec"/><text x="440" y="392.5" class="t tb" text-anchor="middle">Which plan</text><text x="440" y="408.5" class="t tb" text-anchor="middle">mode?</text><path d="M310,396 L287,396" class="e" marker-end="url(#ah)"/><text x="300" y="376" class="el" text-anchor="end">All safe steps</text><rect x="95.0" y="390.0" width="190" height="56" rx="8" class="n-box"/><text x="190" y="414.5" class="t tb" text-anchor="middle">Largest saving</text><text x="190" y="430.5" class="t" text-anchor="middle">among its R0–R2 options</text><path d="M95,418 L50,418" class="e"/><circle cx="50" cy="418" r="3.5" class="jd"/><path d="M440,442 L440,480" class="e" marker-end="url(#ah)"/><text x="448" y="466.0" class="el" text-anchor="start">Reach my target</text><rect x="275.0" y="482.0" width="330" height="64" rx="8" class="n-box"/><text x="440" y="510.5" class="t tb" text-anchor="middle">Pick the tier k</text><text x="440" y="526.5" class="t" text-anchor="middle">lowest tier where everyone&#x27;s best options cover the need</text><path d="M440,546 L440,584" class="e" marker-end="url(#ah)"/><polygon points="440,586.0 570.0,632 440,678.0 310.0,632" class="n-dec"/><text x="440" y="628.5" class="t tb" text-anchor="middle">Does it have an</text><text x="440" y="644.5" class="t tb" text-anchor="middle">option at tier ≤ k?</text><path d="M570,632 L840,632" class="e"/><circle cx="840" cy="632" r="3.5" class="jd"/><text x="580" y="624" class="el" text-anchor="start">no</text><path d="M440,678 L440,712" class="e" marker-end="url(#ah)"/><text x="448" y="700.0" class="el" text-anchor="start">yes</text><polygon points="440,714.0 570.0,760 440,806.0 310.0,760" class="n-dec"/><text x="440" y="756.5" class="t tb" text-anchor="middle">Is one of them</text><text x="440" y="772.5" class="t tb" text-anchor="middle">R0 (safe)?</text><path d="M310,760 L50,760" class="e"/><circle cx="50" cy="760" r="3.5" class="jd"/><text x="300" y="752" class="el" text-anchor="end">yes · always taken</text><path d="M440,806 L440,844" class="e" marker-end="url(#ah)"/><text x="448" y="830.0" class="el" text-anchor="start">no</text><rect x="275.0" y="846.0" width="330" height="64" rx="8" class="n-box"/><text x="440" y="874.5" class="t tb" text-anchor="middle">Greedy pass</text><text x="440" y="890.5" class="t" text-anchor="middle">cheapest extra cost per byte first, until the need is met</text><path d="M440,910 L440,948" class="e" marker-end="url(#ah)"/><polygon points="440,950.0 570.0,996 440,1042.0 310.0,996" class="n-dec"/><text x="440" y="992.5" class="t tb" text-anchor="middle">Reached before the</text><text x="440" y="1008.5" class="t tb" text-anchor="middle">need was met?</text><path d="M570,996 L840,996" class="e"/><circle cx="840" cy="996" r="3.5" class="jd"/><text x="580" y="988" class="el" text-anchor="start">no · not needed</text><path d="M440,1042 L440,1080" class="e" marker-end="url(#ah)"/><text x="448" y="1066.0" class="el" text-anchor="start">yes</text><rect x="275.0" y="1082.0" width="330" height="64" rx="8" class="n-box"/><text x="440" y="1110.5" class="t tb" text-anchor="middle">Prune pass</text><text x="440" y="1126.5" class="t" text-anchor="middle">costliest per byte first: drop or swap if need still met</text><path d="M440,1146 L440,1184" class="e" marker-end="url(#ah)"/><polygon points="440,1186.0 570.0,1232 440,1278.0 310.0,1232" class="n-dec"/><text x="440" y="1228.5" class="t tb" text-anchor="middle">Dropped by</text><text x="440" y="1244.5" class="t tb" text-anchor="middle">the prune?</text><path d="M570,1232 L840,1232" class="e"/><circle cx="840" cy="1232" r="3.5" class="jd"/><text x="580" y="1224" class="el" text-anchor="start">yes</text><path d="M440,1278 L440,1319" class="e" marker-end="url(#ah)"/><text x="448" y="1303.5" class="el" text-anchor="start">no · kept, or swapped to a cheaper option</text><rect x="320.0" y="1321.0" width="240" height="50" rx="8" class="n-box n-strong"/><text x="440" y="1350.5" class="t tb" text-anchor="middle">Chosen option</text><path d="M440,1371 L440,1397 L330,1397 L330,1423" class="e" marker-end="url(#ah)"/><path d="M440,1397 L550,1397 L550,1423" class="e" marker-end="url(#ah)"/><text x="322" y="1390" class="el" text-anchor="end">action = delete</text><text x="558" y="1390" class="el" text-anchor="start">action = re-encode</text><rect x="20.0" y="1425.0" width="180" height="70" rx="8" class="n-box o-arc"/><text x="110" y="1456.5" class="t tb oc" text-anchor="middle">ARCHIVE</text><text x="110" y="1472.5" class="t" text-anchor="middle">no path for a file</text><rect x="240.0" y="1425.0" width="180" height="70" rx="8" class="n-box o-del"/><text x="330" y="1456.5" class="t tb oc" text-anchor="middle">DELETE</text><text x="330" y="1472.5" class="t" text-anchor="middle">R0, R1 or R4</text><rect x="460.0" y="1425.0" width="180" height="70" rx="8" class="n-box o-cmp"/><text x="550" y="1456.5" class="t tb oc" text-anchor="middle">COMPRESS</text><text x="550" y="1472.5" class="t" text-anchor="middle">R1, R2 or R3</text><rect x="750.0" y="1425.0" width="180" height="70" rx="8" class="n-box o-ret"/><text x="840" y="1456.5" class="t tb oc" text-anchor="middle">RETAIN</text><text x="840" y="1472.5" class="t" text-anchor="middle">left as it is</text></svg></div>
+<figcaption>Source: <code>Review.planWithDecisions</code>, <code>Planner.tiered</code>. In <em>All safe steps</em> a file with only R3 or R4 options is retained. If no tier can cover the need, every item gets its largest option and the plan is marked as not reaching the target.</figcaption></figure>
+<div class="notes">
+<div><h3>Pick the tier</h3><p>Try k = R0, R1, … R4. For each k, add up the largest saving every item offers at tier ≤ k. The first k whose sum covers the need is used. Nothing above it is touched.</p></div>
+<div><h3>Greedy pass</h3><p>Start with every R0 option. List every possible upgrade with its price: <code>extra cost ÷ extra bytes</code>. Apply the cheapest first and stop as soon as the need is met. Big files at a low tier go first.</p></div>
+<div><h3>Prune pass</h3><p>The greedy pass can overshoot. Walk the chosen options from the costliest per byte and drop each one, or swap it for a cheaper option of the same file, when the plan still covers the need.</p></div>
+</div>
+</section>
+
+<section>
+<h2>Points for our discussion</h2>
+<ol class="disc">
+<li><b>No file is ever archived.</b> Archive exists only for apps idle 60 days on Android 15. The zip tool is not connected to the planner.</li>
+<li><b>Compress has one setting per type.</b> The video tool's five levels and Motion Photo clip removal are not options the planner can choose.</li>
+<li><b>Many files can't be compressed.</b> HEIC, WebP and AVIF photos, JPEG screenshots, PNGs outside Screenshots and images in Download get no compress option.</li>
+<li><b>Two rules can't fire.</b> The scan skips <code>Android/data</code>, so "App's external cache" and leftovers under that folder are never seen.</li>
+<li><b>Safe junk is always in the plan,</b> even when the target is already met. Everything else is taken only as far as the need requires.</li>
+<li><b>In <em>All safe steps</em> size decides.</b> A duplicate that could also be compressed is deleted, because deleting saves more.</li>
+<li><b>Estimates count like exact bytes.</b> A compress saving of "45%" is a guess, but the planner trusts it as much as a deletion.</li>
+<li><b>Age is the file's modified date.</b> When you last opened a file plays no part.</li>
+</ol>
+<p class="aside">Apps and caches follow their own short path: cache → clear (R0); idle 60 days on Android 15 → archive (R1); idle 120 days and a game, or Android below 15 → uninstall (R4).</p>
+</section>
+</main>
