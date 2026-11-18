@@ -62,6 +62,17 @@ jobs:
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.ZipTest
           java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.MotionPhotoTest
 
+      - name: Scene, smile and aesthetic models (same numbers as Keras; scan, saving, tags)
+        run: |
+          mkdir -p "$RUNNER_TEMP/scene"
+          T=app/src/main/java/com/storageplanner/tools
+          javac -encoding UTF-8 -nowarn -d "$RUNNER_TEMP/scene" \
+            $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
+            $T/MotionPhoto.java $T/CopyPaths.java \
+            jvmtest/com/storageplanner/test/JvmPlatform.java jvmtest/com/storageplanner/test/CategoryTest.java \
+            jvmtest/com/storageplanner/test/SceneTest.java
+          java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.SceneTest
+
       - name: Android SDK parts
         run: |
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"

@@ -150,11 +150,14 @@ For near-identical shots, every photo in the group is checked on the phone durin
 | **Faces** | YuNet (OpenCV Zoo, MIT licence), a small face-detection network built into the app and run on the phone in plain Java (since 1.8; before that Android's `android.media.FaceDetector`). It finds faces down to about 10 px, tilted or partly turned, and gives the position of each eye. A face counts when its score is at least 0.7; faces much smaller than the main one (bystanders) are not counted. |
 | **Eyes open or closed** | A small neural network built into the app looks at each eye. It was trained on real faces: Closed Eyes In The Wild for closed eyes, plus aligned open-eye faces. On 716 faces it never saw, it is right 98.5% of the time when it looks at each eye where the detector found it (97% from the old detector's eye midpoint). It is still 98% right when the eye positions are off by 6%, and 91% when they are off by 12%. |
 | **Faces visible** | A shot where someone turned away has fewer faces. Each missing face counts like a blink. |
+| **Smiling** | A small network looks at each mouth (see "What a photo shows" below). |
+| **Looking at the camera** | The head is turned to the camera: the nose sits between the eyes, not off to one side, and the head is not tipped far up or down. |
 | **Focus** | Sharpness of the faces, then of the whole photo. It is measured so that a brighter or darker copy of the same photo doesn't look "sharper". |
 | **Lighting** | Blown-out highlights cost the most because they can't be recovered. Then crushed shadows, a photo that is far too dark or too bright, and a face that is too dark or washed out. |
 
 **Ranking.** Each person blinking or missing costs 3 points. Focus is worth up to 1.5 and light up to 1, so a
-blink outweighs any focus or light difference between near-identical shots. The reason is shown on
+blink outweighs any focus or light difference between near-identical shots. Each smiling face adds up to 0.75 and each
+face turned to the camera 0.5: a smile can outweigh a small focus or light difference, never a blink. The reason is shown on
 the card, for example "Near-duplicate of a better shot, IMG_2.jpg: eyes open, face sharper".
 
 **Tests on real photos and real faces** (`PhotoQualityTest`):
@@ -172,7 +175,9 @@ the card, for example "Near-duplicate of a better shot, IMG_2.jpg: eyes open, fa
 Photos analysed by version 1.4 or earlier keep working. Their shots are ranked by sharpness until you tap
 **Analyse** again.
 
-Not judged: smiles, head turns that keep both eyes visible, and composition.
+Not judged: where the eyes look when the head is straight (a sideways glance), and composition between the shots
+(the aesthetic score below is per photo and is not used to pick the best shot). Near-identical shots measured before
+smiles were added are compared again at the next Analyse.
 
 ## Your pictures: categories, search and clean-up (new in 1.6)
 
@@ -499,6 +504,39 @@ Motion Photo tool in the Lab). `PhotoMetaTest` covers the EXIF reader (both byte
 dates), screenshot names from several phones, code types, a scan of a small phone with a favourite and a Motion
 Photo, saving and loading, and the favourites rule.
 
+## What a photo shows, how nice it is, and who smiles
+
+Three things that need small offline networks, all run on the phone in plain Java (no download, nothing leaves the
+phone). The app grows by about 5 MB.
+
+| Tag | How | How good (on pictures it never saw) |
+|---|---|---|
+| **Scene** (`scene`): food, nature, document, pet, vehicle, sky, selfie, other | Food, nature, pet and vehicle: MobileNetV3-Small, an ImageNet network (Keras Applications weights, Apache 2.0), added up over its 1000 classes (every dog and cat breed is "pet", dishes, fruit and vegetables "food", landscapes, plants, flowers and wild animals "nature", cars, buses, bikes, trains, planes and boats "vehicle"). A group needs 40% of the network's belief. Document: the picture category (papers, receipts, bills, tickets, ID cards). Selfie: a face close to the camera (eyes at least 9% of the short side apart). Sky: a smooth blue, sunset or cloud area joined to the top edge covering 45%+ of the picture (ImageNet has no sky) | On 29,468 labelled pictures: 92.5% right. Pets 95%, vehicles 94%, food 93% (9 Food-101 dishes), nature 80% (roses and tulips are not ImageNet classes), "other" 97% (also for kinds of things never used to tune it) |
+| **Aesthetic score** (`aesthetic`), 1 to 10 | A linear layer on the same network that copies NIMA, a model that learned from 255,000 photos each rated by about 200 photographers (AVA). On NIMA's scale an average photo is about 5; ordinary phone and web pictures score around 4.6, and blurred, dark or crushed copies of them 3.2–3.9 | Follows NIMA closely (Spearman 0.81 on 8,419 held-out pictures, mean difference 0.35 points). NIMA itself agrees with the photographers only roughly (Spearman 0.61), so treat it as a hint |
+| **Faces smiling** (`smiling`) | A small network on a patch around each mouth, lined up with the eyes, trained on 13,156 faces marked smiling or not (SMILEs, from Labeled Faces in the Wild), shrunk to phone-photo sizes | 90.5% right on 2,560 held-out faces (AUC 0.96); 86% when the eyes are under 20 px apart |
+| **Faces looking at the camera** (`looking_at_camera`) | The head is turned to the camera (nose between the eyes, head not tipped far up or down) and the eyes are open | Geometry, not trained: a sideways glance with the head straight still counts as looking |
+
+Smiles and looking need the mouth and nose positions, which only the built-in face detector (YuNet) gives; with
+Android's own detector they stay unknown. They are measured on every photo with a face (counted like "faces with eyes
+open"), so every picture is sorted once more at the next Analyse.
+
+**Time.** The scene network takes about 50 ms per photo on a desktop and should take roughly 100–300 ms on a phone; it
+runs on up to 4 cores, photos only (not screenshots, papers or chat graphics), newest first, for at most 15 minutes per
+Analyse. Photos not reached are done at the next Analyse; until then their scene and score are unknown, and a rule that
+tests them does not match. Unchanged photos are never looked at again.
+
+The Algorithm Lab's picture check shows the scene shares, the sky share, the score, and for each face the smile
+probability and the head turn.
+
+Rule ideas: `scene = food` and `taken_days > 180` → delete; `aesthetic < 3.5` and `source = chat image (received)` →
+delete; `scene = document` and `age_days > 365`; `faces > 0` and `smiling = 0`.
+
+`SceneTest` checks that the Java network gives Keras's numbers for the same weights, which classes count for which scene,
+how a scene is decided, the sky measure on drawn pictures, the head-turn geometry, that a scan measures photos only and
+keeps the numbers for unchanged ones, saving, and the four tags. With the held-out data (kept outside the repository)
+it also checks that Java gives Python's smile probabilities and aesthetic scores. How the models were made:
+`tools/scenemodel/README.md` and `tools/smilemodel/README.md`.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -632,7 +670,7 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed; SampleTest for Try on my pictures; PhotoMetaTest for favourites, date taken, screenshot app, Motion Photos and code type) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed; SampleTest for Try on my pictures; PhotoMetaTest for favourites, date taken, screenshot app, Motion Photos and code type; SceneTest for scene, aesthetic score, smiles and looking at the camera) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

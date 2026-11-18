@@ -34,10 +34,14 @@ public interface Platform {
 
     /**
      * Faces in a decoded picture (from argb), in the picture's pixels, Faces.F floats per face
-     * {x between the eyes, y, eye distance, score 0..1, eye-on-the-left x, y, other eye x, y}.
+     * {x between the eyes, y, eye distance, score 0..1, eye-on-the-left x, y, other eye x, y, nose x, y, mouth corners}
+     * (see Faces).
      * Empty array if none; null if detection is unavailable.
      */
     float[] faces(String path, int[] argb, int w, int h);
+
+    /** The scene network (assets/scene/scene.bin), loaded once; null when it is not available. */
+    SceneNet sceneNet();
 
     /** A second face detector for comparison in the Algorithm Lab (same format as faces), or null if there is none. */
     float[] otherFaces(String path, int[] argb, int w, int h);

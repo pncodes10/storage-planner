@@ -52,6 +52,8 @@ public final class Scanner {
         public boolean sortPictures = true;
         /** Time allowed for reading text in pictures in this scan; the rest is read next time. */
         public long textBudgetMs = 20 * 60 * 1000L;
+        /** Time allowed for looking at what photos show (scene, aesthetic score) in this scan; the rest is done next time. */
+        public long sceneBudgetMs = 15 * 60 * 1000L;
         /** Analyse only some pictures (Try on my pictures); null = everything. */
         public Sample.Limit limit;
     }

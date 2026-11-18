@@ -27,6 +27,7 @@ public final class Tags {
             WIDTH = "width", HEIGHT = "height", MEGAPIXELS = "megapixels", CATEGORY = "category", TEXT_READ = "text_read",
             FACES = "faces", EYES_OPEN = "eyes_open", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share", GLARE_SHARE = "glare_share", FAVOURITE = "favourite", TAKEN_DAYS = "taken_days",
             SCREENSHOT_APP = "screenshot_app", MOTION_PHOTO = "motion_photo", MOTION_VIDEO_MB = "motion_video_mb", CODE_TYPE = "code_type",
+            SCENE = "scene", AESTHETIC = "aesthetic", SMILING = "smiling", LOOKING = "looking_at_camera",
             COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", INK_SHARE = "ink_share", LOOKS_LIKE_PAGE = "looks_like_page", TEXT_AMOUNT = "text_amount",
             DUPLICATE = "duplicate", BURST_EXTRA = "burst_extra", BURST_KEEPER = "burst_keeper", SENT_COPY = "sent_copy",
             BLURRY = "blurry_vs_your_photos", INSTALLER_INSTALLED = "installer_already_installed", INSTALLER_NOT_INSTALLED = "installer_not_installed",
@@ -144,6 +145,10 @@ public final class Tags {
         public Boolean motionPhoto;                     // has a short video inside; null = not checked (only camera JPEG/HEIC are)
         public double motionVideoMb = UNKNOWN;          // that video's size in MB (0 when not a Motion Photo)
         public String codeType;                         // kind of QR code or barcode (PhotoMeta.CODE_*); null = not sorted
+        public String scene;                            // what the photo shows (Scene.*); null = not looked at yet
+        public double aesthetic = UNKNOWN;              // learned aesthetic score 1..10; UNKNOWN = not looked at yet
+        public double smiling = UNKNOWN;                // faces smiling; UNKNOWN = no faces judged or no mouth positions
+        public double looking = UNKNOWN;                // faces looking at the camera; UNKNOWN as for smiling
 
         /** All tags in a fixed order, unknown ones included (for rules and tests). */
         public List<Entry> all() {
@@ -197,6 +202,10 @@ public final class Tags {
             l.add(flag(MOTION_PHOTO, "Motion photo (has a short video)", motionPhoto, motionPhoto != null && motionPhoto ? String.format(Locale.US, "%.1f MB video", motionVideoMb) : null));
             l.add(num(MOTION_VIDEO_MB, "Motion photo video size", motionVideoMb, String.format(Locale.US, "%.1f MB", motionVideoMb)));
             l.add(text(CODE_TYPE, "Code type", codeType));
+            l.add(text(SCENE, "Scene (what the photo shows)", scene));
+            l.add(num(AESTHETIC, "Aesthetic score", aesthetic, String.format(Locale.US, "%.1f of 10", aesthetic)));
+            l.add(num(SMILING, "Faces smiling", smiling, String.valueOf((int) smiling)));
+            l.add(num(LOOKING, "Faces looking at the camera", looking, String.valueOf((int) looking)));
             return l;
         }
 
@@ -224,6 +233,9 @@ public final class Tags {
                 case DAYS_SINCE_DATE: return daysSinceDate;
                 case TAKEN_DAYS: return takenDays;
                 case MOTION_VIDEO_MB: return motionVideoMb;
+                case AESTHETIC: return aesthetic;
+                case SMILING: return smiling;
+                case LOOKING: return looking;
                 default: return UNKNOWN;
             }
         }
@@ -242,6 +254,7 @@ public final class Tags {
                 case APK_PACKAGE: return apkPackage;
                 case SCREENSHOT_APP: return screenshotApp;
                 case CODE_TYPE: return codeType;
+                case SCENE: return scene;
                 default: return null;
             }
         }
@@ -304,8 +317,9 @@ public final class Tags {
     private static final Map<String, Type> TYPES = new HashMap<String, Type>();
     static {
         for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, GLARE_SHARE, COLOURFULNESS,
-                GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE, TAKEN_DAYS, MOTION_VIDEO_MB}) TYPES.put(id, Type.NUMBER);
-        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE}) TYPES.put(id, Type.TEXT);
+                GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE, TAKEN_DAYS, MOTION_VIDEO_MB,
+                AESTHETIC, SMILING, LOOKING}) TYPES.put(id, Type.NUMBER);
+        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE, SCENE}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
                 ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE, FAVOURITE, MOTION_PHOTO}) TYPES.put(id, Type.FLAG);
     }
@@ -338,7 +352,8 @@ public final class Tags {
         {APK_PACKAGE, "", "installer for package"},
         {FAVOURITE, "", "is a favourite in your gallery"}, {TAKEN_DAYS, "days", "time since it was taken"},
         {SCREENSHOT_APP, "", "app in the screenshot"}, {MOTION_PHOTO, "", "is a motion photo"}, {MOTION_VIDEO_MB, "MB", "size of its motion photo video"},
-        {CODE_TYPE, "", "kind of code"}};
+        {CODE_TYPE, "", "kind of code"}, {SCENE, "", "scene"}, {AESTHETIC, "of 10", "aesthetic score"},
+        {SMILING, "", "number of smiling faces"}, {LOOKING, "", "number of faces looking at the camera"}};
 
     private static List<Info> LIST;
 
@@ -397,6 +412,7 @@ public final class Tags {
             case TEXT_AMOUNT: for (String c : new String[] {AMOUNT_NONE, AMOUNT_SOME, AMOUNT_LOTS}) l.add(new Choice(c, c)); break;
             case FILE_TYPE: for (String c : FILE_TYPES) l.add(new Choice(c, c)); break;
             case CODE_TYPE: for (String c : PhotoMeta.CODE_TYPES) l.add(new Choice(c, c)); break;
+            case SCENE: for (String c : Scene.ALL) l.add(new Choice(c, c)); break;
             default: break;
         }
         return l;
@@ -504,6 +520,10 @@ public final class Tags {
         if (t.screenshot) t.screenshotApp = PhotoMeta.screenshotApp(f.name(), ctx.apps);
         if (f.motionBytes >= 0) { t.motionPhoto = f.motionBytes > 0; t.motionVideoMb = f.motionBytes / 1e6; }
         if (f.category != null) t.codeType = PhotoMeta.codeType(f.code);
+        if (f.category != null) t.scene = Scene.of(f);
+        if (f.aesthetic >= 0) t.aesthetic = Math.round(f.aesthetic * 10) / 10.0;
+        if (f.eyeFaces > 0 && f.smiling >= 0) t.smiling = f.smiling;
+        if (f.eyeFaces > 0 && f.looking >= 0) t.looking = f.looking;
         return t;
     }
 

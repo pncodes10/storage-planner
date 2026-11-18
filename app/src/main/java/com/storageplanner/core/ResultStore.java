@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 9;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts; 9: favourite, date taken, Motion Photo video
+    public static final int VERSION = 10;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts; 9: favourite, date taken, Motion Photo video; 10: scene, aesthetic score, smiles, faces looking at the camera, face size (and smiles in the near-identical shots' measurements)
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -103,7 +103,7 @@ public final class ResultStore {
             out.writeLong(f.durationMs);
             pool.write(out, f.apkPackage);
             out.writeLong(f.apkVersion);
-            if (version >= 2) writeQuality(out, f.quality);
+            if (version >= 2) writeQuality(out, version >= 10 ? f.quality : null);   // older formats had fewer numbers per face
             if (version >= 3) {
                 pool.write(out, f.category);
                 str(out, f.code);
@@ -116,6 +116,12 @@ public final class ResultStore {
             if (version >= 5) out.writeInt(f.sortVersion);
             if (version >= 6) { out.writeInt(f.eyeFaces); out.writeInt(f.eyesOpen); }
             if (version >= 9) { out.writeByte(f.favourite == null ? -1 : f.favourite ? 1 : 0); out.writeLong(f.taken); out.writeLong(f.motionBytes); }
+            if (version >= 10) {
+                out.writeByte(f.scene == null ? -1 : f.scene.length);
+                if (f.scene != null) for (float x : f.scene) out.writeFloat(x);
+                out.writeFloat(f.aesthetic); out.writeInt(f.sceneVersion);
+                out.writeFloat(f.faceSize); out.writeInt(f.smiling); out.writeInt(f.looking);
+            }
         }
 
         out.writeInt(r.apps.size());
@@ -194,8 +200,8 @@ public final class ResultStore {
             f.durationMs = in.readLong();
             f.apkPackage = pooled(in, pool);
             f.apkVersion = in.readLong();
-            if (v >= 2) f.quality = readQuality(in);
-            if (v < 7) f.quality = null;          // measured before focus ignored sensor grain: compare similar shots afresh
+            if (v >= 2) f.quality = readQuality(in, v >= 10 ? PhotoQuality.FACE_FIELDS : 5);
+            if (v < 10) f.quality = null;         // measured before focus ignored sensor grain (7) and before smiles (10): compare similar shots afresh
             if (v >= 3) {
                 f.category = pooled(in, pool);
                 f.code = str(in);
@@ -217,6 +223,19 @@ public final class ResultStore {
                 f.favourite = fv < 0 ? null : fv == 1;
                 f.taken = in.readLong(); f.motionBytes = in.readLong();
                 if (f.taken < -1 || f.motionBytes < -1 || f.motionBytes > f.size) throw new IOException("results file damaged (photo details)");
+            }
+            if (v >= 10) {
+                int ns = in.readByte();
+                if (ns < -1 || ns > 16) throw new IOException("results file damaged (scene)");
+                if (ns >= 0) {
+                    f.scene = new float[ns];
+                    for (int k = 0; k < ns; k++) { f.scene[k] = in.readFloat(); if (!(f.scene[k] >= 0 && f.scene[k] <= 1.001f)) throw new IOException("results file damaged (scene)"); }
+                }
+                f.aesthetic = in.readFloat(); f.sceneVersion = in.readInt();
+                f.faceSize = in.readFloat(); f.smiling = in.readInt(); f.looking = in.readInt();
+                if (!(f.aesthetic == -1 || f.aesthetic >= 0 && f.aesthetic <= 10) || f.sceneVersion < 0 || !(f.faceSize == -1 || f.faceSize >= 0 && f.faceSize <= 10)
+                        || f.smiling < -1 || f.looking < -1 || f.smiling > Math.max(0, f.eyeFaces) || f.looking > Math.max(0, f.eyeFaces))
+                    throw new IOException("results file damaged (people and scene)");
             }
             r.files.add(f);
         }
@@ -293,17 +312,18 @@ public final class ResultStore {
         return s;
     }
 
-    private static PhotoQuality.Q readQuality(DataInputStream in) throws IOException {
+    private static PhotoQuality.Q readQuality(DataInputStream in, int fields) throws IOException {
         if (!in.readBoolean()) return null;
         PhotoQuality.Q q = new PhotoQuality.Q();
         q.faces = in.readInt(); q.openFaces = in.readInt();
         q.eyes = in.readDouble(); q.faceSharp = in.readDouble(); q.faceLuma = in.readDouble(); q.sharp = in.readDouble();
         q.meanLuma = in.readDouble(); q.clipHi = in.readDouble(); q.clipLo = in.readDouble();
         int n = in.readInt();
-        if (n < 0 || n > 4096 || n != q.faces * PhotoQuality.FACE_FIELDS || q.openFaces < 0 || q.openFaces > q.faces)
+        if (n < 0 || n > 4096 || n != q.faces * fields || q.openFaces < 0 || q.openFaces > q.faces)
             throw new IOException("results file damaged (faces " + n + ")");
         q.face = new float[n];
         for (int i = 0; i < n; i++) q.face[i] = in.readFloat();
+        if (fields == PhotoQuality.FACE_FIELDS) PhotoQuality.countPeople(q);
         return q;
     }
 

@@ -245,7 +245,7 @@ public final class TagsTest {
         boolean ids = true;
         java.util.Set<String> seen = new java.util.HashSet<String>();
         for (Tags.Entry en : all1.all()) ids &= seen.add(en.id) && en.id.matches("[a-z_]+") && en.label.length() > 0;
-        check("49 unique lower_snake ids", ids && seen.size() == 49 && all1.get(Tags.BLUR) != null);
+        check("53 unique lower_snake ids", ids && seen.size() == 53 && all1.get(Tags.BLUR) != null);
         boolean typed = true;                                   // every listed id has a type, and the typed accessors agree with it
         for (Tags.Entry en : all1.all()) {
             Tags.Type ty = Tags.typeOf(en.id);

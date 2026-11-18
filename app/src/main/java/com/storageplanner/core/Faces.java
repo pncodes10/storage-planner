@@ -4,12 +4,14 @@ import java.util.List;
 
 /**
  * Face lists as the Platform hands them over: F floats per face
- * {x between the eyes, y, eye distance, score 0..1, x1, y1, x2, y2} where (x1, y1) is the eye on the image's left.
+ * {x between the eyes, y, eye distance, score 0..1, x1, y1, x2, y2, nose x, y, mouth corner x, y, other mouth corner x, y}
+ * where (x1, y1) is the eye on the image's left and the first mouth corner is the one on the same side as that eye.
+ * Nose and mouth are NaN when the detector does not give them (Android's own detector).
  */
 public final class Faces {
     private Faces() {}
 
-    public static final int F = 8;
+    public static final int F = 14;
     /** The detector works on a copy whose long edge is at most this (YuNet's training size). */
     public static final int DETECT_EDGE = 640;
 
@@ -53,13 +55,20 @@ public final class Faces {
         for (int i = 0; i < out.size(); i++) {
             float[] f = out.get(i);
             // OpenCV's "right eye" (subject's right) is the eye on the image's left
-            float x1 = f[4], y1 = f[5], x2 = f[6], y2 = f[7];
-            if (x1 > x2) { float t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t; }
+            float x1 = f[4], y1 = f[5], x2 = f[6], y2 = f[7], m1x = f[10], m1y = f[11], m2x = f[12], m2y = f[13];
+            if (x1 > x2) {
+                float t = x1; x1 = x2; x2 = t; t = y1; y1 = y2; y2 = t;
+                t = m1x; m1x = m2x; m2x = t; t = m1y; m1y = m2y; m2y = t;
+            }
             o[i * F] = (x1 + x2) / 2; o[i * F + 1] = (y1 + y2) / 2; o[i * F + 2] = (float) Math.hypot(x2 - x1, y2 - y1); o[i * F + 3] = f[14];
             o[i * F + 4] = x1; o[i * F + 5] = y1; o[i * F + 6] = x2; o[i * F + 7] = y2;
+            o[i * F + 8] = f[8]; o[i * F + 9] = f[9]; o[i * F + 10] = m1x; o[i * F + 11] = m1y; o[i * F + 12] = m2x; o[i * F + 13] = m2y;
         }
         return o;
     }
+
+    /** Whether face i (at offset i) has nose and mouth positions. */
+    public static boolean hasMouth(float[] f, int i) { return i + F <= f.length && !Float.isNaN(f[i + 10]) && !Float.isNaN(f[i + 12]) && !Float.isNaN(f[i + 8]); }
 
     /** OpenCV's 15 numbers scaled by (fx, fy) and moved by (ox, oy). */
     static float[] map(float[] f, double fx, double fy, double ox, double oy) {
@@ -98,6 +107,7 @@ public final class Faces {
             float mx = four[i * 4], my = four[i * 4 + 1], d = four[i * 4 + 2];
             o[i * F] = mx; o[i * F + 1] = my; o[i * F + 2] = d; o[i * F + 3] = four[i * 4 + 3];
             o[i * F + 4] = mx - d / 2; o[i * F + 5] = my; o[i * F + 6] = mx + d / 2; o[i * F + 7] = my;
+            for (int k = 8; k < F; k++) o[i * F + k] = Float.NaN;
         }
         return o;
     }

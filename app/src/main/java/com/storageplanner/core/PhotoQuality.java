@@ -22,7 +22,7 @@ public final class PhotoQuality {
     public static final double BACKGROUND = 0.3;
     /** A face whose two eyes average below this is reported as "eyes closed". */
     public static final double OPEN = 0.5;
-    static final int FACE_FIELDS = 5;
+    static final int FACE_FIELDS = 7;
 
     /** Measurements of one photo (all scale-free, so they survive saving and reloading). */
     public static final class Q {
@@ -34,8 +34,10 @@ public final class PhotoQuality {
         public double sharp = -1;          // overall sharpness (same measure as ImageFeatures.sharpness)
         public double meanLuma;            // 0..255
         public double clipHi, clipLo;      // share of pixels blown out (>= 250) / crushed (<= 5)
+        public int smiling = -1;           // faces smiling; -1 = not known (no mouth positions)
+        public int facing = -1;            // faces turned to the camera; -1 = not known
         /** per face: x, y (fractions of width/height, point between the eyes), eye distance (fraction of width),
-         *  eyes-open probability, detector confidence */
+         *  eyes-open probability, detector confidence, smile probability (NaN = not known), turned to the camera (1/0, NaN = not known) */
         public float[] face = new float[0];
 
         public double exposure() { return PhotoQuality.exposure(this); }
@@ -68,13 +70,30 @@ public final class PhotoQuality {
                 double[] st = faceStats(luma, w, h, mx, my, d);
                 eyes += p; fs += st[0]; fl += st[1];
                 if (p >= OPEN) q.openFaces++;
-                kept.add(new float[]{(float) (mx / w), (float) (my / h), (float) (d / w), (float) p, (float) conf});
+                double sm = Smile.probability(luma, w, h, faces, i);
+                float turned = Faces.hasMouth(faces, i) ? (Smile.facing(faces, i) ? 1f : 0f) : Float.NaN;
+                if (sm == sm) { q.smiling = Math.max(0, q.smiling) + (sm >= Smile.SMILING ? 1 : 0); q.facing = Math.max(0, q.facing) + (int) turned; }
+                kept.add(new float[]{(float) (mx / w), (float) (my / h), (float) (d / w), (float) p, (float) conf, (float) sm, turned});
             }
         q.faces = kept.size();
         if (q.faces > 0) { q.eyes = eyes / q.faces; q.faceSharp = fs / q.faces; q.faceLuma = fl / q.faces; }
         q.face = new float[q.faces * FACE_FIELDS];
         for (int i = 0; i < q.faces; i++) System.arraycopy(kept.get(i), 0, q.face, i * FACE_FIELDS, FACE_FIELDS);
         return q;
+    }
+
+    /** Numbers per face in q.face: FACE_FIELDS, or 5 in measurements made before smiles were added. */
+    static int stride(Q q) { return q.faces > 0 && q.face.length == 5 * q.faces ? 5 : FACE_FIELDS; }
+
+    /** Sets q.smiling and q.facing from the per-face numbers (-1 when no face has mouth positions). */
+    static void countPeople(Q q) {
+        q.smiling = -1; q.facing = -1;
+        for (int k = 0; k < q.faces; k++) {
+            float sm = q.face[k * FACE_FIELDS + 5], t = q.face[k * FACE_FIELDS + 6];
+            if (sm != sm) continue;
+            q.smiling = Math.max(0, q.smiling) + (sm >= Smile.SMILING ? 1 : 0);
+            q.facing = Math.max(0, q.facing) + (t == 1f ? 1 : 0);
+        }
     }
 
     /** Eye distance of the biggest face that counts (people far behind it are not judged). */
@@ -92,19 +111,27 @@ public final class PhotoQuality {
     }
 
     /**
-     * Eyes only, for sorting every photo with a face: {faces judged, faces with eyes open}, with the same rules as
-     * analyse(). faces: the detector's output in the pixel space of luma (w x h).
+     * The people in a photo, for sorting every photo with a face, with the same rules as analyse():
+     * {faces judged, faces with eyes open, faces smiling, faces looking at the camera (turned to it with eyes open),
+     * biggest judged face's eye distance in 1/10000 of the short side}; smiling and looking are -1 when the detector
+     * gave no mouth positions. faces: the detector's output in the pixel space of luma (w x h).
      */
     public static int[] eyes(int[] luma, int w, int h, float[] faces) {
-        int n = 0, open = 0;
-        double big = biggest(faces);
+        int n = 0, open = 0, smiling = -1, looking = -1;
+        double big = biggest(faces), size = 0;
         if (faces != null)
             for (int i = 0; i + Faces.F - 1 < faces.length; i += Faces.F) {
                 if (!judged(faces, i, w, h, big)) continue;
                 n++;
-                if (EyeState.openProbability(luma, w, h, faces[i + 4], faces[i + 5], faces[i + 6], faces[i + 7]) >= OPEN) open++;
+                size = Math.max(size, faces[i + 2]);
+                boolean o = EyeState.openProbability(luma, w, h, faces[i + 4], faces[i + 5], faces[i + 6], faces[i + 7]) >= OPEN;
+                if (o) open++;
+                if (Faces.hasMouth(faces, i)) {
+                    smiling = Math.max(0, smiling) + (Smile.probability(luma, w, h, faces, i) >= Smile.SMILING ? 1 : 0);
+                    looking = Math.max(0, looking) + (o && Smile.facing(faces, i) ? 1 : 0);
+                }
             }
-        return new int[]{n, open};
+        return new int[]{n, open, smiling, looking, (int) Math.round(10000 * size / Math.max(1, Math.min(w, h)))};
     }
 
     /** Face box from the eye position: 2 eye-distances wide, from 0.9 above to 1.4 below the eyes. */
@@ -223,21 +250,31 @@ public final class PhotoQuality {
     }
 
     /** Names of the parts of a score, in the order terms() returns them. */
-    public static final String[] TERMS = {"eyes open (3 per face)", "people missing or blinking (-3 each)", "face sharpness", "overall sharpness", "lighting"};
+    public static final String[] TERMS = {"eyes open (3 per face)", "people missing or blinking (-3 each)", "face sharpness", "overall sharpness", "lighting",
+            "smiling (0.75 per face)", "turned to the camera (0.5 per face)"};
+
+    /** How surely a face smiles, 0..1 (0 below p=0.3, 1 above p=0.7); 0 when not known. */
+    static double smiles(double p) { return p == p ? Math.max(0, Math.min(1, (p - 0.3) / 0.4)) : 0; }
 
     /** The parts that add up to each shot's score (see TERMS); used by scores() and shown by the Algorithm Lab. */
     public static double[][] terms(List<Q> g) {
         int maxFaces = 0; double maxFS = 0, maxS = 0;
         for (Q q : g) { maxFaces = Math.max(maxFaces, q.faces); maxFS = Math.max(maxFS, q.faceSharp); maxS = Math.max(maxS, q.sharp); }
-        double[][] t = new double[g.size()][5];
+        double[][] t = new double[g.size()][7];
         for (int i = 0; i < g.size(); i++) {
             Q q = g.get(i);
             double rs = maxS > 0 && q.sharp > 0 ? q.sharp / maxS : 0;
             if (maxFaces > 0) {
-                for (int k = 0; k < q.faces; k++) t[i][0] += 3.0 * openness(q.face[k * FACE_FIELDS + 3]);
+                int st = stride(q);
+                for (int k = 0; k < q.faces; k++) t[i][0] += 3.0 * openness(q.face[k * st + 3]);
                 t[i][1] = -3.0 * maxFaces;                          // people missing from this shot count as blinking
                 t[i][2] = 1.0 * (q.faceSharp > 0 && maxFS > 0 ? q.faceSharp / maxFS : 0);
                 t[i][3] = 0.5 * rs;
+                if (st >= 7)
+                    for (int k = 0; k < q.faces; k++) {
+                        t[i][5] += 0.75 * smiles(q.face[k * st + 5]);
+                        if (q.face[k * st + 6] == 1f) t[i][6] += 0.5;
+                    }
             } else t[i][3] = 1.5 * rs;
             t[i][4] = 1.0 * exposure(q);
         }
@@ -257,12 +294,20 @@ public final class PhotoQuality {
         List<String> r = new ArrayList<String>();
         if (a == null || b == null) return r;
         double oa = 0, ob = 0;
-        for (int k = 0; k < a.faces; k++) oa += openness(a.face[k * FACE_FIELDS + 3]);
-        for (int k = 0; k < b.faces; k++) ob += openness(b.face[k * FACE_FIELDS + 3]);
+        int sa = stride(a), sb = stride(b);
+        for (int k = 0; k < a.faces; k++) oa += openness(a.face[k * sa + 3]);
+        for (int k = 0; k < b.faces; k++) ob += openness(b.face[k * sb + 3]);
         if (oa - ob >= 0.4) {
             int blink = b.faces - b.openFaces;
             if (blink > 0) r.add(a.faces <= 1 ? "Eyes open" : "Eyes open (" + blink + (blink == 1 ? " person blinks" : " people blink") + " in the other)");
             else if (a.faces <= b.faces) r.add("Eyes open wider");
+        }
+        if (sa >= 7 && sb >= 7) {
+            double ma = 0, mb = 0; int ta = 0, tb = 0;
+            for (int k = 0; k < a.faces; k++) { ma += smiles(a.face[k * sa + 5]); if (a.face[k * sa + 6] == 1f) ta++; }
+            for (int k = 0; k < b.faces; k++) { mb += smiles(b.face[k * sb + 5]); if (b.face[k * sb + 6] == 1f) tb++; }
+            if (ma - mb >= 0.5) r.add(a.faces <= 1 ? "Smiling" : "More smiles");
+            if (ta > tb) r.add(a.faces <= 1 ? "Looking at the camera" : "More people looking at the camera");
         }
         if (a.faces > b.faces) r.add("More faces visible (" + a.faces + " vs " + b.faces + ")");
         if (a.faceSharp > 0 && b.faceSharp >= 0 && a.faceSharp > 1.25 * b.faceSharp) r.add("Face sharper");

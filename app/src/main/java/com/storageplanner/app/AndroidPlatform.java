@@ -29,6 +29,7 @@ import android.telecom.TelecomManager;
 
 import com.storageplanner.core.AppItem;
 import com.storageplanner.core.FaceNet;
+import com.storageplanner.core.SceneNet;
 import com.storageplanner.core.Faces;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Platform;
@@ -372,6 +373,28 @@ public final class AndroidPlatform implements Platform {
             if (in != null) try { in.close(); } catch (Throwable ignored) {}
         }
         return faceNet;
+    }
+
+    // ---- scene network: MobileNetV3-Small in plain Java (assets/scene/scene.bin), loaded on first use
+    private SceneNet sceneNet;
+    private boolean sceneNetFailed;
+
+    public synchronized SceneNet sceneNet() {
+        if (sceneNet != null || sceneNetFailed) return sceneNet;
+        java.io.InputStream in = null;
+        try {
+            in = ctx.getAssets().open("scene/scene.bin");
+            java.io.ByteArrayOutputStream bo = new java.io.ByteArrayOutputStream(1 << 23);
+            byte[] buf = new byte[65536]; int n;
+            while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
+            sceneNet = SceneNet.load(bo.toByteArray());
+        } catch (Throwable t) {
+            sceneNetFailed = true;
+            android.util.Log.w("StoragePlanner", "scene model unavailable: " + t);
+        } finally {
+            if (in != null) try { in.close(); } catch (Throwable ignored) {}
+        }
+        return sceneNet;
     }
 
     /** Faces with the bundled YuNet detector (on the phone; nothing leaves it). Falls back to Android's own detector. */

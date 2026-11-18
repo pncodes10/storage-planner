@@ -24,8 +24,17 @@ final class Sorter {
      * should reach pictures that are already sorted. 1: page-of-paper check. 2: eyes open on every photo with a face,
      * cards and papers held up are read (ID cards). 3: focus ignores sensor grain (night skies), glare share.
      * 4: a small sharp subject on a blurred background is not an accidental (shaken) shot.
+     * 5: smiles, faces looking at the camera, and how close the biggest face is (selfies).
      */
-    static final int VERSION = 4;
+    static final int VERSION = 5;
+
+    /**
+     * Version of the scene network and the aesthetic score (SceneNet, Scene, Aesthetic). Pictures measured with an
+     * older one are measured again. 1: first.
+     */
+    static final int SCENE_VERSION = 1;
+    /** The scene network looks at a copy this big (then squeezes it to 224 x 224). */
+    static final int SCENE_EDGE = 448;
 
     /** True when this earlier result for an unchanged picture can be kept as it is. */
     static boolean current(FileItem p) { return p != null && p.category != null && !p.textPending && p.sortVersion >= VERSION; }
@@ -53,7 +62,7 @@ final class Sorter {
         if (code == null && (s.flat >= 0.1 || s.paper >= 0.2)) code = Codes.read(l, w, h, true);
         f.code = code == null ? null : Codes.describe(code[0], code[1]);
         f.faces = -1;
-        f.eyeFaces = -1; f.eyesOpen = -1;
+        f.eyeFaces = -1; f.eyesOpen = -1; f.smiling = -1; f.looking = -1; f.faceSize = -1;
         // a page or a card is looked at for faces too: someone holding it up is a person, and an ID card has a face on it
         if ((!PhotoCategory.worthReading(f, s) || s.page() || PhotoCategory.cardCandidate(s)) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s))
             faces(pf, f, px, w, h, l);
@@ -74,6 +83,7 @@ final class Sorter {
             pr.update("Sorting pictures", k + 1, pics.size());
             FileItem f = pics.get(k);
             FileItem p = Scanner.same(f, opt.previous);
+            if (p != null && p.sceneVersion == SCENE_VERSION) { f.scene = p.scene; f.aesthetic = p.aesthetic; f.sceneVersion = p.sceneVersion; }
             if (current(p)) {                                                  // unchanged and fully sorted last time, by the current rules
                 copyOver(p, f);
                 continue;
@@ -94,9 +104,10 @@ final class Sorter {
             // and the text already read is not read again
             boolean again = p != null && p.category != null && !p.textPending;
             if (again && !PhotoCategory.PHOTO.equals(p.category) && !PhotoCategory.PEOPLE.equals(p.category) && !PhotoCategory.ACCIDENTAL.equals(p.category)) {
-                int ef = f.eyeFaces, eo = f.eyesOpen;                  // just measured: newer than what the older sort kept
+                int ef = f.eyeFaces, eo = f.eyesOpen, sm = f.smiling, lk = f.looking;   // just measured: newer than what the older sort kept
+                float fs = f.faceSize;
                 copyOver(p, f);
-                f.signals = s; f.sortVersion = VERSION; f.eyeFaces = ef; f.eyesOpen = eo;
+                f.signals = s; f.sortVersion = VERSION; f.eyeFaces = ef; f.eyesOpen = eo; f.smiling = sm; f.looking = lk; f.faceSize = fs;
                 continue;
             }
             boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
@@ -153,11 +164,76 @@ final class Sorter {
             String t = TextRules.clean(words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
+        scenes(pf, pr, pics, opt);
+    }
+
+    /** Whether the scene network looks at this picture: photos (not screenshots, papers, chats or graphics). */
+    static boolean sceneWorthy(FileItem f) {
+        return PhotoCategory.PHOTO.equals(f.category) || PhotoCategory.PEOPLE.equals(f.category) || PhotoCategory.ACCIDENTAL.equals(f.category);
+    }
+
+    /**
+     * Pass 3: what each photo shows (SceneNet, Scene) and its aesthetic score (Aesthetic), newest first, within
+     * opt.sceneBudgetMs; the rest is measured in the next scan. The network runs on several threads (one per core,
+     * up to 4); pictures are decoded one at a time.
+     */
+    static void scenes(final Platform pf, final Scanner.Progress pr, List<FileItem> pics, Scanner.Options opt) {
+        if (opt.sceneBudgetMs <= 0) return;
+        final List<FileItem> todo = new ArrayList<FileItem>();
+        for (FileItem f : pics) if (sceneWorthy(f) && f.sceneVersion != SCENE_VERSION) todo.add(f);
+        if (todo.isEmpty()) return;
+        final SceneNet net;
+        try { net = pf.sceneNet(); } catch (Throwable t) { return; }
+        if (net == null) return;
+        Collections.sort(todo, new Comparator<FileItem>() {
+            public int compare(FileItem a, FileItem b) { return Long.compare(b.mtime, a.mtime); }
+        });
+        final long end = System.currentTimeMillis() + opt.sceneBudgetMs;
+        final int[] next = {0}, done = {0};
+        int threads = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors()));
+        Thread[] ts = new Thread[threads];
+        for (int k = 0; k < threads; k++) {
+            ts[k] = new Thread(new Runnable() {
+                public void run() {
+                    int[] dims = new int[4];
+                    while (true) {
+                        FileItem f;
+                        int[] px;
+                        synchronized (next) {
+                            if (pr.cancelled() || System.currentTimeMillis() > end || next[0] >= todo.size()) return;
+                            f = todo.get(next[0]++);
+                            try { px = pf.argb(f.abs, SCENE_EDGE, dims); } catch (Throwable t) { px = null; }
+                        }
+                        if (px != null) {
+                            try { measureScene(net, f, px, dims[2], dims[3]); } catch (Throwable ignored) {}
+                        }
+                        synchronized (next) { done[0]++; pr.update("Looking at what photos show", done[0], todo.size()); }
+                    }
+                }
+            }, "scene-" + k);
+            ts[k].start();
+        }
+        for (Thread t : ts) try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+    }
+
+    /** Scene shares, sky share and aesthetic score of one picture (ARGB, w x h). */
+    static void measureScene(SceneNet net, FileItem f, int[] px, int w, int h) {
+        SceneNet.Out o = net.run(px, w, h);
+        float[] g = Scene.shares(SceneNet.probabilities(o.logits));
+        float[] sc = new float[g.length + 1];
+        System.arraycopy(g, 0, sc, 0, g.length);
+        double k = Math.min(1.0, 96.0 / Math.max(w, h));
+        int sw = Math.max(1, (int) Math.round(w * k)), sh = Math.max(1, (int) Math.round(h * k));
+        sc[g.length] = (float) Scene.sky(k >= 1 ? px : shrink(px, w, h, sw, sh), sw, sh);
+        f.scene = sc;
+        f.aesthetic = (float) Aesthetic.score(o.features);
+        f.sceneVersion = SCENE_VERSION;
     }
 
     private static void copyOver(FileItem p, FileItem f) {
         f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces; f.signals = p.signals;
         f.sortVersion = p.sortVersion; f.textPending = p.textPending; f.eyeFaces = p.eyeFaces; f.eyesOpen = p.eyesOpen;
+        f.smiling = p.smiling; f.looking = p.looking; f.faceSize = p.faceSize;
     }
 
     /** Faces, looked for on a small copy (People vs. other photos only needs to know there is a face). */
@@ -184,11 +260,12 @@ final class Sorter {
             float[] big = f.clone();
             for (int i = 0; i + Faces.F - 1 < big.length; i += Faces.F) {
                 big[i] *= kx; big[i + 1] *= ky; big[i + 2] *= kx;
-                big[i + 4] *= kx; big[i + 5] *= ky; big[i + 6] *= kx; big[i + 7] *= ky;
+                for (int k = 4; k < Faces.F; k += 2) { big[i + k] *= kx; big[i + k + 1] *= ky; }
             }
             int[] e = PhotoQuality.eyes(luma, w, h, big);
-            item.eyeFaces = e[0]; item.eyesOpen = e[1];
-        } catch (Throwable t) { item.eyeFaces = -1; item.eyesOpen = -1; }
+            item.eyeFaces = e[0]; item.eyesOpen = e[1]; item.smiling = e[2]; item.looking = e[3];
+            item.faceSize = e[0] > 0 ? e[4] / 10000f : -1;
+        } catch (Throwable t) { item.eyeFaces = -1; item.eyesOpen = -1; item.smiling = -1; item.looking = -1; item.faceSize = -1; }
     }
 
     /** Box-filter down-scaling of ARGB pixels. */

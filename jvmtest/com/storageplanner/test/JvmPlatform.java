@@ -133,6 +133,24 @@ public final class JvmPlatform implements Platform {
         return net;
     }
 
+    private static com.storageplanner.core.SceneNet scene;
+    private static boolean sceneTried;
+
+    /** The scene network (app/src/main/assets/scene/scene.bin or -Dscenemodel=...); null if missing or -Dscenemodel=none. */
+    public com.storageplanner.core.SceneNet sceneNet() { return sceneModel(); }
+
+    static synchronized com.storageplanner.core.SceneNet sceneModel() {
+        if (!sceneTried) {
+            sceneTried = true;
+            String p = System.getProperty("scenemodel", "app/src/main/assets/scene/scene.bin");
+            if (p.equals("none")) return null;
+            File m = new File(p);
+            if (!m.exists()) m = new File(System.getProperty("user.dir"), "../app/src/main/assets/scene/scene.bin");
+            try { if (m.exists()) scene = com.storageplanner.core.SceneNet.load(Files.readAllBytes(m.toPath())); } catch (Exception e) { scene = null; }
+        }
+        return scene;
+    }
+
     /**
      * Faces with the same detector the phone runs (YuNet). With -Dfaces=sidecar, or when the model is missing,
      * the "<photo>.faces" sidecars are used instead (see otherFaces).

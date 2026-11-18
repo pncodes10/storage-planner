@@ -40,6 +40,14 @@ public final class FileItem {
     public long taken = -1;       // when the photo was taken (EXIF), ms; 0 = the file has no such date; -1 = not read
     public long motionBytes = -1; // the short video inside a Motion Photo, bytes; 0 = not a Motion Photo; -1 = not checked
 
+    // ---- what a photo shows, and the people in it (1.10)
+    public float[] scene;         // SceneNet: shares for Scene.GROUPS (food, nature, pet, vehicle), then the sky share; null = not looked at
+    public float aesthetic = -1;  // learned aesthetic score, 1..10; -1 = not looked at
+    public int sceneVersion;      // Sorter.SCENE_VERSION when scene and aesthetic were measured; 0 = not measured
+    public float faceSize = -1;   // the biggest judged face: eye distance / the picture's short side; -1 = no face or not looked at
+    public int smiling = -1;      // of the judged faces (as for eyes), how many smile; -1 = not looked at
+    public int looking = -1;      // of the judged faces, how many look at the camera (head turned to it, eyes open); -1 = not looked at
+
     public String apkPackage;     // for .apk files: the package inside
     public long apkVersion;
 

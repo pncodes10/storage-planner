@@ -168,7 +168,8 @@ public final class Lab {
     }
 
     static float[] shown(Img m, float[] raw, int i, double pOpen) {
-        return new float[]{raw[i] / m.w, raw[i + 1] / m.h, raw[i + 2] / m.w, (float) pOpen, raw[i + 3]};
+        float turned = Faces.hasMouth(raw, i) ? (Smile.facing(raw, i) ? 1f : 0f) : Float.NaN;
+        return new float[]{raw[i] / m.w, raw[i + 1] / m.h, raw[i + 2] / m.w, (float) pOpen, raw[i + 3], (float) Smile.probability(m.l, m.w, m.h, raw, i), turned};
     }
 
     static double open(Img m, float[] raw, int i) { return EyeState.openProbability(m.l, m.w, m.h, raw[i + 4], raw[i + 5], raw[i + 6], raw[i + 7]); }
@@ -287,6 +288,14 @@ public final class Lab {
                     pOpen >= PhotoQuality.OPEN ? "EYES OPEN" : "EYES CLOSED"));
             o.line("    left/right eye at the 7 positions tried (centre, up, down, left, right, smaller, larger):" + shifts);
             o.line(f("    counts towards the score as %.2f of a face (0 below p=0.2, full above p=0.8)", PhotoQuality.openness(pOpen)));
+            if (Faces.hasMouth(raw, i)) {
+                double sm = Smile.probability(m.l, m.w, m.h, raw, i);
+                double[] t = Smile.turn(raw, i);
+                o.line(f("    smile probability %.2f -> %s; nose %s%.2f eye distances to the side, %.0f%% of the way down to the mouth -> %s",
+                        sm, sm >= Smile.SMILING ? "SMILING" : "NOT SMILING", t == null ? "" : "", t == null ? 0 : t[0], t == null ? 0 : 100 * t[1],
+                        Smile.facing(raw, i) ? (pOpen >= PhotoQuality.OPEN ? "LOOKING AT THE CAMERA" : "turned to the camera, but eyes closed") : "TURNED AWAY"));
+                o.line(f("    (turned to the camera: nose at most %.2f to the side and %.0f-%.0f%% of the way down)", Smile.MAX_TURN, 100 * Smile.MIN_NOSE, 100 * Smile.MAX_NOSE));
+            } else o.line("    smile and head turn: not known (this detector gives no mouth positions)");
             for (int e = 0; e < 2; e++) {
                 double ex = e == 0 ? x1 : x2, ey = e == 0 ? y1 : y2;
                 sh.patches.add(gray(EyeState.patch(m.l, m.w, m.h, ex, ey, d, e == 1)));
@@ -474,9 +483,33 @@ public final class Lab {
         f.category = r.category; f.faces = f.faces;
         o.line("  => " + PhotoCategory.label(r.category) + (r.why.isEmpty() ? "" : "  (" + r.why + ")") + (r.date > 0 ? "; date " + Report.day(r.date) : ""));
         f.category = r.category; f.catDate = r.date; f.textPending = read && v == null;
+        if (f.faceSize > 0 || f.smiling >= 0)
+            o.line(f("  people: biggest face %.1f%% of the short side apart at the eyes (selfie from %.0f%%); smiling %s, looking at the camera %s",
+                    100 * Math.max(0, f.faceSize), 100 * Scene.SELFIE_FACE, f.smiling < 0 ? "not known" : f.smiling + " of " + f.eyeFaces,
+                    f.looking < 0 ? "not known" : f.looking + " of " + f.eyeFaces));
+        sceneLines(pf, f, o);
         tagLines(f, now, o);
         sh.file = f;
         return sh;
+    }
+
+    /** What the photo shows and its aesthetic score, as the scan measures them (photos only). */
+    static void sceneLines(Platform pf, FileItem f, Out o) {
+        if (!Sorter.sceneWorthy(f)) { o.line("  scene network: not run (" + (Scene.document(f.category) ? "a paper or card: scene document" : "not a photo") + ")"); return; }
+        SceneNet net;
+        try { net = pf.sceneNet(); } catch (Throwable t) { net = null; }
+        if (net == null) { o.line("  ! the scene network is not available"); return; }
+        int[] dims = new int[4];
+        int[] px;
+        try { px = pf.argb(f.abs, Sorter.SCENE_EDGE, dims); } catch (Throwable t) { px = null; }
+        if (px == null) return;
+        long t0 = System.nanoTime();
+        Sorter.measureScene(net, f, px, dims[2], dims[3]);
+        StringBuilder b = new StringBuilder();
+        for (int g = 0; g < Scene.GROUPS.length; g++) b.append(f(" %s %.0f%%", Scene.GROUPS[g], 100 * f.scene[g]));
+        o.line(f("  scene network (%d ms):%s; sky %.0f%% of the picture -> scene %s (a group needs %.0f%%, sky %.0f%%)", (System.nanoTime() - t0) / 1000000, b,
+                100 * f.scene[Scene.GROUPS.length], Scene.of(f), 100 * Scene.MIN_SHARE, 100 * Scene.MIN_SKY));
+        o.line(f("  aesthetic score %.1f of 10 (%s)", f.aesthetic, Aesthetic.words(f.aesthetic)));
     }
 
     // ------------------------------------------------------------------ rules
