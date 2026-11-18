@@ -63,6 +63,12 @@ public interface Platform {
     /** {package, versionCode} of an .apk file, or null. */
     String[] apkInfo(String path);
 
+    /**
+     * Absolute paths of the pictures and videos marked as favourites in the gallery (Android 11+), or null when the phone
+     * cannot say (older Android, or the gallery index could not be read). An empty set means none is a favourite.
+     */
+    java.util.Set<String> favourites();
+
     /** Android API level (for features such as app archiving, API 35+). */
     int sdkInt();
 

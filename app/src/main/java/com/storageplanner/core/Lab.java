@@ -449,6 +449,8 @@ public final class Lab {
         Shown sh = new Shown();
         FileItem f = new FileItem(p.rel != null ? p.rel : p.area.equals("screenshot") ? "Pictures/Screenshots/" + p.name : "Lab/" + p.name, p.path, p.size, p.mtime);
         f.area = p.area; f.type = p.type != null ? p.type : p.name.toLowerCase(Locale.ROOT).endsWith(".png") ? "png" : "jpeg";
+        f.taken = "jpeg".equals(f.type) ? PhotoMeta.taken(p.path, java.util.TimeZone.getDefault()) : 0;    // date taken, Motion Photo: as in a scan
+        if ("camera".equals(f.area)) try { f.motionBytes = com.storageplanner.tools.MotionPhoto.find(new java.io.File(p.path)).videoBytes(); } catch (Throwable t) { f.motionBytes = -1; }
         Img m = load(pf, p, Sorter.EDGE, o);
         if (m == null) return sh;
         int[] d = {m.ow, m.oh, m.w, m.h};

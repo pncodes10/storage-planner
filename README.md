@@ -475,6 +475,30 @@ Nothing is copied, changed or deleted by either button. `SampleTest` covers the 
 the limited analysis (only the picked pictures, sorted, a plan built from them), skipping files that are not
 pictures, stopping, and that no file changes.
 
+## Five tags from the file and the gallery
+
+Every picture now also gets these tags, which rules can use:
+
+| Tag | Where it comes from | Unknown when |
+|---|---|---|
+| **Favourite in your gallery** (`favourite`, yes/no) | The heart or star you set in the phone's gallery (Android's media index, `IS_FAVORITE`; a read-only query) | Before Android 11, or the index could not be read |
+| **Age in days (since taken)** (`taken_days`) | The date the camera wrote into the photo (EXIF DateTimeOriginal, with its time zone offset when the camera wrote one, else the phone's). Unlike "age" (the file's date), it survives copying, forwarding and restoring a backup | The picture has no such date (most screenshots, downloads and chat images, and PNG, WebP and HEIC files: only JPEG is read) |
+| **Screenshot of app** (`screenshot_app`) | The screenshot's file name: Samsung writes the app's name (`Screenshot_20240115_123456_WhatsApp.jpg`), Xiaomi and others the package (`…_com.whatsapp.jpg`), shown as the app's name when the app is installed | Not a screenshot, or the name does not say (Pixel; OnePlus and Oppo write a code) |
+| **Motion photo** (`motion_photo`, yes/no) and **Motion photo video size** (`motion_video_mb`) | The short video inside Samsung and Google Motion Photos, found by the Motion Photo tool's finder, which only reads | Not a camera photo (only JPEG and HEIC camera photos are checked) |
+| **Code type** (`code_type`) | What the QR code or barcode found while sorting is: UPI payment, link, Wi-Fi, contact, e-mail, phone number, barcode, text, or none | The picture was not sorted |
+
+**Favourites are never suggested.** A new built-in rule, **Favourite in your gallery**, keeps every favourite out of every
+suggestion, like a keep rule of your own. It can be switched off on the rules screen. The old-against-new test checks
+that favourites get no option and every other file gets exactly the options it got before.
+
+Date taken and the Motion Photo check read each picture's first 72 KB (and the end of camera photos) once; results
+format 9 saves them, so a later scan reads only new or changed pictures. The favourites are asked again at every scan.
+Rule ideas: `screenshot_app = Swiggy` and `age_days > 30` → delete; `code_type = UPI payment` and `category = Payment
+screenshots`; `motion_photo is yes` and `taken_days > 365` (no rule can remove the video part yet: that is the
+Motion Photo tool in the Lab). `PhotoMetaTest` covers the EXIF reader (both byte orders, offsets, blank and damaged
+dates), screenshot names from several phones, code types, a scan of a small phone with a favourite and a Motion
+Photo, saving and loading, and the favourites rule.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -608,7 +632,7 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed; SampleTest for Try on my pictures) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed; SampleTest for Try on my pictures; PhotoMetaTest for favourites, date taken, screenshot app, Motion Photos and code type) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

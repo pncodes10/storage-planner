@@ -30,6 +30,18 @@ public final class JvmPlatform implements Platform {
 
     public JvmPlatform(String deviceDir) { this.dev = new File(deviceDir); }
 
+    /** meta/favourites.txt on the virtual phone: one path per line, relative to sdcard; no such file = the phone cannot say. */
+    public java.util.Set<String> favourites() {
+        File m = new File(dev, "meta/favourites.txt");
+        if (!m.isFile()) return null;
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        try {
+            for (String l : Files.readAllLines(m.toPath(), StandardCharsets.UTF_8))
+                if (!l.trim().isEmpty()) out.add(new File(storageRoot(), l.trim()).getAbsolutePath());
+        } catch (Exception e) { return null; }
+        return out;
+    }
+
     public String storageRoot() { return new File(dev, "sdcard").getAbsolutePath(); }
     public long totalBytes() { return du(dev); }      // the virtual phone is "full"
     public long freeBytes() { return 0; }

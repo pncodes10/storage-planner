@@ -48,6 +48,28 @@ public final class AndroidPlatform implements Platform {
 
     public String storageRoot() { return Environment.getExternalStorageDirectory().getAbsolutePath(); }
     public int sdkInt() { return Build.VERSION.SDK_INT; }
+
+    /**
+     * Favourites from the gallery index (MediaStore IS_FAVORITE, Android 11+): the paths of pictures and videos marked with
+     * the heart or star in the phone's gallery. Read-only query; null on older Android or when the index cannot be read.
+     */
+    public java.util.Set<String> favourites() {
+        if (Build.VERSION.SDK_INT < 30) return null;
+        java.util.Set<String> out = new java.util.HashSet<String>();
+        android.database.Cursor c = null;
+        try {
+            android.net.Uri uri = android.provider.MediaStore.Files.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL);
+            String data = android.provider.MediaStore.MediaColumns.DATA;
+            c = ctx.getContentResolver().query(uri, new String[]{data}, android.provider.MediaStore.MediaColumns.IS_FAVORITE + "=1", null, null);
+            if (c == null) return null;
+            while (c.moveToNext()) { String p = c.getString(0); if (p != null) out.add(new java.io.File(p).getAbsolutePath()); }
+            return out;
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (c != null) try { c.close(); } catch (Throwable ignored) {}
+        }
+    }
     public long now() { return System.currentTimeMillis(); }
 
     public long totalBytes() {

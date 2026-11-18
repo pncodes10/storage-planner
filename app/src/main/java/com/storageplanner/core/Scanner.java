@@ -154,6 +154,29 @@ public final class Scanner {
                 if (info != null) { f.apkPackage = info[0]; try { f.apkVersion = Long.parseLong(info[1]); } catch (Exception ignored) {} }
             }
         }
+        // ---- favourites in the gallery, date taken and Motion Photos (from the file, not the pixels)
+        java.util.Set<String> fav = null;
+        try { fav = pf.favourites(); } catch (Throwable ignored) {}
+        for (FileItem f : r.files) {
+            String k = Tags.kind(f);
+            if (fav != null && (Tags.IMAGE.equals(k) || Tags.VIDEO.equals(k))) f.favourite = fav.contains(f.abs);
+        }
+        java.util.TimeZone tz = java.util.TimeZone.getDefault();
+        List<FileItem> pics = new ArrayList<FileItem>();
+        for (FileItem f : r.files) if (Tags.IMAGE.equals(Tags.kind(f))) pics.add(f);
+        for (int k = 0; k < pics.size(); k++) {
+            if (pr.cancelled()) return r;
+            FileItem f = pics.get(k);
+            FileItem p = same(f, opt.previous);
+            if (p != null && p.taken >= 0) { f.taken = p.taken; f.motionBytes = p.motionBytes; continue; }   // read last time
+            if (k % 50 == 0) pr.update("Reading photo details", k + 1, pics.size());
+            f.taken = "jpeg".equals(f.type) ? PhotoMeta.taken(f.abs, tz) : 0;
+            if (f.taken < 0) continue;                                        // unreadable: try again next time
+            // the short video of a Motion Photo: only camera photos have one (read-only; the Motion Photo tool's finder)
+            if (f.area.equals("camera") && ("jpeg".equals(f.type) || "heic".equals(f.type)))
+                try { f.motionBytes = com.storageplanner.tools.MotionPhoto.find(new File(f.abs)).videoBytes(); }
+                catch (Throwable t) { f.motionBytes = -1; }
+        }
         int[] dims = new int[4];
         Map<FileItem, Sorter.Prep> measured = new HashMap<FileItem, Sorter.Prep>();
         for (int k = 0; k < imgs.size(); k++) {

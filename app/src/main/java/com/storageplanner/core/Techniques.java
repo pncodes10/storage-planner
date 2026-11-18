@@ -24,6 +24,7 @@ public final class Techniques {
     public static final String UNINSTALL_GAMES = "Uninstall unused games";
     public static final String UNINSTALL_APPS = "Uninstall unused apps";
     public static final String BURSTS = "Burst near-duplicates";
+    public static final String FAVOURITES = "Favourites in your gallery (kept)";
     public static final String BLURRY = "Possibly blurry photos";
     public static final String OLD_DOWNLOADS = "Old downloads and installers";
     public static final String OTP_SHOTS = "Screenshots of one-time codes";
@@ -87,6 +88,8 @@ public final class Techniques {
             "Look at each one; delete it in your gallery if nothing is in it.");
         put(BURSTS, "Photos taken within minutes of each other that look almost identical. The better one is kept: eyes open, faces visible, sharper, better lit.",
             "Look at each one; delete the extras in your gallery if you agree.");
+        put(FAVOURITES, "Pictures and videos you marked as favourites in your gallery. They never get a suggestion.",
+            "Nothing to do: favourites are kept. Remove the heart or star in your gallery if one should be suggested again.");
         put(BLURRY, "Photos much softer than the rest of your photos. Some may be intentional (motion, low light, close-ups).",
             "Look at each one before deleting.");
         put(OLD_DOWNLOADS, "Downloads you have not touched for 6+ months, and installers for apps that are no longer installed.",

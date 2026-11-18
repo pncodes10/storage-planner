@@ -72,6 +72,12 @@ public final class BuiltInRules {
                 .when(Tags.SIZE_BYTES, Op.GE, num(UnitBuilder.OLD_DOWNLOAD_MIN));
         old.onlyIfNoOtherOption = true;
         l.add(old);
+        // ---- keep: a favourite in the gallery gets no suggestion at all (you marked it; unknown before Android 11)
+        Rule fav = new Rule();
+        fav.id = "keep_favourites"; fav.name = "Favourite in your gallery"; fav.builtIn = true; fav.action = Action.KEEP;
+        fav.technique = Techniques.FAVOURITES; fav.risk = Option.R0; fav.saving = Saving.FILE_SIZE; fav.why = "";
+        fav.when(Tags.FAVOURITE, Op.IS_YES, "");
+        l.add(fav);
         // ---- re-encoding: the first rule that matches a file is the only one used
         l.add(re("reencode_camera_photo", "Re-encode camera photo", Action.REENCODE_PHOTO, Techniques.PHOTOS, Option.R2, Saving.CAMERA_PHOTO,
                 "Visually identical at matched quality; {photo_source}")

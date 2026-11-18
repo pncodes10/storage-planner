@@ -183,6 +183,7 @@ public final class RulesEquivalenceTest {
         // teeth: with any one built-in rule switched off the result must differ from the old code somewhere (so every rule was exercised)
         int untested = 0;
         for (Rule rule : RuleSet.defaults().rules) {
+            if (rule.id.equals("keep_favourites")) continue;           // new since the old code: checked on its own below
             boolean differs = false;
             for (int seed = 0; seed < 80 && !differs; seed++) {
                 Scanner.Result r = scan(new Random(seed));
@@ -193,6 +194,27 @@ public final class RulesEquivalenceTest {
             if (!differs) { untested++; fail("rule " + rule.id + " is never exercised by the random scans"); }
         }
         System.out.println("  every one of the " + RuleSet.defaults().rules.size() + " built-in rules changes the result when switched off: " + (untested == 0));
+        // favourites (new since the old code): a favourite gets no option at all; every other file exactly as before
+        int favs = 0, favWithOld = 0;
+        for (int seed = 0; seed < 40; seed++) {
+            Scanner.Result r = scan(new Random(seed));
+            java.util.Set<String> fav = new java.util.HashSet<String>();
+            for (int i = 0; i < r.files.size(); i++) if (i % 7 == 0) { r.files.get(i).favourite = true; fav.add(r.files.get(i).rel); }
+            List<Unit> old = new LegacyUnitBuilder(r, ests[0], 34).units, now = new UnitBuilder(r, ests[0], 34).units;
+            java.util.Map<String, Unit> nowById = new java.util.HashMap<String, Unit>();
+            for (Unit u : now) nowById.put(u.id, u);
+            for (Unit u : old) {
+                Unit n = nowById.get(u.id);
+                if (fav.contains(u.id)) {
+                    favs++;
+                    if (!u.options.isEmpty()) favWithOld++;
+                    if (n != null && !n.options.isEmpty()) fail("favourite " + u.id + " still gets an option");
+                } else if (n == null || !summary(java.util.Collections.singletonList(u)).equals(summary(java.util.Collections.singletonList(n))))
+                    fail("non-favourite " + u.id + " changed");
+            }
+        }
+        if (favWithOld == 0) fail("rule keep_favourites is never exercised by the random scans");
+        System.out.println("  favourites: " + favs + " favourite files (" + favWithOld + " had an option before) get none; the rest unchanged");
         if (args.length > 0 && new File(args[0]).isDirectory()) {
             JvmPlatform pf = new JvmPlatform(args[0]);
             Scanner.Result r = Scanner.scan(pf, new Scanner.Progress() {

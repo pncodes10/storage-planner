@@ -35,6 +35,11 @@ public final class FileItem {
     public ImageSignals.S signals;
     public int sortVersion;       // Sorter.VERSION in force when this picture was sorted; 0 = sorted by an older app (measure and sort again once)
 
+    // ---- from the file and the gallery (1.9)
+    public Boolean favourite;     // marked as a favourite in the gallery (Android 11+); null = not known
+    public long taken = -1;       // when the photo was taken (EXIF), ms; 0 = the file has no such date; -1 = not read
+    public long motionBytes = -1; // the short video inside a Motion Photo, bytes; 0 = not a Motion Photo; -1 = not checked
+
     public String apkPackage;     // for .apk files: the package inside
     public long apkVersion;
 

@@ -25,7 +25,8 @@ public final class Tags {
     // ---- ids (stable; rules refer to them)
     public static final String SOURCE = "source", AREA = "area", KIND = "kind", SIZE_BYTES = "size_bytes", AGE_DAYS = "age_days",
             WIDTH = "width", HEIGHT = "height", MEGAPIXELS = "megapixels", CATEGORY = "category", TEXT_READ = "text_read",
-            FACES = "faces", EYES_OPEN = "eyes_open", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share", GLARE_SHARE = "glare_share",
+            FACES = "faces", EYES_OPEN = "eyes_open", HAS_CODE = "has_code", BLUR = "blur", BRIGHTNESS = "brightness", DARK_SHARE = "dark_share", GLARE_SHARE = "glare_share", FAVOURITE = "favourite", TAKEN_DAYS = "taken_days",
+            SCREENSHOT_APP = "screenshot_app", MOTION_PHOTO = "motion_photo", MOTION_VIDEO_MB = "motion_video_mb", CODE_TYPE = "code_type",
             COLOURFULNESS = "colourfulness", GRAPHIC_SHARE = "graphic_share", PAPER_SHARE = "paper_share", INK_SHARE = "ink_share", LOOKS_LIKE_PAGE = "looks_like_page", TEXT_AMOUNT = "text_amount",
             DUPLICATE = "duplicate", BURST_EXTRA = "burst_extra", BURST_KEEPER = "burst_keeper", SENT_COPY = "sent_copy",
             BLURRY = "blurry_vs_your_photos", INSTALLER_INSTALLED = "installer_already_installed", INSTALLER_NOT_INSTALLED = "installer_not_installed",
@@ -137,6 +138,12 @@ public final class Tags {
         public Boolean dateInPicture;                   // a date was read in the picture; null = not sorted
         public double daysSinceDate = UNKNOWN;          // days since that date (0 if it lies ahead); UNKNOWN without a date
         public String apkPackage;                       // package inside an .apk file
+        public Boolean favourite;                       // a favourite in the gallery; null = the phone cannot say (before Android 11)
+        public double takenDays = UNKNOWN;              // days since the photo was taken (EXIF); UNKNOWN when the file has no such date
+        public String screenshotApp;                    // the app a screenshot shows, from its file name; null when the name does not say
+        public Boolean motionPhoto;                     // has a short video inside; null = not checked (only camera JPEG/HEIC are)
+        public double motionVideoMb = UNKNOWN;          // that video's size in MB (0 when not a Motion Photo)
+        public String codeType;                         // kind of QR code or barcode (PhotoMeta.CODE_*); null = not sorted
 
         /** All tags in a fixed order, unknown ones included (for rules and tests). */
         public List<Entry> all() {
@@ -184,6 +191,12 @@ public final class Tags {
             l.add(flag(DATE_IN_PICTURE, "Date read in the picture", dateInPicture, null));
             l.add(num(DAYS_SINCE_DATE, "Days since the date in the picture", daysSinceDate, String.format(Locale.US, "%.0f days", daysSinceDate)));
             l.add(text(APK_PACKAGE, "Installer for package", apkPackage));
+            l.add(flag(FAVOURITE, "Favourite in your gallery", favourite, null));
+            l.add(num(TAKEN_DAYS, "Age in days (since taken)", takenDays, String.format(Locale.US, "%.0f days", takenDays)));
+            l.add(text(SCREENSHOT_APP, "Screenshot of app", screenshotApp));
+            l.add(flag(MOTION_PHOTO, "Motion photo (has a short video)", motionPhoto, motionPhoto != null && motionPhoto ? String.format(Locale.US, "%.1f MB video", motionVideoMb) : null));
+            l.add(num(MOTION_VIDEO_MB, "Motion photo video size", motionVideoMb, String.format(Locale.US, "%.1f MB", motionVideoMb)));
+            l.add(text(CODE_TYPE, "Code type", codeType));
             return l;
         }
 
@@ -209,6 +222,8 @@ public final class Tags {
                 case BITS_PER_PIXEL: return bitsPerPixel;
                 case BITRATE_KBPS: return bitrateKbps;
                 case DAYS_SINCE_DATE: return daysSinceDate;
+                case TAKEN_DAYS: return takenDays;
+                case MOTION_VIDEO_MB: return motionVideoMb;
                 default: return UNKNOWN;
             }
         }
@@ -225,6 +240,8 @@ public final class Tags {
                 case FILE_TYPE: return fileType;
                 case VIDEO_CODEC: return videoCodec;
                 case APK_PACKAGE: return apkPackage;
+                case SCREENSHOT_APP: return screenshotApp;
+                case CODE_TYPE: return codeType;
                 default: return null;
             }
         }
@@ -247,6 +264,8 @@ public final class Tags {
                 case CHAT_MEDIA: return chatMedia;
                 case CAMERA_PHOTO: return cameraPhoto;
                 case DATE_IN_PICTURE: return dateInPicture;
+                case FAVOURITE: return favourite;
+                case MOTION_PHOTO: return motionPhoto;
                 default: return null;
             }
         }
@@ -285,10 +304,10 @@ public final class Tags {
     private static final Map<String, Type> TYPES = new HashMap<String, Type>();
     static {
         for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, GLARE_SHARE, COLOURFULNESS,
-                GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE}) TYPES.put(id, Type.NUMBER);
-        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE}) TYPES.put(id, Type.TEXT);
+                GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE, TAKEN_DAYS, MOTION_VIDEO_MB}) TYPES.put(id, Type.NUMBER);
+        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
-                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE}) TYPES.put(id, Type.FLAG);
+                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE, FAVOURITE, MOTION_PHOTO}) TYPES.put(id, Type.FLAG);
     }
 
     /** The type of the tag with this id; null if there is no such tag. */
@@ -316,7 +335,10 @@ public final class Tags {
         {CHAT_MEDIA, "", "is chat or Telegram media"}, {CAMERA_PHOTO, "", "is a camera photo"}, {SIZE_MB, "MB", "size"},
         {FILE_TYPE, "", "file type"}, {BITS_PER_PIXEL, "", "bits per pixel"}, {VIDEO_CODEC, "", "video codec"}, {BITRATE_KBPS, "kbit/s", "bitrate"},
         {DATE_IN_PICTURE, "", "has a date read in the picture"}, {DAYS_SINCE_DATE, "days", "time since the date in the picture"},
-        {APK_PACKAGE, "", "installer for package"}};
+        {APK_PACKAGE, "", "installer for package"},
+        {FAVOURITE, "", "is a favourite in your gallery"}, {TAKEN_DAYS, "days", "time since it was taken"},
+        {SCREENSHOT_APP, "", "app in the screenshot"}, {MOTION_PHOTO, "", "is a motion photo"}, {MOTION_VIDEO_MB, "MB", "size of its motion photo video"},
+        {CODE_TYPE, "", "kind of code"}};
 
     private static List<Info> LIST;
 
@@ -374,6 +396,7 @@ public final class Tags {
             case TEXT_READ: for (String c : new String[] {TEXT_HAS, TEXT_NOT_YET, TEXT_NONE}) l.add(new Choice(c, c)); break;
             case TEXT_AMOUNT: for (String c : new String[] {AMOUNT_NONE, AMOUNT_SOME, AMOUNT_LOTS}) l.add(new Choice(c, c)); break;
             case FILE_TYPE: for (String c : FILE_TYPES) l.add(new Choice(c, c)); break;
+            case CODE_TYPE: for (String c : PhotoMeta.CODE_TYPES) l.add(new Choice(c, c)); break;
             default: break;
         }
         return l;
@@ -476,6 +499,11 @@ public final class Tags {
         t.screenshot = PhotoCategory.isScreenshot(f);
         t.chatMedia = f.area != null && (f.area.startsWith("wa_") || "telegram_media".equals(f.area));
         t.cameraPhoto = "camera".equals(f.area) && IMAGE.equals(t.kind);
+        t.favourite = f.favourite;
+        if (f.taken > 0) t.takenDays = Math.max(0, (now - f.taken) / 86400000.0);
+        if (t.screenshot) t.screenshotApp = PhotoMeta.screenshotApp(f.name(), ctx.apps);
+        if (f.motionBytes >= 0) { t.motionPhoto = f.motionBytes > 0; t.motionVideoMb = f.motionBytes / 1e6; }
+        if (f.category != null) t.codeType = PhotoMeta.codeType(f.code);
         return t;
     }
 
