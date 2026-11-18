@@ -29,6 +29,7 @@ public final class ImageSignals {
         public double paper;                // share of bright, nearly colourless pixels
         public double flat;                 // share of pixels exactly equal to all 4 neighbours (screens, graphics)
         public double sharp;                // PhotoQuality.sharpness
+        public double peakSharp = -1;       // focus of the sharpest parts (PhotoQuality.focus); -1 = not measured (sorted before it existed)
         public int textBlobs;               // character-sized blobs that sit in rows with neighbours
         public double textArea;             // share of the picture covered by those rows' characters
         public int textLines;               // rough number of text lines
@@ -98,7 +99,8 @@ public final class ImageSignals {
                 if ((argb[i - 1] & 0xFFFFFF) == p && (argb[i + 1] & 0xFFFFFF) == p && (argb[i - w] & 0xFFFFFF) == p && (argb[i + w] & 0xFFFFFF) == p) flat++;
             }
         s.flat = flat / (double) Math.max(1, (w - 2) * (h - 2));
-        s.sharp = PhotoQuality.sharpness(l, w, h);
+        double[] fo = PhotoQuality.focus(l, w, h);
+        s.sharp = fo[0]; s.peakSharp = fo[1];
         long[][] in = integral(l, w, h);
         text(l, w, h, s, in);
         page(argb, l, w, h, in, hist, histPlain, s);

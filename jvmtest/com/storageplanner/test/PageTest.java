@@ -239,6 +239,7 @@ public final class PageTest {
         resort();
 
         nightChecks();
+        bokehChecks();
         System.out.println(checks - fails + "/" + checks + " page checks pass");
         if (fails > 0) System.exit(1);
     }
@@ -368,4 +369,32 @@ public final class PageTest {
     }
 
     static String f(double v) { return String.format(java.util.Locale.US, "%.3f", v); }
+
+    // ---- a small sharp subject on a blurred background (a flower in portrait mode) is not a shaken shot
+    static int[] bokeh(long seed, boolean subjectSharp) {
+        java.util.Random r = new java.util.Random(seed);
+        double[] y = new double[W * H];
+        for (int py = 0; py < H; py++)
+            for (int px = 0; px < W; px++) y[py * W + px] = 90 + 60 * Math.sin(px / 9.0) * Math.cos(py / 11.0) + r.nextGaussian() * 25;
+        double[] soft = boxBlur(y, 6);
+        int x0 = W / 2 - 90, x1 = W / 2 + 90, y0 = H / 2 - 110, y1 = H / 2 + 110;          // about 7% of the picture
+        int[] out = new int[W * H];
+        for (int py = 0; py < H; py++)
+            for (int px = 0; px < W; px++) {
+                boolean in = px >= x0 && px < x1 && py >= y0 && py < y1;
+                double v = in && subjectSharp ? ((px / 6 + py / 6) % 2 == 0 ? 70 : 200) : soft[py * W + px];
+                out[py * W + px] = rgb(v + 30, v - 10, v - 20);
+            }
+        return out;
+    }
+
+    static void bokehChecks() {
+        ImageSignals.S sharp = ImageSignals.measure(bokeh(3, true), W, H), soft = ImageSignals.measure(bokeh(3, false), W, H);
+        check("bokeh: soft overall (focus " + f(sharp.sharp) + " < " + PhotoCategory.SHAKEN + ")", sharp.sharp < PhotoCategory.SHAKEN);
+        check("bokeh: the sharp subject is seen (sharpest parts " + f(sharp.peakSharp) + " >= " + PhotoCategory.SHAKEN_PEAK + ")", sharp.peakSharp >= PhotoCategory.SHAKEN_PEAK);
+        check("bokeh: a sharp subject on a blurred background is not an accidental shot", !PhotoCategory.accidental(sharp));
+        check("bokeh: the same picture with the subject blurred too is (sharpest parts " + f(soft.peakSharp) + ")", PhotoCategory.accidental(soft));
+        ImageSignals.S night = ImageSignals.measure(night(1, false, 4), W, H);
+        check("a blurred night shot is still an accidental shot", PhotoCategory.accidental(night) || night.meanLuma <= 25);
+    }
 }

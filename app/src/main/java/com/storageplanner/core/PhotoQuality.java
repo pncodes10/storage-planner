@@ -128,9 +128,17 @@ public final class PhotoQuality {
     static final double NOISE_VAR = 25;     // luma variance of a tile that is only sensor grain stays below this (std-dev 5)
     static final int MIN_TILES = 3;
 
-    public static double sharpness(int[] l, int w, int h) {
+    public static double sharpness(int[] l, int w, int h) { return focus(l, w, h)[0]; }
+
+    /**
+     * {focus (the 90th percentile above), focus of the sharpest parts (the 3rd-sharpest tile)}; {-1, -1} for a picture
+     * smaller than one tile. The second number is for photos where only a small subject is sharp on purpose (a flower with
+     * a blurred background, portrait mode): their 90th percentile falls in the background, but their sharpest tiles are
+     * clearly sharp. In a shaken or blurred photo nothing is sharp, so its sharpest tiles stay low too.
+     */
+    public static double[] focus(int[] l, int w, int h) {
         int tw = w / 64, th = h / 64;
-        if (tw == 0 || th == 0) return -1;
+        if (tw == 0 || th == 0) return new double[]{-1, -1};
         double[] lap = new double[tw * th], var = new double[tw * th];
         for (int ty = 0; ty < th; ty++)
             for (int tx = 0; tx < tw; tx++) {
@@ -147,11 +155,14 @@ public final class PhotoQuality {
         }
         double[] v = new double[lap.length]; int n = 0;
         for (int i = 0; i < lap.length; i++) if (var[i] >= min) v[n++] = Math.max(0, lap[i] - grain) / var[i];
-        if (n == 0) return 0;
+        if (n == 0) return new double[]{0, 0};
         v = java.util.Arrays.copyOf(v, n);
         java.util.Arrays.sort(v);
-        return v[(int) Math.min(n - 1, Math.floor(0.9 * (n - 1) + 0.5))];
+        return new double[]{v[(int) Math.min(n - 1, Math.floor(0.9 * (n - 1) + 0.5))], v[Math.max(0, n - PEAK_TILE)]};
     }
+
+    /** The sharpest parts: the PEAK_TILE-th sharpest tile, so one or two odd tiles (a highlight, a crisp edge of noise) do not count. */
+    static final int PEAK_TILE = 3;
 
     /** Laplacian variance of sensor grain: the median over tiles with almost nothing in them; 0 with fewer than MIN_TILES such tiles. */
     static double grain(double[] lap, double[] var) {

@@ -23,8 +23,9 @@ final class Sorter {
      * next scan (the file is unchanged, but the rules or the measurements are new). Raise it whenever a change
      * should reach pictures that are already sorted. 1: page-of-paper check. 2: eyes open on every photo with a face,
      * cards and papers held up are read (ID cards). 3: focus ignores sensor grain (night skies), glare share.
+     * 4: a small sharp subject on a blurred background is not an accidental (shaken) shot.
      */
-    static final int VERSION = 3;
+    static final int VERSION = 4;
 
     /** True when this earlier result for an unchanged picture can be kept as it is. */
     static boolean current(FileItem p) { return p != null && p.category != null && !p.textPending && p.sortVersion >= VERSION; }

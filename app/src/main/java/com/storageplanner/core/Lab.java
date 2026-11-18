@@ -454,8 +454,8 @@ public final class Lab {
         int[] d = {m.ow, m.oh, m.w, m.h};
         Sorter.Prep prep = Sorter.measure(pf, f, m.px, d);
         ImageSignals.S s = prep.s;
-        o.line(f("  brightness %.0f, contrast %.1f, colourful %.1f, dark %.1f%%, glare %.1f%%, paper-like %.1f%%, flat (screen) %.1f%%, focus %.3f",
-                s.meanLuma, s.contrast, s.colorful, 100 * s.darkFrac, 100 * s.glare, 100 * s.paper, 100 * s.flat, s.sharp));
+        o.line(f("  brightness %.0f, contrast %.1f, colourful %.1f, dark %.1f%%, glare %.1f%%, paper-like %.1f%%, flat (screen) %.1f%%, focus %.3f (sharpest parts %.3f)",
+                s.meanLuma, s.contrast, s.colorful, 100 * s.darkFrac, 100 * s.glare, 100 * s.paper, 100 * s.flat, s.sharp, s.peakSharp));
         o.line(f("  text-like marks %d in %d lines covering %.2f%% (letter height %.1f%% of the picture, big lettering %.0f%% of the width)",
                 s.textBlobs, s.textLines, 100 * s.textArea, 100 * s.textHeight, 100 * s.bigText));
         o.line(pageLine(s));
@@ -465,7 +465,7 @@ public final class Lab {
         o.line("  card or paper held up? " + (PhotoCategory.cardLike(f, s) ? "yes" + (f.faces > 0 ? " (with a face: only an ID document verdict from the text counts)" : " (three or more lines of print)")
                 : "no" + (PhotoCategory.cardCandidate(s) ? " (paper and print, but no face and fewer than 3 lines)" : f(" (needs paper-like 20%%+, 2+ lines, 8+ marks)"))));
         boolean read = PhotoCategory.worthReading(f, s);
-        o.line("  accidental shot? " + PhotoCategory.accidental(s) + "; worth reading the text? " + read);
+        o.line("  accidental shot? " + PhotoCategory.accidental(s) + shakenNote(s) + "; worth reading the text? " + read);
         TextRules.Verdict v = null;
         if (read) v = readAndJudge(pf, f, s, prep.aspect, now, o);
         PhotoCategory.Result r = PhotoCategory.classify(f, s, f.code, v, f.faces);
@@ -532,6 +532,15 @@ public final class Lab {
         for (Option op : u.options)
             o.line(f("      %s by \"%s\", frees about %.1f MB%s", op.action, op.technique, op.saved / 1e6, op.why == null || op.why.isEmpty() ? "" : " — " + op.why));
         return sh;
+    }
+
+    /** Why a soft picture is or is not called shaken (both its focus and its sharpest parts must be soft). */
+    static String shakenNote(ImageSignals.S s) {
+        if (s.sharp < 0 || s.sharp >= PhotoCategory.SHAKEN) return "";
+        if (s.peakSharp >= PhotoCategory.SHAKEN_PEAK)
+            return f(" (soft overall, focus %.3f < %.2f, but its sharpest parts are sharp, %.3f >= %.2f: a sharp subject on a blurred background, not shaken)",
+                    s.sharp, PhotoCategory.SHAKEN, s.peakSharp, PhotoCategory.SHAKEN_PEAK);
+        return f(" (focus %.3f < %.2f and even its sharpest parts are soft, %.3f < %.2f)", s.sharp, PhotoCategory.SHAKEN, s.peakSharp, PhotoCategory.SHAKEN_PEAK);
     }
 
     /** The page-of-paper measurements on one line (the later ones are not measured when an earlier check already failed). */

@@ -123,14 +123,14 @@ public final class ResultStoreTest {
         ImageSignals.S sg = new ImageSignals.S();
         sg.meanLuma = 101.25; sg.darkFrac = 0.125; sg.contrast = 33.5; sg.colorful = 17.75; sg.paper = 0.0625; sg.flat = 0.5; sg.sharp = 0.375;
         sg.textBlobs = 77; sg.textArea = 0.015625; sg.textLines = 6; sg.textHeight = 0.03125; sg.bigText = 0.25;
-        sg.whiteLevel = 161; sg.pagePaper = 0.875; sg.smooth = 0.9375; sg.ink = 0.0234375; sg.inkBands = 7; sg.glare = 0.1875;
+        sg.whiteLevel = 161; sg.pagePaper = 0.875; sg.smooth = 0.9375; sg.ink = 0.0234375; sg.inkBands = 7; sg.glare = 0.1875; sg.peakSharp = 0.4375;
         own.signals = sg; own.sortVersion = 1; own.eyeFaces = 3; own.eyesOpen = 2;
         FileItem none = new FileItem("DCIM/Camera/none.jpg", "/sdcard/DCIM/Camera/none.jpg", 10, 20);
         none.area = "camera"; none.type = "jpeg";
         r.files.add(own); r.files.add(none);
         ResultStore.Saved l4 = ResultStore.read(new ByteArrayInputStream(save(s)));
         FileItem own4 = l4.result.files.get(l4.result.files.size() - 2), none4 = l4.result.files.get(l4.result.files.size() - 1);
-        check("v5 signals kept (every field, page measurements included)", own4.signals != null && compareFields("signals", sg, own4.signals) == 18);
+        check("v5 signals kept (every field, page measurements included)", own4.signals != null && compareFields("signals", sg, own4.signals) == 19);
         check("v5 sorting version kept", own4.sortVersion == 1 && none4.sortVersion == 0);
         check("v5 unmeasured stays null", none4.signals == null);
         check("v6 eyes kept", own4.eyeFaces == 3 && own4.eyesOpen == 2);
@@ -146,6 +146,10 @@ public final class ResultStoreTest {
         ResultStore.write(b6, s, 6);
         ResultStore.Saved l6 = ResultStore.read(new ByteArrayInputStream(b6.toByteArray()));
         FileItem own6 = l6.result.files.get(l6.result.files.size() - 2);
+        ByteArrayOutputStream b7 = new ByteArrayOutputStream();
+        ResultStore.write(b7, s, 7);
+        FileItem own7 = ResultStore.read(new ByteArrayInputStream(b7.toByteArray())).result.files.get(r.files.size() - 2);
+        check("format 7 file loads: sharpest parts not measured, glare kept", own7.signals.peakSharp == -1 && own7.signals.glare == 0.1875);
         check("format 6 file loads: glare not measured, eyes kept", own6.signals.glare == -1 && own6.eyeFaces == 3 && own6.signals.inkBands == 7);
         check("format 6 file loads: similar-shot quality dropped (measured before grain was ignored)", l6.result.files.get(0).quality == null);
         check("format 7 keeps similar-shot quality", ResultStore.read(new ByteArrayInputStream(save(s))).result.files.get(0).quality != null);

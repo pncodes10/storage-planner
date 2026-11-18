@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 7;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share
+    public static final int VERSION = 8;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -266,6 +266,7 @@ public final class ResultStore {
         out.writeInt(s.textBlobs); out.writeDouble(s.textArea); out.writeInt(s.textLines); out.writeDouble(s.textHeight); out.writeDouble(s.bigText);
         if (version >= 5) { out.writeDouble(s.whiteLevel); out.writeDouble(s.pagePaper); out.writeDouble(s.smooth); out.writeDouble(s.ink); out.writeInt(s.inkBands); }
         if (version >= 7) out.writeDouble(s.glare);
+        if (version >= 8) out.writeDouble(s.peakSharp);
     }
 
     private static ImageSignals.S readSignals(DataInputStream in, int version) throws IOException {
@@ -276,6 +277,8 @@ public final class ResultStore {
         s.textBlobs = in.readInt(); s.textArea = in.readDouble(); s.textLines = in.readInt(); s.textHeight = in.readDouble(); s.bigText = in.readDouble();
         if (version >= 5) { s.whiteLevel = in.readDouble(); s.pagePaper = in.readDouble(); s.smooth = in.readDouble(); s.ink = in.readDouble(); s.inkBands = in.readInt(); }
         if (version >= 7) s.glare = in.readDouble();
+        if (version >= 8) s.peakSharp = in.readDouble();
+        if (s.peakSharp != s.peakSharp) throw new IOException("results file damaged (signals)");
         if (s.glare != s.glare || s.glare > 1 || s.glare < -1) throw new IOException("results file damaged (signals)");
         if (s.textBlobs < 0 || s.textLines < 0) throw new IOException("results file damaged (signals)");
         if (s.inkBands < -1 || s.inkBands > 8) throw new IOException("results file damaged (signals)");

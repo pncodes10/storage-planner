@@ -192,7 +192,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 | Tickets & passes | Text: PNR, train no., boarding pass, gate, seat, booking ID; the travel date is read | Yes, once the date has passed by a week (or 6 months after saving if no date is found) |
 | Chat screenshots | Screenshot with chat layout and many timestamps | No |
 | Greetings & forwards | A greeting ("Good morning", "Happy Diwali" …) read on an image received in a chat | Yes, if older than a week |
-| Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp | Yes |
+| Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp (a small sharp subject on a blurred background does not count as shaken) | Yes |
 | ID documents (sensitive) | Text: Government of India (also "Government of" with the country cut off), Aadhaar, PAN, passport, licence, VID; Aadhaar and PAN number patterns; the gender written after its Indian-language word ("पुरुष / MALE"). A card held up in a photo is read when it has a face on it (see below) | **Never.** Other suggestions are removed too; only an identical extra copy may go |
 | Other screenshots, Graphics | Everything else from screenshots, downloads and chat apps | No |
 
@@ -303,6 +303,19 @@ Nothing is deleted on glare alone: no built-in rule uses it. A rule you can add 
 On the four real photos tried it matched only the night shot. It can also match night photos you want to keep
 (a lit skyline, fireworks), and the limits come from one night photo, so try it on yours in the Lab first.
 Sorting version 3 measures every picture once more at the next scan so the tag and the new focus reach them.
+
+**A sharp subject on a blurred background is not a shaken shot.** "Shaken" used to mean a focus below 0.12, and focus
+is the 90th percentile of the picture's 64 px patches, so it assumes at least a tenth of the picture is sharp. A
+flower or a face shot in portrait mode, with the background blurred on purpose, has fewer sharp patches than that:
+a rose photo (forwarded through WhatsApp) scored 0.110 on the phone and was suggested for deletion as an accidental
+shot, although the rose itself was sharp (its sharpest patches 0.5 to 1.3; the background about 0.01). Now a shot is
+shaken only if its sharpest parts are soft as well: the 3rd-sharpest patch below 0.3 (`PhotoCategory.SHAKEN_PEAK`;
+the 3rd, so one or two odd patches do not count). On the four real photos tried here plus blurred and shaken copies
+of each (Gaussian blur 2 and 4 px, motion 9 and 21 px in one and in two directions), every copy that was an
+accidental shot before still is, the sharpest parts of those copies stayed at or below 0.23, and the rose (0.36 to
+0.76, depending on the decoder) no longer is. The limit sits between those two with little room on either side and
+comes from these few pictures only. The Lab's picture category line shows both numbers and why a soft picture is or
+is not called shaken. Results format 8 saves the new number; sorting version 4 sorts every picture once more.
 
 The start screen has a switch to turn sorting off.
 

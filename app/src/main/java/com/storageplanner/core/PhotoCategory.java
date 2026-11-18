@@ -102,12 +102,17 @@ public final class PhotoCategory {
         return r;
     }
 
+    /** Shaken: focus below SHAKEN and the sharpest parts below SHAKEN_PEAK (PhotoQuality.focus). */
+    public static final double SHAKEN = 0.12, SHAKEN_PEAK = 0.3;
+
     /** Dark (lens covered, pocket), almost featureless, or so shaken that nothing is sharp anywhere; never with text. */
     public static boolean accidental(ImageSignals.S s) {
         if (s.textBlobs >= 20 || s.flat >= 0.3) return false;
         if (s.contrast < 16 && !s.page()) return true;                     // nothing in the picture (a lightly written page is not "nothing")
         if (s.meanLuma < 25 && s.contrast < 30) return true;               // dark
-        return s.sharp >= 0 && s.sharp < 0.12 && s.meanLuma > 25;          // shaken: no sharp detail anywhere
+        // shaken: no sharp detail anywhere. Both the picture as a whole and its sharpest parts must be soft: a small sharp
+        // subject on a blurred background (a flower, portrait mode) is a good photo, not a shaken one
+        return s.sharp >= 0 && s.sharp < SHAKEN && s.meanLuma > 25 && (s.peakSharp < 0 || s.peakSharp < SHAKEN_PEAK);
     }
 
     /**
