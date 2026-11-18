@@ -94,6 +94,11 @@ public final class OverviewScreen extends Screen {
         labBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new LabScreen(a)); } });
         LinearLayout.LayoutParams lab0 = new LinearLayout.LayoutParams(-1, -2); lab0.topMargin = dp(8);
         content.addView(labBtn, lab0);
+        Button sampleBtn = Ui.button(a, "Try on my pictures (debug)", false);
+        sampleBtn.setContentDescription("Try on my pictures: run the sorting and your rules on a number of pictures picked at random from each folder");
+        sampleBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new SampleScreen(a)); } });
+        LinearLayout.LayoutParams sample0 = new LinearLayout.LayoutParams(-1, -2); sample0.topMargin = dp(8);
+        content.addView(sampleBtn, sample0);
         Button save = Ui.button(a, "Save report", true);
         save.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.saveReport(); } });
         Button share = Ui.button(a, "Share", false);

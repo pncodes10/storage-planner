@@ -61,6 +61,7 @@ public final class RuleEditScreen extends Screen {
     private final boolean builtIn;
     private String name = "";
     private Action action = Action.DELETE;
+    private String fileType = Rule.ANY_FILE;
     private boolean enabled = true;
     private final List<Cond> conds = new ArrayList<Cond>();
 
@@ -89,6 +90,7 @@ public final class RuleEditScreen extends Screen {
         builtIn = base != null && base.builtIn;
         if (base != null) {
             name = base.name; action = base.action; enabled = base.enabled;
+            fileType = base.fileType == null ? Rule.ANY_FILE : base.fileType;
             for (Condition c : base.when) conds.add(fromCondition(c));
         } else if (ruleId == null) {
             conds.add(defaultCond(Tags.AGE_DAYS));
@@ -186,6 +188,7 @@ public final class RuleEditScreen extends Screen {
             r.name = name.trim();
             r.technique = Rule.USER_PREFIX + r.name;
             r.action = action;
+            r.fileType = fileType;
             if (action != null) { r.unknownAction = null; r.saving = Rule.Saving.defaultFor(action); }
         }
         r.when.clear();
@@ -244,6 +247,32 @@ public final class RuleEditScreen extends Screen {
             content.addView(rr, rl);
             if (shown.action == Action.KEEP)
                 Ui.add(content, Ui.text(a, "Files this rule matches get no suggestion at all, from any rule. ID documents are protected like this anyway.", 13, Ui.text2, false), 4);
+        }
+
+        Ui.add(content, Ui.heading(a, "File type", 18), 22);
+        if (builtIn) {
+            Ui.add(content, Ui.text(a, RuleText.appliesTo(base) + ".", 16, Ui.text, true), 6);
+        } else {
+            final String[] types = Rule.FILE_TYPES;
+            final String[] tl = new String[types.length];
+            int cur = 0;
+            for (int i = 0; i < types.length; i++) {
+                tl[i] = (Rule.isKind(types[i]) || Rule.ANY_FILE.equals(types[i]) ? "" : "      ") + RuleText.fileType(types[i]);   // formats indented under their kind
+                if (types[i].equals(fileType)) cur = i;
+            }
+            final int curIdx = cur;
+            Button pickType = picker("File type", RuleText.fileType(fileType));
+            pickType.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    choose("Which files is this rule for?", tl, curIdx, new Picked() {
+                        public void on(int i) { fileType = types[i]; edited(); render(); }
+                    });
+                }
+            });
+            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-1, -2); tp.topMargin = dp(6);
+            content.addView(pickType, tp);
+            Ui.add(content, Ui.text(a, RuleText.appliesTo(shown) + ". The rule never matches a file of another type. "
+                    + "Compressing only ever touches its own kind of file (photos, videos or music), whatever is chosen here.", 13, Ui.text2, false), 4);
         }
 
         Ui.add(content, Ui.heading(a, "When", 18), 22);

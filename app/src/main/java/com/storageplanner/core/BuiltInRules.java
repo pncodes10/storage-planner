@@ -88,7 +88,29 @@ public final class BuiltInRules {
         l.add(re("reencode_music", "Music to 128 kbps", Action.REENCODE_AUDIO, Techniques.MUSIC, Option.R3, Saving.MUSIC,
                 "{kbps} kbps -> 128 kbps; small audible trade-off for some listeners")
                 .when(Tags.AREA, Op.EQ, "music").when(Tags.BITRATE_KBPS, Op.GT, "0").when(Tags.FILE_TYPE, Op.KNOWN, ""));
+        for (Rule r : l) { String t = FILE_TYPE.get(r.id); if (t != null) r.fileType = t; }
         return l;
+    }
+
+    /** Which files each built-in rule is for; the rest are for any file (areas, duplicates, old downloads). */
+    private static final java.util.Map<String, String> FILE_TYPE = new java.util.HashMap<String, String>();
+    static {
+        FILE_TYPE.put("sent_copy", Tags.IMAGE);
+        FILE_TYPE.put("burst_extra", Tags.IMAGE);
+        FILE_TYPE.put("blurry_photo", Tags.IMAGE);
+        FILE_TYPE.put("otp_screenshot", Tags.IMAGE);
+        FILE_TYPE.put("old_payment", Tags.IMAGE);
+        FILE_TYPE.put("expired_ticket", Tags.IMAGE);
+        FILE_TYPE.put("old_ticket_no_date", Tags.IMAGE);
+        FILE_TYPE.put("old_greeting", Tags.IMAGE);
+        FILE_TYPE.put("accidental_shot", Tags.IMAGE);
+        FILE_TYPE.put("installer_installed", Tags.APK);
+        FILE_TYPE.put("installer_not_installed", Tags.APK);
+        FILE_TYPE.put("reencode_camera_photo", "jpeg");
+        FILE_TYPE.put("reencode_chat_image", "jpeg");
+        FILE_TYPE.put("lossless_screenshot", "png");
+        FILE_TYPE.put("reencode_video", Tags.VIDEO);
+        FILE_TYPE.put("reencode_music", Tags.AUDIO);
     }
 
     private static Rule del(String id, String name, String technique, int risk, String why) { return rule(id, name, Action.DELETE, technique, risk, Saving.FILE_SIZE, why); }

@@ -20,6 +20,7 @@ public final class Lab {
         public final String path, name;
         public final long size, mtime;
         public String area = "camera";        // how to treat it for sorting: camera, screenshot, wa_image, download
+        public String rel, type;              // a picture on the phone itself (Try on my pictures): its real path and file type; null for picked copies
         public Pic(String path, String name, long size, long mtime) { this.path = path; this.name = name; this.size = size; this.mtime = mtime; }
     }
 
@@ -29,6 +30,8 @@ public final class Lab {
         public final List<int[]> patches = new ArrayList<int[]>();   // ARGB, EyeState.PW x EyeState.PH each
         public final List<String> patchLabels = new ArrayList<String>();
         public FileItem file;                                  // "Picture category": the picture as the sorter left it
+        public final List<Option> options = new ArrayList<Option>();   // "Rules": what the plan would suggest for it
+        public final List<String> matched = new ArrayList<String>();   // "Rules": names of the rules that match
     }
 
     // ------------------------------------------------------------------ files the Lab makes of picked pictures
@@ -444,8 +447,8 @@ public final class Lab {
     public static Shown category(Platform pf, Pic p, long now, Out o) {
         o.line("PICTURE CATEGORY — " + p.name + " (treated as " + p.area + ")");
         Shown sh = new Shown();
-        FileItem f = new FileItem(p.area.equals("screenshot") ? "Pictures/Screenshots/" + p.name : "Lab/" + p.name, p.path, p.size, p.mtime);
-        f.area = p.area; f.type = p.name.toLowerCase(Locale.ROOT).endsWith(".png") ? "png" : "jpeg";
+        FileItem f = new FileItem(p.rel != null ? p.rel : p.area.equals("screenshot") ? "Pictures/Screenshots/" + p.name : "Lab/" + p.name, p.path, p.size, p.mtime);
+        f.area = p.area; f.type = p.type != null ? p.type : p.name.toLowerCase(Locale.ROOT).endsWith(".png") ? "png" : "jpeg";
         Img m = load(pf, p, Sorter.EDGE, o);
         if (m == null) return sh;
         int[] d = {m.ow, m.oh, m.w, m.h};
@@ -499,12 +502,16 @@ public final class Lab {
             if (r.problem() != null) { o.line("  - " + who + ": not used, " + r.problem()); continue; }
             if (r.matches(t)) {
                 hits++;
+                sh.matched.add(r.name);
                 String rail = r.action == Rule.Action.DELETE && t.idDocument ? "  (but an ID document is never deleted: only an identical extra copy may go)" : "";
                 o.line("  ✔ " + who + " MATCHES -> " + r.action.text + (r.onlyIfNoOtherOption ? " (only if no other rule gave an option)" : "") + rail);
                 continue;
             }
             List<String> why = new ArrayList<String>();
+            if (!r.fileTypeMatches(t))
+                why.add("f" + RuleText.appliesTo(r).substring(1) + " — here: " + (t.fileType == null ? "file type not known" : RuleText.fileType(t.fileType)));
             for (Rule.Condition c : r.when) {
+                if (r.builtIn && !why.isEmpty()) break;
                 if (c.matches(t)) continue;
                 Tags.Entry e = t.get(c.tag);
                 why.add(RuleText.condition(c) + " — here: " + (e == null ? "no such tag" : e.known ? e.value : "not known"));
@@ -520,6 +527,7 @@ public final class Lab {
         if (off > 0) o.line("  " + off + " built-in rule" + (off == 1 ? " is" : "s are") + " switched off");
         Unit u = Unit.forFile(f);
         rules.compile().apply(u, f, t, ctx, est, now);
+        sh.options.addAll(u.options);
         o.line("  => " + hits + " rule" + (hits == 1 ? "" : "s") + " match; the plan would get " + (u.options.isEmpty() ? "no option for it (kept)" : u.options.size() + " option" + (u.options.size() == 1 ? "" : "s") + ":"));
         for (Option op : u.options)
             o.line(f("      %s by \"%s\", frees about %.1f MB%s", op.action, op.technique, op.saved / 1e6, op.why == null || op.why.isEmpty() ? "" : " — " + op.why));

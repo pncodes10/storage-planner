@@ -114,6 +114,10 @@ public final class RulesEquivalenceTest {
                     f.bitrate = rnd.nextInt(8) == 0 ? 0 : (long) (bppf * Math.max(1, f.width) * Math.max(1, f.height) * 30) + rnd.nextInt(3) - 1;
                 }
             }
+            // as in a real scan: only pictures are sorted into categories, and in the music folder only audio files get a bitrate
+            // (the rules' file types rely on this; a category on a video or a bitrate on a JPEG never occurs)
+            if (!Tags.IMAGE.equals(Tags.kind(f))) { f.category = null; f.catDate = 0; }
+            if (area.equals("music") && !Tags.AUDIO.equals(Tags.kind(f))) f.bitrate = 0;
             // size to land bits per pixel on a threshold
             if (f.width > 0 && rnd.nextInt(2) == 0) {
                 double bpp = new double[] {0.1, 0.4999, 0.5, 0.5001, 1.0, 0.9999, 1.0001, 3}[rnd.nextInt(8)];

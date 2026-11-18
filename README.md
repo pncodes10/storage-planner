@@ -427,6 +427,31 @@ Copies go to `Download/StoragePlanner/compressed/motion-<time>/`; the originals 
 
 The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the scan's numbers. `LabTest` runs every tool on real pictures on the desktop.
 
+### Try on my pictures
+
+**Try on my pictures (debug)** is on the start screen, in the overview and at the top of the Algorithm Lab. It has a
+number field for each place: **Camera photos**, **Screenshots**, **Downloads**, **WhatsApp images (received)**,
+**WhatsApp images (sent)** and **Other pictures** (the Pictures folder), up to 100,000 each. **Run** picks that many
+pictures at random from each place (all of them when there are fewer) and runs each through the picture sorting and
+your rules, exactly as **Rules: which ones match** does in the Lab. Nothing is copied, changed or deleted.
+
+- **Which pictures:** files named .jpg, .jpeg, .png, .webp, .heic or .heif under DCIM, Pictures, Download and the
+  WhatsApp folders, placed by the same folder rules as a scan (so `DCIM/.thumbnails` is not a camera photo, and
+  `Pictures/Screenshots` is a screenshot). A file whose first bytes are not a picture is skipped and counted.
+- **Same pictures again:** tick **Pick the same pictures as last time** to run the same sample after changing a rule.
+  The numbers you typed are remembered.
+- **Results:** for each place, how many pictures were sorted out of how many it has, how many fell into each category,
+  how many would get each suggestion (or none), and roughly how much the suggestions would free. Below that, every
+  picture that would get a suggestion or was skipped (the first 400; the log has all of them).
+- **Log:** every picture's measurements, the text read and each rule's verdict go to the Lab log (**Save log** and
+  **Share log** are on this screen too), in full for the first 300 pictures and one line each after that, because a
+  full entry is about 6 KB.
+- **Limits:** like the Lab, each picture is judged on its own, so duplicates, bursts, blur compared with your other
+  photos and sent copies are unknown and rules that test them do not match. Reading text takes a few seconds per
+  picture, so 1,000 pictures can take over half an hour. The run happens on this screen, which stays awake while it
+  runs; **Stop** ends it after the current picture and keeps what was done. If Android closes the app, the run ends.
+  `SampleTest` covers the listing, the picking, skipping files that are not pictures, stopping and that no file changes.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -484,13 +509,32 @@ The suggestions for single files are now **rules**, and you will be able to add 
 
 Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned). A rule that names a tag this version does not know is loaded switched off.
 
+**Every rule is for one file type.** A rule says which files it is for: any file, a kind (pictures, videos, music and
+audio, documents, app installers, other files) or one format (JPEG, PNG, WebP, HEIC, AVIF, MP4, MKV, MP3, FLAC, M4A,
+OGG, PDF, ZIP). It never matches a file of another type; the file type is read from the file's first bytes, not its
+name. On top of that, a compress action only ever touches its own kind of file, whatever the rule says: compress
+photo and compress screenshot only pictures, compress video only videos, compress music only music and audio. So a
+music rule can never act on a JPEG, even one set to "any file". A rule whose file type does not fit its action
+("compress music" for JPEG pictures) cannot be saved, and if one is found in the saved rules it is loaded switched off.
+
+The built-in rules have fixed file types: the photo re-encodes are for JPEG, the lossless screenshot rule for PNG,
+video for videos, music for music and audio; the picture categories, bursts, blur, sent copies and accidental shots
+for pictures; installers for app installers; the area rules (thumbnails, temp files, trash, ...), exact duplicates
+and old downloads for any file. Before, a built-in rule kept to its type only through its conditions (for example
+"file type is png"), and a rule of your own had no type at all: "age more than 365 days -> compress music" would have
+matched JPEGs too. The old-against-new test (`RulesEquivalenceTest`) still finds every option identical on files
+that can occur in a scan; its random files no longer give a category to a video or a music bitrate to a JPEG, which a
+real scan never does. A file outside the media folders (camera, screenshots, pictures, downloads, music, movies,
+WhatsApp, installers) has no file type read during a scan, so a rule for a format does not match it.
+Rules saved before file types existed load as "any file".
+
 ### The Rules screen
 
-Open **Your rules** from the start screen or from the overview (next to the Algorithm Lab button). Your own rules come first, then the built-in ones. Each row says in words what the rule looks for ("Picture category is Greetings & forwards, age more than 7 days and is chat or Telegram media"), what it does and its risk, and, once you have analysed your storage, how many files and how much space it matches right now. Scanning is not repeated: the counts and the plan come from the scan already on the phone.
+Open **Your rules** from the start screen or from the overview (next to the Algorithm Lab button). Your own rules come first, then the built-in ones. Each row says which files the rule is for ("For JPEG pictures only") and in words what it looks for ("Picture category is Greetings & forwards, age more than 7 days and is chat or Telegram media"), what it does and its risk, and, once you have analysed your storage, how many files and how much space it matches right now. Scanning is not repeated: the counts and the plan come from the scan already on the phone.
 
 - **Switch a rule off or on** with its switch. A rule that is off suggests nothing; a rule that cannot run (it names a tag this version does not know) stays off and says why.
 - **Change a built-in rule:** tap it. Its name, action and conditions are fixed, but its numbers can change (greetings after 3 days instead of 7). **Reset to default** appears on a changed rule, in the list and in the editor.
-- **Add a rule:** tap **Add a rule**. Give it a name, pick what it does (Delete, Compress photo, Compress screenshot (lossless), Compress video, Compress music, or Keep), and add conditions. Each condition is a tag (shown by its plain label, such as "Age in days" or "Picture category"), a comparison that fits the tag (more than, at least, less than, is, is not, is one of; yes or no for yes/no tags), a value (a number with its unit, or a choice from the values the app knows plus the ones your scan has), and an optional NOT. All conditions must be true; for "or", write two rules.
+- **Add a rule:** tap **Add a rule**. Give it a name, pick what it does (Delete, Compress photo, Compress screenshot (lossless), Compress video, Compress music, or Keep), pick its **File type** (any file, a kind or one format; the formats are listed under their kind), and add conditions. Each condition is a tag (shown by its plain label, such as "Age in days" or "Picture category"), a comparison that fits the tag (more than, at least, less than, is, is not, is one of; yes or no for yes/no tags), a value (a number with its unit, or a choice from the values the app knows plus the ones your scan has), and an optional NOT. All conditions must be true; for "or", write two rules.
 - **Live preview:** under the form, "Matches 143 files, 1.2 GB" and a grid of the largest matching files update about a third of a second after each change. Tap a file to see its details, including every tag. It also says how many of the matches another rule already suggests, how many are ID documents (left out of a delete), and, for a compress rule, how many a built-in compress rule claims first (only the first compressing rule that matches a file counts). Without a scan the editor still works; it just says "Analyse your storage to see what this rule matches".
 - **Delete a rule** from its row or from its editor; the button asks you to tap it a second time.
 
@@ -521,6 +565,7 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
   - **FaceNet / Faces:** the YuNet face detector in plain Java, and the face list format (1.8).
   - **Sorter / ImageSignals / Codes / TextRules / PhotoCategory:** picture categories (1.6).
   - **Lab:** the Algorithm Lab's step-by-step runs (1.7).
+  - **Sample:** Try on my pictures: picks pictures at random from each place and runs the sorting and the rules on them.
   - **Tags:** the named facts about every file (source, kind, age, blur, brightness, faces, duplicate, ...) shown on the details page, and a listing of them (label, type, unit) for the rule editor.
   - **Rule / RuleSet / BuiltInRules / RuleText:** the rule engine, the built-in rules, matches and checks for the Rules screen, and rules in words.
 - `app/src/main/java/com/google/zxing/`: ZXing 3.5.3 decoding code (Apache-2.0, unmodified; encoders left out).
@@ -540,7 +585,7 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
   - **ResultFiles:** saves and loads results in app-private storage (AtomicFile).
-- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed) and image-compression rules (CompressionTest) tests.
+- `jvmtest/`: runs the unchanged core on a desktop against the virtual phone from the study, plus classifier, planner, review, saved-results (ResultStoreTest), file tags (TagsTest), rules (RulesTest, RuleMatchTest for matches, wording and checks, and RulesEquivalenceTest against a copy of the old hard-coded builder), group-tick (GroupDecisionTest), eye-model (EyeStateTest), photo-quality (PhotoQualityTest), face detector against OpenCV (FaceNetTest), picture-category (CategoryTest, TextRulesTest, PageTest for pages of paper and re-sorting), reader-bridge (OcrBridgeTest), Algorithm Lab (LabTest on real pictures; LabFilesTest for picked-picture slots and decode failures, no pictures needed; SampleTest for Try on my pictures) and image-compression rules (CompressionTest) tests.
 - `tools/eyemodel/`: how the eye model was trained and checked.
 - `tools/test_ocr_page.py`: runs the app's offline text-reader page in Chromium the way the app serves it.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).

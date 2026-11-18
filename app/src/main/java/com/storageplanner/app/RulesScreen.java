@@ -151,7 +151,7 @@ public final class RulesScreen extends Screen {
         final boolean on = r.enabled && problem == null;
         TextView name = Ui.text(a, r.name + (on ? "" : "  ·  Off"), 16, Ui.text, true);
         text.addView(name);
-        Ui.add(text, Ui.text(a, RuleText.conditions(r), 14, Ui.text2, false), 2);
+        Ui.add(text, Ui.text(a, RuleText.appliesTo(r) + ". " + RuleText.conditions(r), 14, Ui.text2, false), 2);
         LinearLayout act = Ui.row(a);
         int risk = r.effectiveRisk();
         if (risk >= 0) { act.addView(Ui.badge(a, risk)); }
@@ -167,7 +167,7 @@ public final class RulesScreen extends Screen {
         }
         if (problem != null) Ui.add(text, Ui.text(a, "Cannot run: " + problem + ". Tap to fix it.", 14, Ui.tier[4], true), 4);
         text.setClickable(true); text.setFocusable(true);
-        text.setContentDescription(r.name + (on ? ", on" : ", off") + ". " + RuleText.conditions(r) + ". " + RuleText.action(r) + ". "
+        text.setContentDescription(r.name + (on ? ", on" : ", off") + ". " + RuleText.appliesTo(r) + ". " + RuleText.conditions(r) + ". " + RuleText.action(r) + ". "
                 + (risk >= 0 ? Ui.TIER_SPOKEN[risk] + ". " : "No risk. ") + (matchText != null ? matchText + ". " : "")
                 + (problem != null ? "Cannot run: " + problem + ". " : "") + "Double tap to change.");
         text.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { confirmDelete = null; a.push(new RuleEditScreen(a, r.id)); } });

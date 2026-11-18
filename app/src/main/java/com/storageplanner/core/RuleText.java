@@ -99,6 +99,47 @@ public final class RuleText {
         return s.substring(0, 1).toUpperCase(Locale.ROOT) + s.substring(1);
     }
 
+    /** A rule's file type in words: "Any file", "Pictures (any format)", "JPEG pictures", ... */
+    public static String fileType(String ft) {
+        if (ft == null || Rule.ANY_FILE.equals(ft)) return "Any file";
+        switch (ft) {
+            case Tags.IMAGE: return "Pictures (any format)";
+            case Tags.VIDEO: return "Videos (any format)";
+            case Tags.AUDIO: return "Music and audio (any format)";
+            case Tags.DOCUMENT: return "Documents (any format)";
+            case Tags.APK: return "App installers (APK)";
+            case Tags.OTHER: return "Other files";
+            case "zip": return "ZIP archives";
+            default: {
+                String k = Rule.kindOf(ft), up = ft.toUpperCase(Locale.ROOT);
+                if (Tags.IMAGE.equals(k)) return up + " pictures";
+                if (Tags.VIDEO.equals(k)) return up + " videos";
+                if (Tags.AUDIO.equals(k)) return up + " audio";
+                if (Tags.DOCUMENT.equals(k)) return up + " documents";
+                return up + " files";
+            }
+        }
+    }
+
+    /** pictures, videos, music and audio files, ... */
+    public static String kindWords(String kind) {
+        if (Tags.IMAGE.equals(kind)) return "pictures";
+        if (Tags.VIDEO.equals(kind)) return "videos";
+        if (Tags.AUDIO.equals(kind)) return "music and audio files";
+        if (Tags.DOCUMENT.equals(kind)) return "documents";
+        if (Tags.APK.equals(kind)) return "app installers";
+        return "other files";
+    }
+
+    /** "For JPEG pictures only", or "For any file"; with the kind a re-encode is limited to when the rule says any file. */
+    public static String appliesTo(Rule r) {
+        String ft = r.fileType == null ? Rule.ANY_FILE : r.fileType, need = Rule.kindFor(r.action);
+        if (Rule.ANY_FILE.equals(ft)) return need == null ? "For any file" : "For " + kindWords(need) + " (" + action(r.action).toLowerCase(Locale.ROOT) + " works on nothing else)";
+        String w = fileType(ft);
+        if (Rule.isKind(ft)) w = w.substring(0, 1).toLowerCase(Locale.ROOT) + w.substring(1);     // "pictures (any format)"; keep "JPEG pictures"
+        return "For " + w + " only";
+    }
+
     /** Short name of the action: "Delete", "Compress photo", "Keep (protect)". */
     public static String action(Rule r) { return r.action == null ? "Unknown action" : action(r.action); }
 

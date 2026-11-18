@@ -117,6 +117,10 @@ public final class LabScreen extends Screen {
         motionLab.setContentDescription("Open the Motion Photo Lab: make test copies of Motion Photos without their video, or survey the camera folder");
         motionLab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new MotionLabScreen(a)); } });
         add(root, motionLab, 6);
+        Button sample = Ui.button(a, "Try on my pictures: N at random from each folder", true);
+        sample.setContentDescription("Open Try on my pictures: run the sorting and your rules on a number of pictures picked at random from camera, screenshots, downloads and WhatsApp");
+        sample.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new SampleScreen(a)); } });
+        add(root, sample, 6);
 
         Ui.add(root, Ui.heading(a, "Pictures", 17), 14);
         LinearLayout pickRow = Ui.row(a);

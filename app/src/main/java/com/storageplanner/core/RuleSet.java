@@ -233,6 +233,13 @@ public final class RuleSet {
                 if (!o.builtIn && !o.id.equals(r.id) && o.name != null && o.name.trim().equalsIgnoreCase(n)) { out.add("You already have a rule with this name. Choose another."); break; }
         }
         if (r.when.isEmpty()) out.add("Add at least one condition.");
+        if (r.fileType != null && !Rule.knownFileType(r.fileType)) out.add("Choose which files the rule is for.");
+        else {
+            String need = Rule.kindFor(r.action), have = Rule.kindOf(r.fileType);
+            if (need != null && !Rule.ANY_FILE.equals(r.fileType) && !need.equals(have))
+                out.add("“" + RuleText.action(r.action) + "” only works on " + RuleText.kindWords(need)
+                        + ", but this rule is for " + RuleText.fileType(r.fileType).toLowerCase(Locale.ROOT) + ". Choose another file type or action.");
+        }
         for (Condition c : r.when) {
             String p = c.problem();
             if (p != null) out.add("\"" + RuleText.condition(c) + "\": " + p + ".");
@@ -343,6 +350,8 @@ public final class RuleSet {
      *   enabled yes
      *   action delete              <- delete, reencode_photo, lossless_image, reencode_video, reencode_audio, keep
      *   saving file_size           <- how the saving is counted (re-encode rules)
+     *   filetype jpeg              <- which files: any, a kind (image, video, audio, document, apk, other) or a format
+     *                                 (Rule.FILE_TYPES); missing = any (rules saved before file types existed)
      *   when chat_media is yes
      *   when NOT faces > 0
      *   why Chat graphic from {age} days ago
@@ -361,6 +370,7 @@ public final class RuleSet {
                 b.append("action ").append(r.action != null ? r.action.text : r.unknownAction).append('\n');
                 b.append("saving ").append(r.saving == null ? "" : r.saving.name().toLowerCase(Locale.ROOT)).append('\n');
             }
+            if (!r.builtIn) b.append("filetype ").append(r.fileType == null ? Rule.ANY_FILE : r.fileType).append('\n');
             for (Condition c : r.when) b.append("when ").append(c.toText()).append('\n');
             if (!r.builtIn) b.append("why ").append(esc(r.why)).append('\n');
             b.append("end\n");
@@ -406,6 +416,7 @@ public final class RuleSet {
             else if (key.equals("action")) { cur.action = Action.of(val.trim()); if (cur.action == null) cur.unknownAction = val.trim(); }
             else if (key.equals("saving")) cur.saving = Saving.of(val.trim());
             else if (key.equals("why")) cur.why = unesc(val);
+            else if (key.equals("filetype")) cur.fileType = val.trim().toLowerCase(Locale.ROOT);
             else if (key.equals("when")) {
                 Condition c = Condition.parse(val);
                 cur.when.add(c != null ? c : new Condition(val.trim(), null, "", false));

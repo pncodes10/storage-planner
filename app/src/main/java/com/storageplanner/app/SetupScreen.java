@@ -109,6 +109,11 @@ public final class SetupScreen extends Screen {
         L.addView(rules, rulesl);
         LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
         L.addView(lab, labl);
+        Button sample = Ui.button(a, "Try on my pictures (debug)", false);
+        sample.setContentDescription("Try on my pictures: run the sorting and your rules on a number of pictures picked at random from each folder");
+        sample.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new SampleScreen(a)); } });
+        LinearLayout.LayoutParams samplel = new LinearLayout.LayoutParams(-2, -2); samplel.topMargin = dp(10);
+        L.addView(sample, samplel);
         Ui.add(L, Ui.text(a, "Runs in the background. You can switch apps; you'll get a notification when your plan is ready.", 14, Ui.text2, false), 8);
 
         progressBar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);

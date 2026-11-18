@@ -17,6 +17,11 @@ import java.util.Set;
  *
  * Text values compare without regard to case; numbers compare as numbers. For category the id ("greeting")
  * and the name shown on screen ("Greetings & forwards") both work.
+ *
+ * FILE TYPE: every rule says which files it is for (fileType): any file, a kind (pictures, videos, music, ...)
+ * or one format (jpeg, mp3, ...). A rule never matches a file of another type. On top of that a re-encode only
+ * ever touches files of its own kind (compress photo: pictures; compress video: videos; compress music: audio),
+ * whatever the rule says, so a music rule can never act on a JPEG.
  */
 public final class Rule {
     public enum Op {
@@ -206,6 +211,59 @@ public final class Rule {
         }
     }
 
+    // ------------------------------------------------------------------ file type
+    /** fileType of a rule for every file. */
+    public static final String ANY_FILE = "any";
+    /** File types a rule can be for: any file, then each kind followed by its formats. */
+    public static final String[] FILE_TYPES = {ANY_FILE,
+            Tags.IMAGE, "jpeg", "png", "webp", "heic", "avif",
+            Tags.VIDEO, "mp4", "mkv",
+            Tags.AUDIO, "mp3", "flac", "m4a", "ogg",
+            Tags.DOCUMENT, "pdf",
+            Tags.APK, Tags.OTHER, "zip"};
+
+    /** A kind (image, video, ...) rather than one format. */
+    public static boolean isKind(String ft) {
+        return Tags.IMAGE.equals(ft) || Tags.VIDEO.equals(ft) || Tags.AUDIO.equals(ft) || Tags.DOCUMENT.equals(ft) || Tags.APK.equals(ft) || Tags.OTHER.equals(ft);
+    }
+
+    /** The kind of files of this file type: the kind itself, the kind of a format, null for any file or an unknown type. */
+    public static String kindOf(String ft) {
+        if (ft == null || ANY_FILE.equals(ft)) return null;
+        if (isKind(ft)) return ft;
+        FileItem f = new FileItem("x", "x", 0, 0);
+        f.type = ft;
+        String k = Tags.kind(f);
+        return Tags.OTHER.equals(k) && !"zip".equals(ft) ? null : k;
+    }
+
+    public static boolean knownFileType(String ft) {
+        for (String s : FILE_TYPES) if (s.equals(ft)) return true;
+        return false;
+    }
+
+    /** The only kind of file this action may touch (re-encodes), or null when it may touch any (delete, keep). */
+    public static String kindFor(Action a) {
+        if (a == null) return null;
+        switch (a) {
+            case REENCODE_PHOTO: case LOSSLESS_IMAGE: return Tags.IMAGE;
+            case REENCODE_VIDEO: return Tags.VIDEO;
+            case REENCODE_AUDIO: return Tags.AUDIO;
+            default: return null;
+        }
+    }
+
+    /** True if a file with these tags is of this rule's file type and of the kind its action may touch. */
+    public boolean fileTypeMatches(Tags.T t) {
+        String ft = fileType == null ? ANY_FILE : fileType;
+        if (!ANY_FILE.equals(ft)) {
+            if (isKind(ft)) { if (!ft.equals(t.kind)) return false; }
+            else if (t.fileType == null || !ft.equalsIgnoreCase(t.fileType)) return false;
+        }
+        String need = kindFor(action);
+        return need == null || need.equals(t.kind);
+    }
+
     // ------------------------------------------------------------------ the rule
     public String id;                    // stable; built-ins have fixed ids, user rules get one from the rule set
     public String name;                  // what the user sees
@@ -220,6 +278,7 @@ public final class Rule {
     public String whyHook;               // built-ins that need code to word the reason: "burst"
     public String unknownAction;         // the action text of a rule saved by a newer version (action is null then); kept so saving loses nothing
     public boolean onlyIfNoOtherOption;  // fires only when no other rule gave this file an option yet
+    public String fileType = ANY_FILE;   // which files the rule is for: ANY_FILE, a kind or a format (FILE_TYPES)
 
     public static final String USER_PREFIX = "My rule: ";
 
@@ -242,11 +301,16 @@ public final class Rule {
     public String problem() {
         if (action == null) return "unknown action";
         if (when.isEmpty()) return "no conditions";
+        if (fileType != null && !knownFileType(fileType)) return "unknown file type \"" + fileType + "\"";
+        String need = kindFor(action), have = kindOf(fileType);
+        if (need != null && fileType != null && !ANY_FILE.equals(fileType) && !need.equals(have))
+            return action.text + " only works on " + RuleText.kindWords(need) + ", not on " + fileType;
         for (Condition c : when) { String p = c.problem(); if (p != null) return p; }
         return null;
     }
 
     public boolean matches(Tags.T t) {
+        if (!fileTypeMatches(t)) return false;
         for (int i = 0; i < when.size(); i++) if (!when.get(i).matches(t)) return false;
         return true;
     }
@@ -263,6 +327,7 @@ public final class Rule {
         Rule r = new Rule();
         r.id = id; r.name = name; r.builtIn = builtIn; r.enabled = enabled; r.when.addAll(when); r.action = action; r.risk = risk;
         r.technique = technique; r.saving = saving; r.why = why; r.whyHook = whyHook; r.unknownAction = unknownAction; r.onlyIfNoOtherOption = onlyIfNoOtherOption;
+        r.fileType = fileType;
         return r;
     }
 }

@@ -324,6 +324,7 @@ public final class RulesTest {
             check("50000 files with 30 rules build in well under a second", ms < 1000 && withRules.units.size() > 0 && old.units.size() > 0);
         }
 
+        fileTypes();
         System.out.println((checks - fails) + "/" + checks + " rule checks pass");
         if (fails > 0) System.exit(1);
     }
@@ -337,5 +338,65 @@ public final class RulesTest {
             if (!ids.add(r.id) || !r.builtIn || r.problem() != null || !tech.contains(r.technique) || r.name == null || r.name.length() == 0) return false;
         }
         return l.size() == 26;
+    }
+
+    // ---------------------------------------------------------------- file types: a rule is for one type of file
+    static Tags.T tags(FileItem f) { Scanner.Result r = scan(f); return Tags.of(f, Tags.context(r, new UnitBuilder.Detections()), NOW); }
+
+    static void fileTypes() {
+        FileItem jpg = file("DCIM/Camera/a.jpg", "camera", "jpeg", 4000000, 400), png = file("Pictures/Screenshots/b.png", "screenshot", "png", 900000, 400);
+        FileItem mp3 = file("Music/c.mp3", "music", "mp3", 8000000, 400), mp4 = file("DCIM/Camera/d.mp4", "camera", "mp4", 90000000, 400);
+        mp3.bitrate = 320000; jpg.bitrate = 320000;                          // a bitrate on a JPEG never happens; here it tests the guard
+        Tags.T tj = tags(jpg), tp = tags(png), ta = tags(mp3), tv = tags(mp4);
+
+        Rule music = Rule.user("Old music", Action.REENCODE_AUDIO).when(Tags.AGE_DAYS, Op.GT, "30");
+        check("file type: a compress-music rule for any file never matches a JPEG (re-encodes stay on their own kind)", !music.matches(tj) && music.matches(ta));
+        Rule photo = Rule.user("Old photos", Action.REENCODE_PHOTO).when(Tags.AGE_DAYS, Op.GT, "30");
+        check("file type: a compress-photo rule never matches music or a video", photo.matches(tj) && photo.matches(tp) && !photo.matches(ta) && !photo.matches(tv));
+        Rule del = Rule.user("Old JPEGs", Action.DELETE).when(Tags.AGE_DAYS, Op.GT, "30");
+        check("file type: any file by default", Rule.ANY_FILE.equals(del.fileType) && del.matches(tj) && del.matches(ta) && del.matches(tv));
+        del.fileType = "jpeg";
+        check("file type jpeg: only JPEGs", del.matches(tj) && !del.matches(tp) && !del.matches(ta) && !del.matches(tv));
+        del.fileType = Tags.IMAGE;
+        check("file type pictures: JPEG and PNG, not music or video", del.matches(tj) && del.matches(tp) && !del.matches(ta) && !del.matches(tv));
+        del.fileType = Tags.AUDIO;
+        check("file type music: only music", !del.matches(tj) && del.matches(ta));
+
+        RuleSet set = RuleSet.defaults();
+        Rule bad = Rule.user("Squash photos as music", Action.REENCODE_AUDIO).when(Tags.AGE_DAYS, Op.GT, "30");
+        bad.fileType = "jpeg";
+        check("file type: compress music for JPEGs cannot be saved", !set.problems(bad).isEmpty() && bad.problem() != null
+                && set.problems(bad).toString().contains("only works on music"));
+        bad.fileType = "mp3";
+        check("file type: compress music for MP3 can", set.problems(bad).isEmpty() && bad.problem() == null);
+        bad.fileType = "gif";
+        check("file type: an unknown file type cannot be saved", !set.problems(bad).isEmpty() && bad.problem() != null);
+
+        Rule u = set.addUser("Old PNGs", Action.DELETE).when(Tags.AGE_DAYS, Op.GT, "30");
+        u.fileType = "png";
+        RuleSet back = RuleSet.fromText(set.toText());
+        Rule u2 = null; for (Rule r : back.rules) if ("Old PNGs".equals(r.name)) u2 = r;
+        check("file type: saved and loaded", u2 != null && "png".equals(u2.fileType) && u2.enabled && back.warnings.isEmpty());
+        String old = set.toText().replace("filetype png\n", "");
+        Rule u3 = null; for (Rule r : RuleSet.fromText(old).rules) if ("Old PNGs".equals(r.name)) u3 = r;
+        check("file type: a rule saved before file types existed is for any file", u3 != null && Rule.ANY_FILE.equals(u3.fileType) && u3.enabled);
+        String odd = set.toText().replace("filetype png", "filetype gif");
+        RuleSet oddSet = RuleSet.fromText(odd);
+        Rule u4 = null; for (Rule r : oddSet.rules) if ("Old PNGs".equals(r.name)) u4 = r;
+        check("file type: an unknown file type loads switched off with a warning", u4 != null && !u4.enabled && !oddSet.warnings.isEmpty());
+        check("file type: built-in rules are saved without one (it comes with the app)", !set.toText().contains("filetype jpeg"));
+
+        String[] want = {"reencode_camera_photo", "jpeg", "lossless_screenshot", "png", "reencode_video", Tags.VIDEO, "reencode_music", Tags.AUDIO,
+                "accidental_shot", Tags.IMAGE, "installer_installed", Tags.APK, "exact_duplicate", Rule.ANY_FILE, "trash", Rule.ANY_FILE};
+        boolean ok = true;
+        for (int i = 0; i < want.length; i += 2) ok &= want[i + 1].equals(set.find(want[i]).fileType);
+        check("file type: built-in rules have theirs", ok);
+        boolean allOk = true;
+        for (Rule r : BuiltInRules.all()) allOk &= r.problem() == null;
+        check("file type: every built-in rule's file type fits its action", allOk);
+        check("file type: words", RuleText.fileType("jpeg").equals("JPEG pictures") && RuleText.fileType(Tags.AUDIO).equals("Music and audio (any format)")
+                && RuleText.appliesTo(music).equals("For music and audio files (compress music works on nothing else)") && RuleText.appliesTo(u).equals("For PNG pictures only"));
+        Rule copy = u.copy();
+        check("file type: copied", "png".equals(copy.fileType));
     }
 }
