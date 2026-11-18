@@ -86,11 +86,15 @@ OCR_ASSETS = {"assets/ocr/ocr.html", "assets/ocr/tesseract.min.js", "assets/ocr/
               "assets/ocr/tesseract-core-lstm.wasm.js", "assets/ocr/eng.traineddata", "assets/ocr/LICENSE-tesseract.js.md", "assets/ocr/LICENSE-tesseract.js-core"}
 # 1.8: the face detector's weights (YuNet, converted by tools/facemodel/export_yunet.py) and its licence
 FACE_ASSETS = {"assets/faces/yunet.bin", "assets/faces/LICENSE-yunet.txt"}
+# 1.10: the scene network's weights (MobileNetV3-Small, written by tools/scenemodel/export_mnv3.py) and its licence
+SCENE_ASSETS = {"assets/scene/scene.bin", "assets/scene/LICENSE-keras-applications.txt"}
 other = [n for n in names if n not in ("AndroidManifest.xml", "classes.dex", "resources.arsc")]
 check("zip entries", set(names) >= {"AndroidManifest.xml", "classes.dex", "resources.arsc"}
-      and all(n.startswith("res/") or n in OCR_ASSETS or n in FACE_ASSETS for n in other) and OCR_ASSETS <= set(names) and FACE_ASSETS <= set(names),
+      and all(n.startswith("res/") or n in OCR_ASSETS or n in FACE_ASSETS or n in SCENE_ASSETS for n in other)
+      and OCR_ASSETS <= set(names) and FACE_ASSETS <= set(names) and SCENE_ASSETS <= set(names),
       ", ".join(n for n in names if not n.startswith("assets/")) + " + " + str(len([n for n in names if n.startswith("assets/ocr/")])) + " text-reader files + "
-      + str(len([n for n in names if n.startswith("assets/faces/")])) + " face-detector files")
+      + str(len([n for n in names if n.startswith("assets/faces/")])) + " face-detector files + "
+      + str(len([n for n in names if n.startswith("assets/scene/")])) + " scene-network files")
 import hashlib
 pinned = {}
 pin_file = os.path.join(os.path.dirname(__file__), "ocr_assets.sha256")
@@ -105,6 +109,12 @@ for line in open(os.path.join(os.path.dirname(__file__), "face_assets.sha256")):
 with zipfile.ZipFile(apk_path) as z:
     fbad = [n for n in fpinned if hashlib.sha256(z.read(n)).hexdigest() != fpinned[n]]
 check("face-detector files are the pinned conversion of face_detection_yunet_2023mar.onnx", not fbad, "; ".join(fbad))
+spinned = {}
+for line in open(os.path.join(os.path.dirname(__file__), "scene_assets.sha256")):
+    h, n = line.split(); spinned["assets/scene/" + n] = h
+with zipfile.ZipFile(apk_path) as z:
+    sbad = [n for n in spinned if hashlib.sha256(z.read(n)).hexdigest() != spinned[n]]
+check("scene-network files are the pinned conversion of Keras's MobileNetV3Small ImageNet weights", not sbad, "; ".join(sbad))
 check("resources.arsc stored + 4-byte aligned", arsc.compress_type == zipfile.ZIP_STORED and off % 4 == 0, f"offset {off}")
 
 # 4) dex: classes and every external reference
