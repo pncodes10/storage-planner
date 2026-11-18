@@ -49,6 +49,15 @@ public final class OverviewScreen extends Screen {
     @Override public void refresh() {
         if (content == null || !Session.hasResults()) return;
         content.removeAllViews();
+        String sample = AnalysisRunner.lastSample(a);
+        if (sample != null) {
+            LinearLayout card = Ui.card(a);
+            Ui.add(card, Ui.text(a, "Sample only: " + sample, 15, Ui.text, true), 0);
+            Ui.add(card, Ui.text(a, "This plan covers only these pictures from Try on my pictures, not your whole phone (no other files, no apps). "
+                    + "Duplicates, bursts and blur were looked for among them only. Tap Analyse my storage on the start screen to see everything.", 13, Ui.text2, false), 4);
+            LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2); cl.bottomMargin = dp(12);
+            content.addView(card, cl);
+        }
         modeToggle();
         summaryCard();
 

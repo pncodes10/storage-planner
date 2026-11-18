@@ -50,6 +50,7 @@ public final class SampleTest {
 
     public static void main(String[] args) throws Exception {
         File dev = Files.createTempDirectory("sample").toFile(), sd = new File(dev, "sdcard");
+        text(new File(dev, "meta/usagestats.json"), "{}");                   // a phone with no apps
         for (int i = 0; i < 12; i++) img(new File(sd, "DCIM/Camera/IMG_" + i + ".jpg"), i, "jpg");
         for (int i = 0; i < 3; i++) img(new File(sd, "DCIM/Screenshots/Screenshot_" + i + ".png"), 50 + i, "png");
         img(new File(sd, "Download/poster.jpg"), 70, "jpg");
@@ -60,6 +61,8 @@ public final class SampleTest {
         img(new File(sd, wa + "Sent/IMG-s-WA.jpg"), 90, "jpg");
         img(new File(sd, "DCIM/.thumbnails/t.jpg"), 91, "jpg");               // thumbnails are not camera photos
         img(new File(sd, "Movies/still.jpg"), 92, "jpg");                     // not one of the places
+        // camera photos get distinct times: IMG_0 oldest ... IMG_11 newest (for the newest pick)
+        for (int i = 0; i < 12; i++) new File(sd, "DCIM/Camera/IMG_" + i + ".jpg").setLastModified(1700000000000L + i * 60000L);
         Map<String, Long> before = new TreeMap<String, Long>();
         for (File f : all(sd)) before.put(f.getPath(), f.length() * 31 + f.lastModified());
 
@@ -113,6 +116,9 @@ public final class SampleTest {
 
         Map<String, Long> after = new TreeMap<String, Long>();
         for (File f : all(sd)) after.put(f.getPath(), f.length() * 31 + f.lastModified());
+        limitedAnalyse(pf, quiet, sd);
+        after.clear();
+        for (File f : all(sd)) after.put(f.getPath(), f.length() * 31 + f.lastModified());
         check("nothing on the phone changed", before.equals(after));
 
         check("log detail limit is sane", Sample.DETAIL_MAX >= 100);
@@ -133,5 +139,41 @@ public final class SampleTest {
         File[] k = d.listFiles();
         if (k != null) for (File f : k) { if (f.isDirectory()) out.addAll(all(f)); else out.add(f); }
         return out;
+    }
+
+    // ---- the main analysis limited to some pictures (the Analyse these pictures button)
+    static void limitedAnalyse(JvmPlatform pf, Scanner.Progress quiet, File sd) throws Exception {
+        Sample.Limit lim = new Sample.Limit();
+        lim.counts.put("camera", 5); lim.counts.put("screenshot", 2); lim.counts.put("download", 10); lim.counts.put("wa_image", 0);
+        lim.seed = 9;
+        Scanner.Options opt = new Scanner.Options();
+        opt.limit = lim;
+        Scanner.Result r = Scanner.scan(pf, quiet, opt);
+        int cam = 0, shot = 0, dl = 0, other = 0;
+        for (FileItem f : r.files) {
+            if (f.area.equals("camera")) cam++; else if (f.area.equals("screenshot")) shot++; else if (f.area.equals("download")) dl++; else other++;
+        }
+        check("limited analyse: 5 camera photos, 2 screenshots, both downloads named as pictures, nothing else", cam == 5 && shot == 2 && dl == 2 && other == 0);
+        check("limited analyse: no apps, no .txt, says what it covers", r.apps.isEmpty() && r.sample != null && r.sample.contains("5 camera photos") && r.sample.endsWith("(random)"));
+        boolean sorted = true;
+        for (FileItem f : r.files) if (!"text".equals(f.type) && f.type != null && (f.type.equals("jpeg") || f.type.equals("png"))) sorted &= f.category != null;
+        check("limited analyse: the picked pictures are sorted like in a full analysis", sorted);
+        UnitBuilder ub = new UnitBuilder(r, new Estimates(), pf.sdkInt(), RuleSet.defaults());
+        int withOptions = 0;
+        for (Unit u : ub.units) if (!u.options.isEmpty()) withOptions++;
+        check("limited analyse: the plan is built from them (" + ub.units.size() + " units, " + withOptions + " with options)", !ub.units.isEmpty());
+        Scanner.Result again = Scanner.scan(pf, quiet, opt);
+        boolean same = again.files.size() == r.files.size();
+        for (int i = 0; same && i < r.files.size(); i++) same = again.files.get(i).rel.equals(r.files.get(i).rel);
+        check("limited analyse: the same seed analyses the same pictures", same);
+        lim.newest = true;
+        Scanner.Result nw = Scanner.scan(pf, quiet, opt);
+        java.util.Set<String> want = new java.util.HashSet<String>();
+        for (int i = 7; i < 12; i++) want.add("DCIM/Camera/IMG_" + i + ".jpg");
+        java.util.Set<String> got = new java.util.HashSet<String>();
+        for (FileItem f : nw.files) if (f.area.equals("camera")) got.add(f.rel);
+        check("limited analyse: newest takes the 5 newest camera photos", got.equals(want) && nw.sample.endsWith("(newest)"));
+        Scanner.Result full = Scanner.scan(pf, quiet, new Scanner.Options());
+        check("a full analysis is not limited", full.sample == null && full.files.size() > r.files.size());
     }
 }

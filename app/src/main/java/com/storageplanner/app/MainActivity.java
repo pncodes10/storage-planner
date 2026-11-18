@@ -210,6 +210,14 @@ public final class MainActivity extends Activity {
         return null;
     }
 
+    /** Back to the start screen (its progress shows the analysis that was just started). */
+    void showStart() {
+        if (!stack.isEmpty()) top().onHide();
+        while (stack.size() > 1) stack.remove(stack.size() - 1);
+        show(top());
+        top().refresh();
+    }
+
     private void showFreshOverview() {
         if (!stack.isEmpty()) top().onHide();
         while (stack.size() > 1) stack.remove(stack.size() - 1);
@@ -307,7 +315,10 @@ public final class MainActivity extends Activity {
     void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
 
     // ------------------------------------------------------------------ analysis (runs in AnalysisService)
-    void startAnalysis(final double targetGb, final boolean measure) {
+    void startAnalysis(final double targetGb, final boolean measure) { startAnalysis(targetGb, measure, false); }
+
+    /** sample: only the pictures picked on Try on my pictures; the start screen shows the progress, the overview the plan. */
+    void startAnalysis(final double targetGb, final boolean measure, final boolean sample) {
         if (!AnalysisState.begin()) return;
         // the scan runs whether or not this is granted; it only decides whether the notification shows
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
@@ -315,14 +326,15 @@ public final class MainActivity extends Activity {
         Intent i = new Intent(this, AnalysisService.class)
                 .setAction(AnalysisService.ACTION_START)
                 .putExtra(AnalysisService.EXTRA_TARGET_GB, targetGb)
-                .putExtra(AnalysisService.EXTRA_MEASURE, measure);
+                .putExtra(AnalysisService.EXTRA_MEASURE, measure)
+                .putExtra(AnalysisService.EXTRA_SAMPLE, sample);
         try {
             startForegroundService(i);
         } catch (Throwable t) {
             // the system refused the service: run in this process as before (stops if Android kills the app)
             final android.content.Context app = getApplicationContext();
             new Thread(new Runnable() {
-                public void run() { AnalysisRunner.run(app, targetGb, measure, AnalysisRunner.progress(null)); }
+                public void run() { AnalysisRunner.run(app, targetGb, measure, sample, AnalysisRunner.progress(null)); }
             }, "analysis").start();
         }
     }

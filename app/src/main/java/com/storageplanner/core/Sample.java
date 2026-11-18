@@ -108,6 +108,67 @@ public final class Sample {
         return new ArrayList<FileItem>(l.subList(0, k));
     }
 
+    /** n newest pictures (by date modified; the path breaks a tie), so bursts and near-identical shots stay together. */
+    public static List<FileItem> newest(List<FileItem> all, int n) {
+        List<FileItem> l = new ArrayList<FileItem>(all);
+        Collections.sort(l, new java.util.Comparator<FileItem>() {
+            public int compare(FileItem a, FileItem b) { return a.mtime != b.mtime ? (a.mtime > b.mtime ? -1 : 1) : a.rel.compareTo(b.rel); }
+        });
+        return new ArrayList<FileItem>(l.subList(0, Math.min(Math.max(0, n), l.size())));
+    }
+
+    // ------------------------------------------------------------------ a limited Analyse
+    /**
+     * A limit for the main analysis: how many pictures from each place, picked at random (seed) or the newest. A scan with a
+     * limit keeps only those pictures and nothing else (no other files, no apps), and runs the full pipeline on them:
+     * duplicates, bursts, blur against the other picked photos, sorting, the rules and the plan.
+     */
+    public static final class Limit {
+        public final Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
+        public long seed;
+        public boolean newest;
+
+        public int total() { int n = 0; for (Integer v : counts.values()) n += v == null ? 0 : v; return n; }
+
+        /** "100 camera photos, 20 screenshots (random)". */
+        public String describe() {
+            StringBuilder b = new StringBuilder();
+            for (Map.Entry<String, Integer> e : counts.entrySet()) {
+                if (e.getValue() == null || e.getValue() <= 0) continue;
+                if (b.length() > 0) b.append(", ");
+                b.append(e.getValue()).append(' ').append(label(e.getKey()).toLowerCase(Locale.ROOT));
+            }
+            return b.append(newest ? " (newest)" : " (random)").toString();
+        }
+    }
+
+    /**
+     * The files a limited scan keeps: from each place in the limit, that many pictures (by name, as list() finds them);
+     * everything else is left out. Same files and seed give the same pictures. Keeps the order of files.
+     */
+    public static List<FileItem> restrict(List<FileItem> files, Limit lim) {
+        Map<String, List<FileItem>> by = new LinkedHashMap<String, List<FileItem>>();
+        for (FileItem f : files) {
+            Integer n = lim.counts.get(f.area);
+            if (n == null || n <= 0 || !pictureName(f.name())) continue;
+            List<FileItem> l = by.get(f.area);
+            if (l == null) { l = new ArrayList<FileItem>(); by.put(f.area, l); }
+            l.add(f);
+        }
+        Set<FileItem> keep = new HashSet<FileItem>();
+        Random rnd = new Random(lim.seed);
+        for (String a : lim.counts.keySet()) {                       // the limit's order, so the random picks do not depend on the walk
+            List<FileItem> l = by.get(a);
+            if (l == null) continue;
+            Collections.sort(l, new java.util.Comparator<FileItem>() { public int compare(FileItem x, FileItem y) { return x.rel.compareTo(y.rel); } });
+            int n = Math.min(lim.counts.get(a), MAX_EACH);
+            keep.addAll(lim.newest ? newest(l, n) : pick(l, n, rnd));
+        }
+        List<FileItem> out = new ArrayList<FileItem>();
+        for (FileItem f : files) if (keep.contains(f)) out.add(f);
+        return out;
+    }
+
     /** One picture of the sample. */
     public static final class Item {
         public final String source;

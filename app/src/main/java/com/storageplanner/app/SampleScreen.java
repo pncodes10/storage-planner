@@ -30,9 +30,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Try on my pictures (debug): a number for each place on the phone (camera, screenshots, downloads, WhatsApp, ...);
- * that many pictures are picked at random from each and run through the sorting and the rules, as in the Algorithm Lab.
- * Shows a summary per place and the pictures that would get a suggestion; every picture's full details go to the Lab log.
+ * Try on my pictures (debug): a number for each place on the phone (camera, screenshots, downloads, WhatsApp, ...).
+ * Run starts the real Analyse limited to that many pictures from each place (at random or the newest): the same
+ * pipeline, plan and screens as a full analysis, so every picture gets the options it would get there. "Lab check
+ * only" runs each picked picture through the sorting and the rules one by one, as in the Algorithm Lab, with no plan.
  * Read-only: nothing on the phone is changed.
  */
 public final class SampleScreen extends Screen {
@@ -44,7 +45,8 @@ public final class SampleScreen extends Screen {
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean busy, stop;
     private Button runBtn, stopBtn;
-    private CheckBox sameBox;
+    private CheckBox sameBox, newestBox;
+    private Button labBtn;
     private ProgressBar bar;
     private TextView status, summary, list;
 
@@ -62,12 +64,12 @@ public final class SampleScreen extends Screen {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(16), dp(12), dp(16), dp(32));
         sv.addView(root);
-        Ui.add(root, Ui.text(a, "Debug tool. Type how many pictures to try from each place. That many are picked at random from your phone, "
-                + "sorted into categories and run through your rules, exactly as the Algorithm Lab does for one picture. "
-                + "Nothing is changed or deleted.", 14, Ui.text2, false), 0);
-        Ui.add(root, Ui.text(a, "Each picture is judged on its own: duplicates, bursts, blur compared with your other photos and sent copies need "
-                + "a full Analyse, so rules that test them do not match here. Reading text takes a few seconds per picture, so 1,000 pictures "
-                + "can take over half an hour. Keep this screen open; it stays awake while it runs.", 13, Ui.text2, false), 6);
+        Ui.add(root, Ui.text(a, "Type how many pictures to analyse from each place, then tap Analyse these pictures. It runs the same "
+                + "analysis as Analyse my storage, on those pictures only, and opens the plan: every picture gets the options it would get "
+                + "in a full analysis. Nothing is changed or deleted.", 14, Ui.text2, false), 0);
+        Ui.add(root, Ui.text(a, "The plan then covers only these pictures (no other files, no apps) and replaces the last results until you "
+                + "analyse your whole storage again. Duplicates, bursts and blur are found among the picked pictures only: pick the newest "
+                + "to keep bursts together. Reading text takes a few seconds per picture, so 1,000 pictures can take over half an hour.", 13, Ui.text2, false), 6);
 
         SharedPreferences p = prefs();
         for (int i = 0; i < Sample.SOURCES.length; i++) {
@@ -94,11 +96,17 @@ public final class SampleScreen extends Screen {
         sameBox.setEnabled(p.contains("seed"));
         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2); cl.topMargin = dp(8);
         root.addView(sameBox, cl);
+        newestBox = new CheckBox(a);
+        newestBox.setText("Take the newest pictures instead of random ones (keeps bursts and near-identical shots together)");
+        newestBox.setTextColor(Ui.text);
+        newestBox.setChecked(p.getBoolean("newest", false));
+        LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(-1, -2); nl.topMargin = dp(4);
+        root.addView(newestBox, nl);
 
         LinearLayout buttons = Ui.row(a);
-        runBtn = Ui.button(a, "Run", true);
-        runBtn.setContentDescription("Run the sorting and the rules on the pictures picked from each place");
-        runBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { start(); } });
+        runBtn = Ui.button(a, "Analyse these pictures", true);
+        runBtn.setContentDescription("Run the full analysis on the pictures picked from each place and open the plan");
+        runBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { analyse(); } });
         stopBtn = Ui.button(a, "Stop", false);
         stopBtn.setEnabled(false);
         stopBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { stop = true; status.setText("Stopping after this picture…"); } });
@@ -106,6 +114,14 @@ public final class SampleScreen extends Screen {
         buttons.addView(runBtn, b1); buttons.addView(stopBtn, new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-1, -2); bl.topMargin = dp(12);
         root.addView(buttons, bl);
+
+        Ui.add(root, Ui.text(a, "Lab check only: runs each picked picture through the sorting and your rules one by one, as the Algorithm Lab does, "
+                + "and lists the results here, with every detail in the Lab log. No plan is made and your last results stay. Each picture is "
+                + "judged on its own, so duplicates, bursts, blur and sent copies are not checked. Stop ends it after the current picture.", 13, Ui.text2, false), 16);
+        labBtn = Ui.button(a, "Lab check only (no plan)", false);
+        labBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { start(); } });
+        LinearLayout.LayoutParams lb = new LinearLayout.LayoutParams(-1, -2); lb.topMargin = dp(6);
+        root.addView(labBtn, lb);
 
         bar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(1000);
@@ -148,10 +164,10 @@ public final class SampleScreen extends Screen {
         return t;
     }
 
-    // ------------------------------------------------------------------ running
-    private void start() {
-        if (busy) return;
-        final Map<String, Integer> want = new LinkedHashMap<String, Integer>();
+    // ------------------------------------------------------------------ the limit
+    /** Reads the fields, saves them (numbers, seed, newest); null and a message when no place has a number. */
+    private Map<String, Integer> readCounts() {
+        Map<String, Integer> want = new LinkedHashMap<String, Integer>();
         int total = 0;
         SharedPreferences.Editor ed = prefs().edit();
         for (int i = 0; i < boxes.length; i++) {
@@ -163,11 +179,43 @@ public final class SampleScreen extends Screen {
             ed.putInt(Sample.SOURCES[i], n);
             total += n;
         }
-        if (total == 0) { a.toast("Type a number for at least one place."); return; }
-        final long seed = sameBox.isChecked() ? prefs().getLong("seed", System.currentTimeMillis()) : System.currentTimeMillis();
-        ed.putLong("seed", seed).apply();
+        if (total == 0) { a.toast("Type a number for at least one place."); return null; }
+        long seed = sameBox.isChecked() ? prefs().getLong("seed", System.currentTimeMillis()) : System.currentTimeMillis();
+        ed.putLong("seed", seed).putBoolean("newest", newestBox.isChecked()).commit();       // the analysis reads them right away
+        sameBox.setEnabled(true);
+        return want;
+    }
+
+    /** The limit as saved on this screen, for the analysis (AnalysisRunner). */
+    static Sample.Limit limit(android.content.Context c) {
+        SharedPreferences p = c.getSharedPreferences(PREFS, 0);
+        Sample.Limit l = new Sample.Limit();
+        for (String area : Sample.SOURCES) l.counts.put(area, p.getInt(area, 0));
+        l.seed = p.getLong("seed", 1);
+        l.newest = p.getBoolean("newest", false);
+        return l;
+    }
+
+    /** Starts the real analysis on the picked pictures; the start screen shows the progress and the plan opens when it is done. */
+    private void analyse() {
+        if (busy) { a.toast("Wait for the Lab check to finish, or stop it."); return; }
+        if (AnalysisState.running) { a.toast("An analysis is already running."); return; }
+        if (!AndroidPlatform.hasFilesAccess(a)) { a.toast("Grant all files access first (on the start screen)."); return; }
+        if (readCounts() == null) return;
+        long total = new AndroidPlatform(a).totalBytes();
+        double gb = Math.max(1, total / 1e9 * 70.0 / 128.0);          // the start screen's default target
+        a.startAnalysis(gb, false, true);
+        a.showStart();
+    }
+
+    // ------------------------------------------------------------------ Lab check only
+    private void start() {
+        if (busy) return;
+        final Map<String, Integer> want = readCounts();
+        if (want == null) return;
+        final long seed = prefs().getLong("seed", System.currentTimeMillis());
         busy = true; stop = false;
-        runBtn.setEnabled(false); stopBtn.setEnabled(true);
+        runBtn.setEnabled(false); labBtn.setEnabled(false); stopBtn.setEnabled(true);
         bar.setProgress(0); bar.setVisibility(View.VISIBLE);
         status.setText("Listing pictures…");
         summary.setText(""); list.setText("");
@@ -215,7 +263,7 @@ public final class SampleScreen extends Screen {
                 ui.post(new Runnable() {
                     public void run() {
                         busy = false;
-                        runBtn.setEnabled(true); stopBtn.setEnabled(false); sameBox.setEnabled(true);
+                        runBtn.setEnabled(true); labBtn.setEnabled(true); stopBtn.setEnabled(false); sameBox.setEnabled(true);
                         bar.setVisibility(View.GONE);
                         a.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                         if (r == null) { status.setText("Failed: " + e); return; }

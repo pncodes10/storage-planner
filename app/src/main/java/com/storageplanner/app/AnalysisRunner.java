@@ -24,13 +24,17 @@ final class AnalysisRunner {
         long saved;          // bytes the plan frees (for the notification)
     }
 
-    static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) {
+    static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) { return run(app, targetGb, measure, false, pr); }
+
+    /** sample: analyse only the pictures picked on Try on my pictures (SampleScreen.limit), not the whole phone. */
+    static Outcome run(final Context app, double targetGb, boolean measure, boolean sample, Scanner.Progress pr) {
         Outcome o = new Outcome();
         ResultFiles.setRunning(app, true);
         try {
             AndroidPlatform pf = new AndroidPlatform(app);
             Scanner.Options opt = new Scanner.Options();
             opt.sortPictures = sortPictures(app);
+            if (sample) { opt.limit = SampleScreen.limit(app); opt.sortPictures = true; }
             ResultStore.Saved prev = ResultFiles.load(app);               // unchanged pictures are not measured or read again
             if (prev != null) {
                 opt.previous = new java.util.HashMap<String, com.storageplanner.core.FileItem>();
@@ -51,6 +55,7 @@ final class AnalysisRunner {
             s.appStats = pf.appStatsAvailable; s.sdk = pf.sdkInt(); s.mode = Session.mode;
             pr.update("Saving results", 0, 0);
             ResultFiles.save(app, s);                 // a failed save only costs a rescan after process death
+            setLastSample(app, r.sample);             // the overview says when the plan covers only some pictures
 
             final CountDownLatch set = new CountDownLatch(1);
             final long[] saved = {0};
@@ -67,7 +72,8 @@ final class AnalysisRunner {
             set.await(60, TimeUnit.SECONDS);
             o.ok = true;
             o.saved = saved[0];
-            o.message = "Done: " + r.files.size() + " files and " + r.apps.size() + " apps analysed.";
+            o.message = r.sample != null ? "Done: " + r.files.size() + " pictures analysed (" + r.sample + ")."
+                    : "Done: " + r.files.size() + " files and " + r.apps.size() + " apps analysed.";
             return o;
         } catch (Throwable t) {
             o.message = "Analysis failed: " + t;
@@ -76,6 +82,14 @@ final class AnalysisRunner {
             ResultFiles.setRunning(app, false);
             AnalysisState.finished(o.message, o.ok);
         }
+    }
+
+    /** What the last finished analysis covered when it was limited to some pictures; null after a full one. */
+    static String lastSample(Context c) { return c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getString("last_sample", null); }
+    static void setLastSample(Context c, String s) {
+        android.content.SharedPreferences.Editor e = c.getSharedPreferences("analysis", Context.MODE_PRIVATE).edit();
+        if (s == null) e.remove("last_sample"); else e.putString("last_sample", s);
+        e.apply();
     }
 
     static boolean sortPictures(Context c) { return c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getBoolean("sort_pictures", true); }

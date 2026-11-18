@@ -27,6 +27,8 @@ public final class Scanner {
         public long total, free, now;
         public int unreadableDirs;
         public long scannedBytes;
+        /** Set when only some pictures were analysed (Try on my pictures): what was picked, in words. Not saved with the results. */
+        public String sample;
     }
 
     private static final Set<String> MEDIA_AREAS = new HashSet<String>();
@@ -50,6 +52,8 @@ public final class Scanner {
         public boolean sortPictures = true;
         /** Time allowed for reading text in pictures in this scan; the rest is read next time. */
         public long textBudgetMs = 20 * 60 * 1000L;
+        /** Analyse only some pictures (Try on my pictures); null = everything. */
+        public Sample.Limit limit;
     }
 
     public static Result scan(Platform pf, Progress pr) { return scan(pf, pr, new Options()); }
@@ -91,6 +95,16 @@ public final class Scanner {
                 r.files.add(f); r.scannedBytes += size;
                 if (++seen % 500 == 0) pr.update("Listing files", seen, 0);
             }
+        }
+        // ---- a limited analysis: only the picked pictures, nothing else (no other files, no apps)
+        if (opt.limit != null) {
+            pr.update("Picking pictures", 0, 0);
+            List<FileItem> keep = Sample.restrict(r.files, opt.limit);
+            r.files.clear(); r.files.addAll(keep);
+            r.scannedBytes = 0;
+            for (FileItem f : r.files) r.scannedBytes += f.size;
+            r.apps = new ArrayList<AppItem>();
+            r.sample = opt.limit.describe();
         }
         // ---- types from magic bytes (only where it matters)
         int i = 0;

@@ -431,26 +431,36 @@ The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the 
 
 **Try on my pictures (debug)** is on the start screen, in the overview and at the top of the Algorithm Lab. It has a
 number field for each place: **Camera photos**, **Screenshots**, **Downloads**, **WhatsApp images (received)**,
-**WhatsApp images (sent)** and **Other pictures** (the Pictures folder), up to 100,000 each. **Run** picks that many
-pictures at random from each place (all of them when there are fewer) and runs each through the picture sorting and
-your rules, exactly as **Rules: which ones match** does in the Lab. Nothing is copied, changed or deleted.
+**WhatsApp images (sent)** and **Other pictures** (the Pictures folder), up to 100,000 each. The numbers are remembered.
 
-- **Which pictures:** files named .jpg, .jpeg, .png, .webp, .heic or .heif under DCIM, Pictures, Download and the
-  WhatsApp folders, placed by the same folder rules as a scan (so `DCIM/.thumbnails` is not a camera photo, and
-  `Pictures/Screenshots` is a screenshot). A file whose first bytes are not a picture is skipped and counted.
-- **Same pictures again:** tick **Pick the same pictures as last time** to run the same sample after changing a rule.
-  The numbers you typed are remembered.
-- **Results:** for each place, how many pictures were sorted out of how many it has, how many fell into each category,
-  how many would get each suggestion (or none), and roughly how much the suggestions would free. Below that, every
-  picture that would get a suggestion or was skipped (the first 400; the log has all of them).
-- **Log:** every picture's measurements, the text read and each rule's verdict go to the Lab log (**Save log** and
-  **Share log** are on this screen too), in full for the first 300 pictures and one line each after that, because a
-  full entry is about 6 KB.
-- **Limits:** like the Lab, each picture is judged on its own, so duplicates, bursts, blur compared with your other
-  photos and sent copies are unknown and rules that test them do not match. Reading text takes a few seconds per
-  picture, so 1,000 pictures can take over half an hour. The run happens on this screen, which stays awake while it
-  runs; **Stop** ends it after the current picture and keeps what was done. If Android closes the app, the run ends.
-  `SampleTest` covers the listing, the picking, skipping files that are not pictures, stopping and that no file changes.
+**Analyse these pictures** runs the real analysis (the same one as **Analyse my storage**, in the background service
+with its notification), limited to that many pictures from each place, and opens the plan when it is done. Every
+picked picture goes through the whole pipeline (file type, exact duplicates, bursts, blur, sorting into categories,
+reading text, your rules) and gets the options it would get in a full analysis, in the usual screens: the plan, the
+categories, the swipe review, each file's details and tags.
+
+- **Which pictures:** files named .jpg, .jpeg, .png, .webp, .heic or .heif in those places, placed by the same folder
+  rules as a scan (`DCIM/.thumbnails` is not a camera photo, `Pictures/Screenshots` is a screenshot). Picked at
+  random, or tick **Take the newest pictures** to take the newest ones, which keeps bursts and near-identical shots
+  together. Tick **Pick the same pictures as last time** to analyse the same ones again after changing a rule.
+- **What the plan then covers:** only those pictures. No other files and no apps are included, and duplicates, bursts
+  and blur (compared with your other photos) are looked for among the picked pictures only. The plan replaces your
+  last results until you tap **Analyse my storage** again, and the overview says so at the top ("Sample only: 100
+  camera photos, 20 screenshots (random)"). Calibration ("Measure compression on a few of my photos") is skipped,
+  and pictures are always sorted, whatever the start screen's switch says. The target is the start screen's default.
+- **Time:** reading text takes a few seconds per picture, so 1,000 pictures can take over half an hour.
+
+**Lab check only (no plan)** runs each picked picture through the sorting and your rules one by one, exactly as
+**Rules: which ones match** does in the Lab, and lists the results on this screen: for each place, how many fell into
+each category, how many would get each suggestion and roughly how much they would free, then every picture that would
+get a suggestion or was skipped (the first 400). It makes no plan and keeps your last results. Each picture is judged
+on its own, so duplicates, bursts, blur and sent copies are not checked. Every picture's details go to the Lab log
+(**Save log** and **Share log** are on this screen too), in full for the first 300 pictures and one line each after
+that. It runs on this screen, which stays awake; **Stop** ends it after the current picture.
+
+Nothing is copied, changed or deleted by either button. `SampleTest` covers the listing, the random and newest picks,
+the limited analysis (only the picked pictures, sorted, a plan built from them), skipping files that are not
+pictures, stopping, and that no file changes.
 
 ## Runs in the background
 
