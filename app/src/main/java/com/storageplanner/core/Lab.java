@@ -493,6 +493,80 @@ public final class Lab {
         return sh;
     }
 
+    /**
+     * The offline models on one picture, whatever its category: the scene network (its 5 likeliest ImageNet classes,
+     * the share of each scene group, the sky share, the scene it gives), the aesthetic score, and for every counted
+     * face the smile probability and whether the head is turned to the camera.
+     */
+    public static Shown models(Platform pf, Pic p, Out o) {
+        o.line("SCENE, AESTHETIC SCORE, SMILES — " + p.name);
+        Shown sh = new Shown();
+        SceneNet net;
+        try { net = pf.sceneNet(); } catch (Throwable t) { net = null; }
+        if (net == null) o.line("  ! the scene network is not available");
+        else {
+            int[] dims = new int[4];
+            int[] px;
+            try { px = pf.argb(p.path, Sorter.SCENE_EDGE, dims); } catch (Throwable t) { px = null; }
+            if (px == null) o.line("  ! could not decode the picture" + (pf.decodeNote() == null ? "" : ": " + pf.decodeNote()));
+            else {
+                long t0 = System.nanoTime();
+                SceneNet.Out out = net.run(px, dims[2], dims[3]);
+                long ms = (System.nanoTime() - t0) / 1000000;
+                float[] pr = SceneNet.probabilities(out.logits);
+                o.line(f("  scene network: %d ms on a %d x %d copy squeezed to %d x %d", ms, dims[2], dims[3], SceneNet.SIZE, SceneNet.SIZE));
+                Integer[] idx = new Integer[pr.length];
+                for (int i = 0; i < idx.length; i++) idx[i] = i;
+                final float[] pp = pr;
+                java.util.Arrays.sort(idx, new java.util.Comparator<Integer>() { public int compare(Integer x, Integer y) { return Float.compare(pp[y], pp[x]); } });
+                float[] g = Scene.shares(pr);
+                for (int k = 0; k < 5; k++) {
+                    int c = idx[k];
+                    String grp = "no group";
+                    float[] one = new float[pr.length]; one[c] = 1;
+                    float[] gs = Scene.shares(one);
+                    for (int j = 0; j < gs.length; j++) if (gs[j] > 0) grp = Scene.GROUPS[j];
+                    o.line(f("    %d. %s %.1f%% (%s)", k + 1, ImageNetClasses.name(c), 100 * pr[c], grp));
+                }
+                StringBuilder b = new StringBuilder();
+                for (int j = 0; j < g.length; j++) b.append(f(" %s %.0f%%", Scene.GROUPS[j], 100 * g[j]));
+                int sw = Math.max(1, (int) Math.round(dims[2] * Math.min(1.0, 96.0 / Math.max(dims[2], dims[3]))));
+                int shh = Math.max(1, (int) Math.round(dims[3] * Math.min(1.0, 96.0 / Math.max(dims[2], dims[3]))));
+                double sky = Scene.sky(sw == dims[2] ? px : Sorter.shrink(px, dims[2], dims[3], sw, shh), sw, shh);
+                o.line("  groups:" + b + f("; sky %.0f%% of the picture", 100 * sky));
+                String grp = Scene.group(g);
+                o.line("  => from the network: " + (grp != null ? grp : sky >= Scene.MIN_SKY ? Scene.SKY : Scene.OTHER)
+                        + f(" (a group needs %.0f%%, sky %.0f%%; a paper or card is \"document\" and a close face \"selfie\" first, see Picture category)",
+                        100 * Scene.MIN_SHARE, 100 * Scene.MIN_SKY));
+                double a = Aesthetic.score(out.features);
+                o.line(f("  aesthetic score %.1f of 10 (%s; an average photo is about 5, spoiled ones 3.2-3.9)", a, Aesthetic.words(a)));
+            }
+        }
+        Img m = load(pf, p, Scanner.QUALITY_EDGE, o);
+        if (m == null) return sh;
+        float[] raw = pf.faces(p.path, m.px, m.w, m.h);
+        if (raw == null) { o.line("  ! the face detector is not available"); return sh; }
+        double big = biggest(raw);
+        List<float[]> kept = new ArrayList<float[]>();
+        int k = 0;
+        for (int i = 0; i + Faces.F - 1 < raw.length; i += Faces.F) {
+            if (verdict(raw, i, m.w, m.h, big) != null) continue;
+            k++;
+            double pOpen = open(m, raw, i);
+            if (!Faces.hasMouth(raw, i)) { o.line(f("  face %d: smile and head turn not known (no mouth positions from this detector)", k)); continue; }
+            double sm = Smile.probability(m.l, m.w, m.h, raw, i);
+            double[] t = Smile.turn(raw, i);
+            boolean facing = Smile.facing(raw, i);
+            o.line(f("  face %d (eyes %.0f px apart): smile %.2f -> %s; nose %.2f eye distances to the side, %.0f%% of the way down to the mouth -> %s; eyes open %.2f -> %s",
+                    k, raw[i + 2], sm, sm >= Smile.SMILING ? "SMILING" : "not smiling", t == null ? 0 : t[0], t == null ? 0 : 100 * t[1],
+                    facing ? "turned to the camera" : "turned away", pOpen, facing && pOpen >= PhotoQuality.OPEN ? "LOOKING AT THE CAMERA" : "not looking"));
+            kept.add(shown(m, raw, i, pOpen));
+        }
+        if (k == 0) o.line("  no face counted");
+        sh.faces = flat(kept);
+        return sh;
+    }
+
     /** What the photo shows and its aesthetic score, as the scan measures them (photos only). */
     static void sceneLines(Platform pf, FileItem f, Out o) {
         if (!Sorter.sceneWorthy(f)) { o.line("  scene network: not run (" + (Scene.document(f.category) ? "a paper or card: scene document" : "not a photo") + ")"); return; }

@@ -525,8 +525,11 @@ runs on up to 4 cores, photos only (not screenshots, papers or chat graphics), n
 Analyse. Photos not reached are done at the next Analyse; until then their scene and score are unknown, and a rule that
 tests them does not match. Unchanged photos are never looked at again.
 
-The Algorithm Lab's picture check shows the scene shares, the sky share, the score, and for each face the smile
-probability and the head turn.
+In the Algorithm Lab, **Scene, aesthetic score, smiles (models)** runs the models on the selected picture, whatever its
+category: the scene network's 5 likeliest ImageNet classes (and which scene group each counts for), the share of each
+group, the sky share, the scene it gives, the aesthetic score, and for every counted face the smile probability, the
+head turn and whether it is looking at the camera. **Scene and score on each picture** does the same for all picked
+pictures, and **Run everything** includes it. Picture category also shows the scene and score as a scan would.
 
 Rule ideas: `scene = food` and `taken_days > 180` → delete; `aesthetic < 3.5` and `source = chat image (received)` →
 delete; `scene = document` and `age_days > 365`; `faces > 0` and `smiling = 0`.
