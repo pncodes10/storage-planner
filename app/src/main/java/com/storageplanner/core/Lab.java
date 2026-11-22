@@ -456,10 +456,7 @@ public final class Lab {
     public static Shown category(Platform pf, Pic p, long now, Out o) {
         o.line("PICTURE CATEGORY — " + p.name + " (treated as " + p.area + ")");
         Shown sh = new Shown();
-        FileItem f = new FileItem(p.rel != null ? p.rel : p.area.equals("screenshot") ? "Pictures/Screenshots/" + p.name : "Lab/" + p.name, p.path, p.size, p.mtime);
-        f.area = p.area; f.type = p.type != null ? p.type : p.name.toLowerCase(Locale.ROOT).endsWith(".png") ? "png" : "jpeg";
-        f.taken = "jpeg".equals(f.type) ? PhotoMeta.taken(p.path, java.util.TimeZone.getDefault()) : 0;    // date taken, Motion Photo: as in a scan
-        if ("camera".equals(f.area)) try { f.motionBytes = com.storageplanner.tools.MotionPhoto.find(new java.io.File(p.path)).videoBytes(); } catch (Throwable t) { f.motionBytes = -1; }
+        FileItem f = itemFor(p);
         Img m = load(pf, p, Sorter.EDGE, o);
         if (m == null) return sh;
         int[] d = {m.ow, m.oh, m.w, m.h};
@@ -491,6 +488,15 @@ public final class Lab {
         tagLines(f, now, o);
         sh.file = f;
         return sh;
+    }
+
+    /** The picked picture as a scan would list it (path, area, file type, date taken, Motion Photo video). */
+    static FileItem itemFor(Pic p) {
+        FileItem f = new FileItem(p.rel != null ? p.rel : p.area.equals("screenshot") ? "Pictures/Screenshots/" + p.name : "Lab/" + p.name, p.path, p.size, p.mtime);
+        f.area = p.area; f.type = p.type != null ? p.type : p.name.toLowerCase(Locale.ROOT).endsWith(".png") ? "png" : "jpeg";
+        f.taken = "jpeg".equals(f.type) ? PhotoMeta.taken(p.path, java.util.TimeZone.getDefault()) : 0;    // date taken, Motion Photo: as in a scan
+        if ("camera".equals(f.area)) try { f.motionBytes = com.storageplanner.tools.MotionPhoto.find(new java.io.File(p.path)).videoBytes(); } catch (Throwable t) { f.motionBytes = -1; }
+        return f;
     }
 
     /**
@@ -746,6 +752,137 @@ public final class Lab {
         if (w == null) o.line(f("  Tesseract (the app's text reader, for comparison): gave nothing (%d ms)", ms2));
         else o.line(f("  Tesseract (the app's text reader, for comparison): %d words in %d ms, %d read confidently: %s", w.text.size(), ms2,
                 TextRules.goodWords(w), cut(TextRules.clean(w), 400)));
+    }
+
+    /**
+     * Would the plan suggest deleting this picture if Mirage read it? Sorts the picture as a scan does today (with
+     * Tesseract), then again with Mirage's text (cleaned up: repeats merged, icon fragments dropped) put through the same
+     * text rules, plus Mirage's view of the picture (a chat image drawn as a graphic, not a photograph, is a forward);
+     * then runs your rules on both and says what the plan would do. Also lists what Mirage saw that no rule uses yet
+     * (people, things photographed only to remember them).
+     */
+    public static Shown mirageVerdict(Platform pf, Pic p, RuleSet rules, long now, Out o) {
+        o.line("MIRAGE VERDICT — " + p.name + " (treated as " + p.area + ")");
+        Shown sh = new Shown();
+        FileItem f = itemFor(p);
+        Img m = load(pf, p, Sorter.EDGE, o);
+        if (m == null) return sh;
+        Sorter.Prep prep = Sorter.measure(pf, f, m.px, new int[]{m.ow, m.oh, m.w, m.h});
+        ImageSignals.S s = prep.s;
+        boolean read = PhotoCategory.worthReading(f, s);
+        boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
+        boolean photoLike = s.colorful >= 15 && s.flat < 0.5;
+
+        // today: the scan's own text reader
+        final List<String> quiet = new ArrayList<String>();
+        Out q = new Out() { public void line(String x) { quiet.add(x); } };
+        TextRules.Verdict vt = read ? readAndJudge(pf, f, s, prep.aspect, now, q) : null;
+        PhotoCategory.Result today = PhotoCategory.classify(f, s, f.code, vt, f.faces);
+
+        // Mirage
+        int[] d = new int[4];
+        int[] px = decode(pf, p.path, p.size, Sorter.TEXT_EDGE, d, "the picture for Mirage", o);
+        String json = null;
+        long t0 = System.nanoTime();
+        if (px != null) try { json = pf.mirage(px, d[2], d[3], Mirage.OPTIONS); } catch (Throwable t) { json = null; }
+        long ms = (System.nanoTime() - t0) / 1000000;
+        Mirage.Answer a = null;
+        if (json == null) o.line(f("  ! Mirage gave nothing (%d ms): %s", ms, pf.mirageNote() == null ? "not available" : pf.mirageNote()));
+        else try { a = Mirage.read(json); } catch (IllegalArgumentException e) { o.line("  ! could not read Mirage's answer: " + e.getMessage()); }
+
+        PhotoCategory.Result withMirage = null;
+        if (a != null) {
+            Mirage.Clean c = Mirage.clean(a.text);
+            String style = Mirage.style(a);
+            int people = Mirage.people(a);
+            o.line(f("  Mirage: %d ms on a %d x %d copy; scene: %s", ms, d[2], d[3], a.scene.isEmpty() ? "(nothing said)" : Mirage.join(a.scene, "; ")));
+            StringBuilder ob = new StringBuilder();
+            for (Mirage.Thing t : a.objects) if (!"text".equals(t.name) && ob.indexOf(t.name) < 0) ob.append(ob.length() == 0 ? "" : ", ").append(t.name);
+            o.line("  objects: " + (ob.length() == 0 ? "none named" : ob));
+            StringBuilder tb = new StringBuilder();
+            for (Mirage.Thing t : c.kept) tb.append(tb.length() == 0 ? "" : " | ").append(t.name);
+            o.line(f("  text, %d line%s after clean-up (%d repeat%s merged, %d short fragment%s dropped): %s", c.kept.size(), c.kept.size() == 1 ? "" : "s",
+                    c.merged, c.merged == 1 ? "" : "s", c.fragments, c.fragments == 1 ? "" : "s", tb.length() == 0 ? "(none)" : cut(tb.toString(), 400)));
+            boolean graphic = "graphic".equals(style);
+            TextRules.Verdict vm = TextRules.classify(Mirage.words(c.kept), prep.aspect, photoLike || graphic, PhotoCategory.isScreenshot(f), chat, now);
+            // the pixel checks can call a real picture "accidental" (smooth, little contrast); what Mirage recognised overrules that
+            String seen = recognised(a, vm);
+            boolean accidental = PhotoCategory.accidental(s);
+            boolean useText = read || accidental && seen != null && !PhotoCategory.isCamera(f);
+            o.line("  Mirage's text says: " + (vm.kind == null ? "nothing specific" : PhotoCategory.label(vm.kind)) + (vm.why.isEmpty() ? "" : " — evidence " + vm.why)
+                    + (vm.date > 0 ? "; date " + Report.day(vm.date) : "") + f(" (%d words read confidently)", vm.goodWords)
+                    + (useText ? "" : "; not used: a scan does not go by the text of a picture like this (" + (PhotoCategory.isCamera(f) ? "a camera photo" : "nothing recognised") + ")"));
+            withMirage = PhotoCategory.classify(f, s, f.code, useText ? vm : null, f.faces);
+            if (PhotoCategory.ACCIDENTAL.equals(withMirage.category) && seen != null) {
+                withMirage = PhotoCategory.classify(f, null, f.code, useText ? vm : null, f.faces);
+                if (PhotoCategory.PHOTO.equals(withMirage.category) && people > 0) withMirage.category = PhotoCategory.PEOPLE;
+                if (withMirage.why == null || withMirage.why.isEmpty()) withMirage.why = "Mirage recognised " + seen + ": not an accidental shot";
+            }
+            String cat = withMirage.category;
+            if (chat && graphic && people == 0 && f.faces <= 0 && (PhotoCategory.PHOTO.equals(cat) || PhotoCategory.DOCUMENT.equals(cat) && vm.kind == null)) {
+                withMirage.category = PhotoCategory.GRAPHIC;
+                withMirage.why = "Mirage: drawn as \"" + styleWords(a) + "\", not a photograph, received in a chat (a forward)";
+            }
+            o.line("  Mirage saw" + (style == null ? "" : " a " + style) + (people > 0 ? f(", %d %s", people, people == 1 ? "person" : "people") : ", no people")
+                    + (Mirage.reference(a).isEmpty() ? "" : "; things photographed to remember? " + Mirage.join(Mirage.reference(a), ", ") + " (no rule uses this yet)")
+                    + (a.objects.isEmpty() && a.text.isEmpty() ? "; nothing recognised in it" : ""));
+        }
+
+        o.line("  category today (the app's text reader" + (read ? "" : ", not needed here") + "): " + catLine(today));
+        if (withMirage != null) o.line("  category with Mirage: " + catLine(withMirage) + (withMirage.category != null && withMirage.category.equals(today.category) ? "  (the same)" : "  <- CHANGED"));
+
+        List<Option> before = planFor(f, today, rules, now, o, "today");
+        if (withMirage != null) {
+            List<Option> after = planFor(f, withMirage, rules, now, o, "with Mirage");
+            sh.options.addAll(after);
+            o.line("  => VERDICT with Mirage: " + verdict(after, withMirage) + (verdict(before, today).equals(verdict(after, withMirage)) ? " (same as today)" : " (today: " + verdict(before, today) + ")"));
+        } else {
+            sh.options.addAll(before);
+            o.line("  => VERDICT today: " + verdict(before, today));
+        }
+        f.category = withMirage != null ? withMirage.category : today.category;
+        sh.file = f;
+        return sh;
+    }
+
+    /** What Mirage clearly recognised (readable text, or an object named with a good score), or null. */
+    static String recognised(Mirage.Answer a, TextRules.Verdict text) {
+        if (text.goodWords >= 3) return text.goodWords + " words";
+        for (Mirage.Thing t : a.objects) if (!"text".equals(t.name) && t.score >= 0.5) return "a " + t.name;
+        return null;
+    }
+
+    static String styleWords(Mirage.Answer a) {
+        for (String x : a.scene) if (x.startsWith("style ")) return x.substring(6);
+        return "a graphic";
+    }
+
+    static String catLine(PhotoCategory.Result r) {
+        return PhotoCategory.label(r.category) + (r.why == null || r.why.isEmpty() ? "" : " (" + r.why + ")") + (r.date > 0 ? "; date " + Report.day(r.date) : "");
+    }
+
+    /** Your rules on the picture with this category: the rules that match and the plan's options, on one or two lines. */
+    static List<Option> planFor(FileItem f, PhotoCategory.Result r, RuleSet rules, long now, Out o, String which) {
+        f.category = r.category; f.catDate = r.date; f.textPending = false;
+        Scanner.Result one = new Scanner.Result();
+        one.files.add(f);
+        Tags.Context ctx = Tags.context(one, new UnitBuilder.Detections());
+        Tags.T t = Tags.of(f, ctx, now);
+        StringBuilder hit = new StringBuilder();
+        for (Rule x : rules.rules) if (x.enabled && x.problem() == null && x.matches(t)) hit.append(hit.length() == 0 ? "" : ", ").append('"').append(x.name).append('"');
+        Unit u = Unit.forFile(f);
+        rules.compile().apply(u, f, t, ctx, new Estimates(), now);
+        StringBuilder ops = new StringBuilder();
+        for (Option op : u.options) ops.append(ops.length() == 0 ? "" : "; ").append(op.action).append(" by \"").append(op.technique).append('"')
+                .append(op.why == null || op.why.isEmpty() ? "" : " — " + op.why);
+        o.line("  rules " + which + ": " + (hit.length() == 0 ? "none match" : hit + " match") + "; plan: " + (ops.length() == 0 ? "no option (kept)" : ops));
+        return u.options;
+    }
+
+    static String verdict(List<Option> ops, PhotoCategory.Result r) {
+        for (Option op : ops) if ("delete".equals(op.action)) return "SUGGEST DELETING (" + op.technique + ")";
+        if (!ops.isEmpty()) return "SUGGEST " + ops.get(0).action.toUpperCase(Locale.ROOT).replace('_', ' ') + " (" + ops.get(0).technique + ")";
+        return PhotoCategory.ID.equals(r.category) ? "KEEP (ID document: never deleted)" : "KEEP (no rule gives an option)";
     }
 
     // ------------------------------------------------------------------ helpers

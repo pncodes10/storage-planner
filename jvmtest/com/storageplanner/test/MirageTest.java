@@ -104,6 +104,98 @@ public final class MirageTest {
         check("a broken answer is reported, not thrown", String.join("\n", out).contains("! could not read Mirage's answer"));
         System.clearProperty("mirage");
 
+        // ---- clean-up: a caption read in overlapping pieces on one row, icon fragments, a low-score line that is real
+        List<Mirage.Thing> raw = Mirage.read("{\"text\":["
+                + "{\"string\":\"9:41\",\"bbox\":[20,10,200,30],\"score\":0.64},"
+                + "{\"string\":\"C\",\"bbox\":[890,570,950,600],\"score\":0.41},"
+                + "{\"string\":\"7\",\"bbox\":[880,650,950,680],\"score\":0.34},"
+                + "{\"string\":\"OK\",\"bbox\":[400,950,460,980],\"score\":0.8},"
+                + "{\"string\":\"rning to all frie\",\"bbox\":[100,820,700,843],\"score\":0.62},"
+                + "{\"string\":\"Good morning to all friends\",\"bbox\":[60,818,950,842],\"score\":0.41},"
+                + "{\"string\":\"to all\",\"bbox\":[530,824,700,840],\"score\":0.33},"
+                + "{\"string\":\"KA01AB1234\",\"bbox\":[190,477,320,502],\"score\":0.40}]}").text;
+        Mirage.Clean cl = Mirage.clean(raw);
+        List<String> kept = new ArrayList<String>();
+        for (Mirage.Thing t : cl.kept) kept.add(t.name);
+        check("clean-up keeps the full caption once, the clock, OK and the low-score plate", kept.toString().equals("[9:41, OK, Good morning to all friends, KA01AB1234]"));
+        check("clean-up counts " + cl.merged + " " + cl.fragments, cl.merged == 2 && cl.fragments == 2);
+        check("lines on different rows are not merged", !Mirage.sameRow(new int[]{0, 0, 100, 20}, new int[]{0, 30, 100, 50})
+                && !Mirage.sameRow(new int[]{0, 0, 100, 20}, new int[]{200, 0, 300, 20}) && Mirage.sameRow(new int[]{0, 0, 100, 20}, new int[]{50, 5, 300, 22}));
+        TextRules.Words ws = Mirage.words(cl.kept);
+        check("words with confidence from the score", ws.text.size() == 8 && ws.text.get(2).equals("Good") && ws.conf.get(2) == 81 && ws.conf.get(0) == 99);
+        check("style", "graphic".equals(Mirage.style(Mirage.read("{\"scene\":{\"style\":\"flat vector illustration\"}}")))
+                && "photograph".equals(Mirage.style(Mirage.read("{\"scene\":{\"style\":\"photograph\"}}")))
+                && "screenshot".equals(Mirage.style(Mirage.read("{\"scene\":{\"style\":\"screenshot\"}}")))
+                && Mirage.style(Mirage.read("{\"scene\":{\"setting\":\"indoor\"}}")) == null);
+        Mirage.Answer ppl = Mirage.read("{\"objects\":[{\"name\":\"man\",\"bbox\":[1,1,5,5]},{\"name\":\"woman\",\"bbox\":[6,1,9,5]},"
+                + "{\"name\":\"price tag\"},{\"name\":\"manhole\"},{\"name\":\"door\"}]}");
+        check("people and things photographed to remember", Mirage.people(ppl) == 2 && Mirage.reference(ppl).toString().equals("[price tag]"));
+
+        // ---- the verdict: a greeting forward, a one-time code screenshot, a photo of a person
+        // a realistic drawn picture: a coloured panel and lines of dark text on white (not "accidental" to the pixel checks)
+        File drawn = new File(dir, "drawn.png");
+        BufferedImage di = new BufferedImage(720, 1280, BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = di.createGraphics();
+        g.setColor(java.awt.Color.WHITE); g.fillRect(0, 0, 720, 1280);
+        g.setColor(new java.awt.Color(230, 120, 40)); g.fillRect(0, 0, 720, 360);
+        g.setColor(new java.awt.Color(40, 120, 220)); g.fillOval(420, 60, 220, 220);
+        g.setColor(java.awt.Color.BLACK); g.setFont(new java.awt.Font(java.awt.Font.SANS_SERIF, java.awt.Font.BOLD, 40));
+        for (int y = 460; y < 1200; y += 70) g.drawString("Lorem ipsum dolor sit amet " + y, 40, y);
+        g.dispose();
+        ImageIO.write(di, "png", drawn);
+        long now = System.currentTimeMillis(), old = now - 30L * 86400000L;
+        RuleSet rules = RuleSet.defaults();
+        String[][] cases = {
+            {"wa_image", "{\"scene\":{\"style\":\"graphic design\"},\"objects\":[{\"name\":\"flower\",\"score\":0.6}],"
+                + "\"text\":[{\"string\":\"Good Morning\",\"bbox\":[100,100,900,200],\"score\":0.7},{\"string\":\"Have a blessed day\",\"bbox\":[100,800,900,880],\"score\":0.6}]}"},
+            {"screenshot", "{\"scene\":{\"style\":\"screenshot\"},\"objects\":[],"
+                + "\"text\":[{\"string\":\"Messages\",\"bbox\":[50,40,300,70],\"score\":0.7},{\"string\":\"482913 is your OTP for login.\",\"bbox\":[50,300,950,340],\"score\":0.7},"
+                + "{\"string\":\"Do not share it with anyone.\",\"bbox\":[50,350,950,390],\"score\":0.66}]}"},
+            {"camera", "{\"scene\":{\"setting\":\"indoor\",\"style\":\"photograph\"},\"objects\":[{\"name\":\"man\",\"score\":0.78},{\"name\":\"door\",\"score\":0.57}],\"text\":[]}"},
+            {"wa_image", "{\"scene\":{\"style\":\"flat vector illustration\"},\"objects\":[{\"name\":\"circle\",\"score\":0.5}],\"text\":[]}"},
+        };
+        String[] want = {"SUGGEST DELETING", "SUGGEST DELETING", "KEEP", null};
+        for (int k = 0; k < cases.length; k++) {
+            Files.write(saved.toPath(), cases[k][1].getBytes(StandardCharsets.UTF_8));
+            System.setProperty("mirage", saved.getPath());
+            Lab.Pic vp = new Lab.Pic(drawn.getPath(), "case" + k + ".png", drawn.length(), old);
+            vp.area = cases[k][0];
+            out.clear();
+            Lab.Shown vs = Lab.mirageVerdict(pf, vp, rules, now, out::add);
+            String vo = String.join("\n", out);
+            String verdictLine = "";
+            for (String x : out) if (x.contains("=> VERDICT")) verdictLine = x;
+            if (a.length > 0) System.out.println(vo + "\n");
+            if (k == 0) check("greeting forward: category from Mirage's text, deleted as an old greeting", vo.contains("category with Mirage: Greetings & forwards")
+                    && verdictLine.contains("SUGGEST DELETING") && vs.file != null && PhotoCategory.GREETING.equals(vs.file.category));
+            if (k == 1) check("one-time code screenshot", vo.contains("category with Mirage: One-time codes") && verdictLine.contains(want[1]) && vo.contains("\"otp\""));
+            if (k == 2) check("a photo of a person is kept, its text not used", verdictLine.contains("KEEP") && vo.contains("1 person"));
+            if (k == 3) check("a chat image drawn as a graphic is a forward", vo.contains("category with Mirage: Graphics & images (Mirage: drawn as \"flat vector illustration\""));
+        }
+        // the gradient picture looks "accidental" to the pixel checks; Mirage reading a greeting on it overrules that
+        Files.write(saved.toPath(), cases[0][1].getBytes(StandardCharsets.UTF_8));
+        Lab.Pic gp = new Lab.Pic(png.getPath(), "gradient.png", png.length(), old);
+        gp.area = "wa_image";
+        out.clear();
+        Lab.mirageVerdict(pf, gp, rules, now, out::add);
+        String go = String.join("\n", out);
+        if (a.length > 0) System.out.println(go + "\n");
+        check("an 'accidental' picture with text Mirage reads is not accidental", go.contains("category today (the app's text reader, not needed here): Accidental shots")
+                && go.contains("category with Mirage: Greetings & forwards"));
+        Files.write(saved.toPath(), cases[2][1].getBytes(StandardCharsets.UTF_8));
+        gp.area = "camera";
+        out.clear();
+        Lab.mirageVerdict(pf, gp, rules, now, out::add);
+        go = String.join("\n", out);
+        if (a.length > 0) System.out.println(go + "\n");
+        check("an 'accidental' camera photo where Mirage sees a man is a photo of a person", go.contains("category with Mirage: People (Mirage recognised a man: not an accidental shot)")
+                && !go.contains("VERDICT with Mirage: SUGGEST DELETING"));
+        System.clearProperty("mirage");
+        out.clear();
+        Lab.mirageVerdict(pf, pic, rules, now, out::add);
+        String nv = String.join("\n", out);
+        check("verdict without Mirage still says today's", nv.contains("! Mirage gave nothing") && nv.contains("=> VERDICT today:"));
+
         System.out.println("MirageTest: " + (checks - fails) + "/" + checks + " checks passed");
         if (fails > 0) System.exit(1);
     }

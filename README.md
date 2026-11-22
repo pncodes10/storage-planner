@@ -553,6 +553,19 @@ It is in the Algorithm Lab only, for trying it on your own pictures; the scan do
   lighting, style), each object it named with its detection score and description, and each line of text with its score
   and box. Then the app's own text reader (Tesseract) on the same copy, with its time and the words it read, to compare.
 - **Mirage on each picture** does the same for every picked picture.
+- **Mirage verdict: would the plan delete it?** sorts the picture twice, as a scan does today (with Tesseract) and with
+  Mirage, then runs your rules on both and ends with the verdict, e.g. `SUGGEST DELETING (Greeting images from chats)
+  (today: KEEP)`. With Mirage:
+  - its text, cleaned up (a caption read in overlapping pieces is merged into its longest reading, one- and two-letter
+    icon fragments below 0.45 are dropped; other low scores are kept, they are not a reliable sign of a wrong reading),
+    goes through the same text rules as Tesseract's (one-time codes, payments, tickets with their date, receipts, bills,
+    greetings, ID documents);
+  - a chat image Mirage calls a drawn graphic (not a photograph), without people, is a forward (Graphics & images);
+  - a picture the pixel checks call an accidental shot is not one when Mirage reads its text or names something in it
+    clearly (a camera photo where it sees a man becomes People, and is not suggested for deletion);
+  - it also lists what no rule uses yet: how many people, and things photographed only to remember them (a price tag,
+  a sign, a screen).
+  **Mirage verdict on each picture** does it for every picked picture.
 - The first run loads the model (a few seconds). Run everything leaves Mirage out because it is slow.
 
 What it did in a test on a desktop processor (4 cores), see `tools/mirage/README.md`: about 2 s per picture; text on
@@ -563,7 +576,9 @@ ordinary objects). The APK is about 23 MB bigger with it.
 The APK audit checks the model is the pinned release, and that the native library is 64-bit ARM, needs only the C
 library, exports only the bridge's three methods and imports nothing that can reach the network, remove or rename a
 file, start a process or load more code. Only `MirageEngine` may load it. `MirageTest` checks reading Mirage's answers
-and the Lab output with invented data.
+and the Lab output with invented data, and the verdict on drawn pictures with saved answers (a greeting forward and a
+one-time code screenshot are suggested for deletion, a photo of a person is kept, an "accidental" picture Mirage reads is
+not accidental).
 
 ## Runs in the background
 

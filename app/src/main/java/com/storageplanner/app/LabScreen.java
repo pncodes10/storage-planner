@@ -185,6 +185,9 @@ public final class LabScreen extends Screen {
         addRun("QR code / barcode", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.codes(pf(), pic(), o); } });
         addRun("Read text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.text(pf(), pic(), System.currentTimeMillis(), o); } });
         addRun("Mirage: scene, objects, text (22 MB model)", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.mirage(pf(), pic(), o); } });
+        addRun("Mirage verdict: would the plan delete it?", false, new Job() {
+            public void run(Lab.Out o) throws Exception { show(Lab.mirageVerdict(pf(), pic(), RulesStore.get(a).copy(), System.currentTimeMillis(), o)); }
+        });
         addRun("Compress (test copy)", false, new Job() { public void run(Lab.Out o) throws Exception { compress(pic(), o); } });
         Ui.add(root, Ui.heading(a, "Run on all picked pictures", 17), 14);
         LinearLayout groupButtons = new LinearLayout(a);
@@ -195,6 +198,12 @@ public final class LabScreen extends Screen {
         addRun("Best shot among them", true, new Job() { public void run(Lab.Out o) throws Exception { show(Lab.best(pf(), new ArrayList<Lab.Pic>(pics), o)); } });
         addRun("Scene and score on each picture", false, new Job() {
             public void run(Lab.Out o) throws Exception { for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) { Lab.models(pf(), p, o); o.line(""); } }
+        });
+        addRun("Mirage verdict on each picture", false, new Job() {
+            public void run(Lab.Out o) throws Exception {
+                com.storageplanner.core.RuleSet rs = RulesStore.get(a).copy();
+                for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) { Lab.mirageVerdict(pf(), p, rs, System.currentTimeMillis(), o); o.line(""); }
+            }
         });
         addRun("Mirage on each picture", false, new Job() {
             public void run(Lab.Out o) throws Exception { for (Lab.Pic p : new ArrayList<Lab.Pic>(pics)) { Lab.mirage(pf(), p, o); o.line(""); } }
