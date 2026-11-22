@@ -461,6 +461,12 @@ public final class AndroidPlatform implements Platform {
         }
     }
 
+    public String mirage(int[] argb, int w, int h, String options) {
+        try { return MirageEngine.describe(ctx, argb, w, h, options); } catch (Throwable t) { return null; }
+    }
+
+    public String mirageNote() { return MirageEngine.why(); }
+
     /** Stops the text reader, if it was started. */
     public void close() { if (ocr != null) { ocr.close(); ocr = null; } }
 

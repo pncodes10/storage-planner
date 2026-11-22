@@ -88,13 +88,17 @@ OCR_ASSETS = {"assets/ocr/ocr.html", "assets/ocr/tesseract.min.js", "assets/ocr/
 FACE_ASSETS = {"assets/faces/yunet.bin", "assets/faces/LICENSE-yunet.txt"}
 # 1.10: the scene network's weights (MobileNetV3-Small, written by tools/scenemodel/export_mnv3.py) and its licence
 SCENE_ASSETS = {"assets/scene/scene.bin", "assets/scene/LICENSE-keras-applications.txt"}
+# 1.11: Mirage (Algorithm Lab only): the model, its licence, and the native bridge to the Cactus engine (64-bit ARM)
+MIRAGE_ASSETS = {"assets/mirage/mirage.cact", "assets/mirage/LICENSE-cactus.txt"}
+NATIVE = {"lib/arm64-v8a/libmirage.so"}
 other = [n for n in names if n not in ("AndroidManifest.xml", "classes.dex", "resources.arsc")]
 check("zip entries", set(names) >= {"AndroidManifest.xml", "classes.dex", "resources.arsc"}
-      and all(n.startswith("res/") or n in OCR_ASSETS or n in FACE_ASSETS or n in SCENE_ASSETS for n in other)
-      and OCR_ASSETS <= set(names) and FACE_ASSETS <= set(names) and SCENE_ASSETS <= set(names),
+      and all(n.startswith("res/") or n in OCR_ASSETS or n in FACE_ASSETS or n in SCENE_ASSETS or n in MIRAGE_ASSETS or n in NATIVE for n in other)
+      and OCR_ASSETS <= set(names) and FACE_ASSETS <= set(names) and SCENE_ASSETS <= set(names) and MIRAGE_ASSETS <= set(names) and NATIVE <= set(names),
       ", ".join(n for n in names if not n.startswith("assets/")) + " + " + str(len([n for n in names if n.startswith("assets/ocr/")])) + " text-reader files + "
       + str(len([n for n in names if n.startswith("assets/faces/")])) + " face-detector files + "
-      + str(len([n for n in names if n.startswith("assets/scene/")])) + " scene-network files")
+      + str(len([n for n in names if n.startswith("assets/scene/")])) + " scene-network files + "
+      + str(len([n for n in names if n.startswith("assets/mirage/")])) + " Mirage files")
 import hashlib
 pinned = {}
 pin_file = os.path.join(os.path.dirname(__file__), "ocr_assets.sha256")
@@ -115,6 +119,41 @@ for line in open(os.path.join(os.path.dirname(__file__), "scene_assets.sha256"))
 with zipfile.ZipFile(apk_path) as z:
     sbad = [n for n in spinned if hashlib.sha256(z.read(n)).hexdigest() != spinned[n]]
 check("scene-network files are the pinned conversion of Keras's MobileNetV3Small ImageNet weights", not sbad, "; ".join(sbad))
+mpinned = {}
+for line in open(os.path.join(os.path.dirname(__file__), "mirage", "files.sha256")):
+    h, n = line.split()
+    if "assets/mirage/" + n in MIRAGE_ASSETS: mpinned["assets/mirage/" + n] = h
+with zipfile.ZipFile(apk_path) as z:
+    mbad = [n for n in MIRAGE_ASSETS if n not in mpinned or hashlib.sha256(z.read(n)).hexdigest() != mpinned[n]]
+check("Mirage files are the pinned release (Cactus-Compute/mirage mirage.cact, engine licence)", not mbad, "; ".join(mbad))
+
+# The native bridge: what it can call is fixed by its dynamic imports (the engine is linked in statically). It must
+# import nothing that reaches the network, removes or renames files, starts processes or loads more code, and export
+# only the bridge's three Java methods.
+import tempfile
+NATIVE_FORBIDDEN = {"socket", "connect", "bind", "listen", "accept", "accept4", "sendto", "sendmsg", "recvfrom", "recvmsg",
+                    "getaddrinfo", "gethostbyname", "gethostbyname_r", "remove", "unlink", "unlinkat", "rename", "renameat",
+                    "renameat2", "rmdir", "truncate", "execve", "execv", "execvp", "execl", "execlp", "execle", "fork", "vfork",
+                    "posix_spawn", "posix_spawnp", "system", "popen", "dlopen", "dlsym", "android_dlopen_ext", "ptrace"}
+with zipfile.ZipFile(apk_path) as z, tempfile.TemporaryDirectory() as td:
+    so = os.path.join(td, "libmirage.so")
+    open(so, "wb").write(z.read("lib/arm64-v8a/libmirage.so"))
+    syms = subprocess.run(["readelf", "--dyn-syms", "-W", so], capture_output=True, text=True).stdout
+    dyn = subprocess.run(["readelf", "-d", "-W", so], capture_output=True, text=True).stdout
+    hdr = subprocess.run(["readelf", "-h", "-W", so], capture_output=True, text=True).stdout
+imports, exports = set(), set()
+for l in syms.splitlines():
+    f = l.split()
+    if len(f) >= 8 and f[0].endswith(":") and f[3] in ("FUNC", "OBJECT", "NOTYPE", "IFUNC"):
+        name = f[7].split("@")[0]
+        (imports if f[6] == "UND" else exports).add(name)
+needed = sorted(re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", dyn))
+bad_imports = sorted(imports & NATIVE_FORBIDDEN)
+check("native bridge: 64-bit ARM, only libc/libm/libdl, no network / file removal / processes / code loading",
+      "AArch64" in hdr and set(needed) <= {"libc.so", "libm.so", "libdl.so"} and not bad_imports and len(imports) > 0,
+      f"needs {needed}; {len(imports)} imports; forbidden: {bad_imports}; file calls: {sorted(i for i in imports if i in ('fopen', 'fwrite', 'open', 'openat', 'mmap'))}")
+check("native bridge exports only MirageEngine's methods",
+      exports and all(e.startswith("Java_com_storageplanner_app_MirageEngine_") for e in exports), ", ".join(sorted(exports)))
 check("resources.arsc stored + 4-byte aligned", arsc.compress_type == zipfile.ZIP_STORED and off % 4 == 0, f"offset {off}")
 
 # 4) dex: classes and every external reference
@@ -161,12 +200,16 @@ COMPRESSORS = {"Lcom/storageplanner/tools/ImageCompressor;", "Lcom/storageplanne
 ALLOWED = {"deletes / renames files": {
     "Ljava/io/File;->delete()Z": COMPRESSORS,
     "Ljava/io/File;->renameTo(Ljava/io/File;)Z": COMPRESSORS,
+}, "loads code / reflection": {
+    # 1.11: the Mirage bridge (lib/arm64-v8a/libmirage.so, checked above), loaded by name from the APK only
+    "Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V": {"Lcom/storageplanner/app/MirageEngine;"},
 }}
+EXCEPT = {"deletes / renames files": " (except image compression)", "loads code / reflection": " (except the Mirage bridge library)"}
 for k, pat in BAD.items():
     allowed = ALLOWED.get(k, {})
     hits = [r for r in ext if re.search(pat, r)
             and not (r in allowed and callers.get(r, set()) <= allowed[r])]
-    check(f"no code that {k}" + (" (except image compression)" if allowed else ""), not hits,
+    check(f"no code that {k}" + EXCEPT.get(k, ""), not hits,
           "; ".join(r + " from " + ", ".join(sorted(callers.get(r, ()))) for r in hits[:5]))
 trash = sorted(r for r in ext if re.search(r"MediaStore;->create(Trash|Delete|Write)Request", r))
 check("no MediaStore trash / delete / write requests (the app never removes originals)", not trash, "; ".join(trash))

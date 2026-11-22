@@ -190,6 +190,15 @@ public final class JvmPlatform implements Platform {
         try { return CategoryTest.words(new String(Files.readAllBytes(side.toPath()), StandardCharsets.UTF_8)); } catch (Exception e) { return null; }
     }
 
+    /** Mirage runs only on the phone; tests can hand in a saved answer with -Dmirage=<file.json>. */
+    public String mirage(int[] argb, int w, int h, String options) {
+        String p = System.getProperty("mirage");
+        if (p == null) return null;
+        try { return new String(Files.readAllBytes(new File(p).toPath()), StandardCharsets.UTF_8); } catch (Exception e) { return null; }
+    }
+
+    public String mirageNote() { return System.getProperty("mirage") == null ? "Mirage runs only on the phone" : null; }
+
     public boolean imageSize(String path, int[] dims) {
         try (javax.imageio.stream.ImageInputStream in = ImageIO.createImageInputStream(new File(path))) {
             java.util.Iterator<javax.imageio.ImageReader> it = ImageIO.getImageReaders(in);

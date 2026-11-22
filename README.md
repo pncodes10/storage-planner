@@ -540,6 +540,31 @@ keeps the numbers for unchanged ones, saving, and the four tags. With the held-o
 it also checks that Java gives Python's smile probabilities and aesthetic scores. How the models were made:
 `tools/scenemodel/README.md` and `tools/smilemodel/README.md`.
 
+## Mirage in the Algorithm Lab (new)
+
+[Mirage](https://cactuscompute.com/blog/mirage) is a 22 MB vision model from Cactus Compute (weights and engine Apache
+2.0). In one pass it names the kind of scene, the objects in a picture and reads its text (Latin script only). It runs on
+the phone through the Cactus engine, linked into a small native library (`lib/arm64-v8a/libmirage.so`), so it works on
+64-bit ARM phones only; on others the Lab says it is not available. Nothing leaves the phone, and the app still has no
+`INTERNET` permission.
+
+It is in the Algorithm Lab only, for trying it on your own pictures; the scan does not use it.
+- **Mirage: scene, objects, text (22 MB model)** on the selected picture: how long it took, the scene (background,
+  lighting, style), each object it named with its detection score and description, and each line of text with its score
+  and box. Then the app's own text reader (Tesseract) on the same copy, with its time and the words it read, to compare.
+- **Mirage on each picture** does the same for every picked picture.
+- The first run loads the model (a few seconds). Run everything leaves Mirage out because it is slow.
+
+What it did in a test on a desktop processor (4 cores), see `tools/mirage/README.md`: about 2 s per picture; text on
+clean receipts, tickets, bills and screenshots read exactly, and on photos of them a few letters wrong; its scenes were
+no better than the scene network's (90% against 91% on the same 240 labelled pictures; better on flowers, worse on
+ordinary objects). The APK is about 23 MB bigger with it.
+
+The APK audit checks the model is the pinned release, and that the native library is 64-bit ARM, needs only the C
+library, exports only the bridge's three methods and imports nothing that can reach the network, remove or rename a
+file, start a process or load more code. Only `MirageEngine` may load it. `MirageTest` checks reading Mirage's answers
+and the Lab output with invented data.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -640,6 +665,11 @@ When you save, the rules are stored on the phone (`rules.txt` in the app's priva
 **Android Studio:** open this folder, let it sync (AGP 8.5, JDK 17), then **Build → Build APK(s)**. The project has no dependencies beyond the Android framework.
 
 **On GitHub (no setup):** the **Build APK** workflow (`.github/workflows/build-apk.yml`) runs `tools/build_offline.sh` on every push, and on demand from the Actions tab. It runs the image-compression tests first and the APK audit after. Download the APK from the run's **Artifacts**. Android installs a new APK as an update only when it's signed with the same key. The workflow takes that key from two repository secrets (Settings → Secrets and variables → Actions): `SIGNING_KEY_PEM` (contents of `key.pem`) and `SIGNING_CERT_DER_B64` (`base64 -w0 cert.der`). Use the key the released 1.8.1 was signed with, so builds also install over that release. Without the secrets, each APK is signed with a one-off key and installs only after uninstalling the app. Each run's summary shows its certificate fingerprint. The key is never kept in the Actions cache: in a public repository, a fork's pull request could restore it. The Python packages the job installs are pinned by hash in `tools/ci-requirements.txt`, and the APK is uploaded only after it passes the audit.
+
+**Mirage (optional for your own builds):** `bash tools/mirage/fetch.sh` downloads the model and the engine at pinned
+hashes, and `ANDROID_NDK=<NDK r28+> bash tools/mirage/build_native.sh` builds the bridge; `build_offline.sh` then
+includes both. Without them the app builds as before and the Lab says Mirage is not in this build. The workflow always
+includes them.
 
 **Without Android Studio:** `tools/build_offline.sh` builds it from javac, D8, aapt2 and a small Python v2 signer. The supplied APK was built this way, because Google's Maven was not reachable from the build machine. An APK you build yourself is signed with your own key, so uninstall the supplied one first.
 

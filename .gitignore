@@ -16,3 +16,6 @@ __pycache__/
 *.pem
 *.p12
 keystore/
+
+# Mirage model: downloaded at build time by tools/mirage/fetch.sh (pinned hash), not kept in git
+app/src/main/assets/mirage/mirage.cact

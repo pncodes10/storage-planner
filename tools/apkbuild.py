@@ -5,6 +5,7 @@ usage: apkbuild.py <base.apk from aapt2 link> <classes.dex> <out.apk> <keystore_
 - Copies entries from the aapt2 output (AndroidManifest.xml, resources.arsc, res/...),
   adds classes.dex, stores resources.arsc uncompressed and 4-byte aligned (required for
   targetSdk >= 30), then signs with APK Signature Scheme v2 (RSA-2048, SHA-256).
+- NATIVE_LIBS=<folder> adds <folder>/<abi>/*.so as lib/<abi>/*.so (the Mirage bridge, tools/mirage/build_native.sh).
 - Key + self-signed certificate are created once in <keystore_dir> and reused, so later
   builds install as updates.
 Spec: https://source.android.com/docs/security/features/apksigning/v2
@@ -44,6 +45,12 @@ def package(base_apk, dex, out_unsigned):
         z = zipfile.ZipFile(f, "w")
         entries = [(i.filename, src.read(i.filename)) for i in src.infolist()]
         entries = [e for e in entries if e[0] != "classes.dex"] + [("classes.dex", open(dex, "rb").read())]
+        libs = os.environ.get("NATIVE_LIBS")
+        if libs and os.path.isdir(libs):
+            for abi in sorted(os.listdir(libs)):
+                for so in sorted(os.listdir(os.path.join(libs, abi))):
+                    if so.endswith(".so"):
+                        entries.append((f"lib/{abi}/{so}", open(os.path.join(libs, abi, so), "rb").read()))
         entries.sort(key=lambda e: (e[0] != "AndroidManifest.xml", e[0]))
         for name, data in entries:
             zi = zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))

@@ -719,6 +719,35 @@ public final class Lab {
         }
     }
 
+    /**
+     * Mirage (Cactus Compute's vision model) on the picture: what scene it calls it, the objects it names and the text
+     * it reads, with its time; then the app's own text reader (Tesseract) on the same copy, for comparison.
+     */
+    public static void mirage(Platform pf, Pic p, Out o) {
+        o.line("MIRAGE: SCENE, OBJECTS, TEXT — " + p.name);
+        int[] d = new int[4];
+        int[] px = decode(pf, p.path, p.size, Sorter.TEXT_EDGE, d, "the picture", o);
+        if (px == null) return;
+        long t0 = System.nanoTime();
+        String json;
+        try { json = pf.mirage(px, d[2], d[3], Mirage.OPTIONS); } catch (Throwable t) { json = null; }
+        long ms = (System.nanoTime() - t0) / 1000000;
+        if (json == null) {
+            String why = pf.mirageNote();
+            o.line(f("  ! Mirage gave nothing (%d ms): %s", ms, why == null ? "not available" : why));
+        } else {
+            o.line(f("  Mirage: %d ms on a %d x %d copy (the first run also loads the 22 MB model)", ms, d[2], d[3]));
+            try { for (String l : Mirage.lines(Mirage.read(json))) o.line(l); }
+            catch (IllegalArgumentException e) { o.line("  ! could not read Mirage's answer: " + e.getMessage() + ": " + cut(json, 200)); }
+        }
+        long t1 = System.nanoTime();
+        TextRules.Words w = pf.readText(p.path, px, d[2], d[3]);
+        long ms2 = (System.nanoTime() - t1) / 1000000;
+        if (w == null) o.line(f("  Tesseract (the app's text reader, for comparison): gave nothing (%d ms)", ms2));
+        else o.line(f("  Tesseract (the app's text reader, for comparison): %d words in %d ms, %d read confidently: %s", w.text.size(), ms2,
+                TextRules.goodWords(w), cut(TextRules.clean(w), 400)));
+    }
+
     // ------------------------------------------------------------------ helpers
     static float[] flat(List<float[]> l) {
         float[] o = new float[l.size() * PhotoQuality.FACE_FIELDS];

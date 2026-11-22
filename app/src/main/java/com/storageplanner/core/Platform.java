@@ -55,6 +55,15 @@ public interface Platform {
      */
     TextRules.Words readText(String path, int[] argb, int w, int h);
 
+    /**
+     * Mirage (Cactus Compute's vision model, Algorithm Lab only) on a decoded ARGB picture: its JSON answer (scene,
+     * objects, text lines), or null when it cannot run here (see mirageNote()). options: the engine's JSON options.
+     */
+    String mirage(int[] argb, int w, int h, String options);
+
+    /** Why mirage() gave null, for the Lab; null when it worked. */
+    String mirageNote();
+
     /** Image dimensions without decoding pixels: dims receives {w, h}. Returns false if unreadable. */
     boolean imageSize(String path, int[] dims);
 

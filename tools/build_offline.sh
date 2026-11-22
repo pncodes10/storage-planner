@@ -42,6 +42,8 @@ PY
 "$AAPT2" link -o "$OUT/base.apk" -I "$AJ" --manifest "$OUT/AndroidManifest.xml" "$OUT/res/compiled.zip" --auto-add-overlay -A "$HERE/app/src/main/assets"
 
 echo "[5/6] package + sign (APK Signature Scheme v2)"
+# The Mirage bridge (tools/mirage/build_native.sh), when it was built; without it the Lab says Mirage is not available.
+if [ -f "$HERE/build/mirage/lib/arm64-v8a/libmirage.so" ]; then export NATIVE_LIBS="$HERE/build/mirage/lib"; echo "  with lib/arm64-v8a/libmirage.so"; fi
 python3 "$HERE/tools/apkbuild.py" "$OUT/base.apk" "$OUT/dex/classes.dex" "$OUT/StoragePlanner.apk" "$KEYS"
 
 echo "[6/6] done: $OUT/StoragePlanner.apk"
