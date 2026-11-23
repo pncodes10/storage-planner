@@ -70,9 +70,10 @@ jobs:
             $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
             $T/MotionPhoto.java $T/CopyPaths.java \
             jvmtest/com/storageplanner/test/JvmPlatform.java jvmtest/com/storageplanner/test/CategoryTest.java \
-            jvmtest/com/storageplanner/test/SceneTest.java jvmtest/com/storageplanner/test/MirageTest.java
+            jvmtest/com/storageplanner/test/SceneTest.java jvmtest/com/storageplanner/test/MirageTest.java jvmtest/com/storageplanner/test/VersusTest.java
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.SceneTest
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.MirageTest
+          java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.VersusTest
 
       - name: Android SDK parts
         run: |

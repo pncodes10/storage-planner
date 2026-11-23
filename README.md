@@ -588,6 +588,34 @@ and the Lab output with invented data, and the verdict on drawn pictures with sa
 one-time code screenshot are suggested for deletion, a photo of a person is kept, an "accidental" picture Mirage reads is
 not accidental).
 
+### v2 vs v3: which sorting is right more often (new)
+
+**v2** is the app's sorting today (its own text reader, Tesseract, and the picture checks). **v3** is a separate
+algorithm (`AlgorithmV3`) that sorts with Mirage; it never changes v2 or the scan. Mirage has no fixed list of labels:
+its decoder writes object names, scene words and a style freely (an 8,192-token vocabulary, up to 64 detections), so v3
+maps what it says onto the app's 15 categories: its text through the same text rules (one-time codes, payments, tickets,
+receipts, bills, chats, greetings, ID documents, documents), memes and forwards from its style (drawn, or a collage
+with captions, received or saved), no accidental shot where it clearly sees something, and the rest as v2 sorts it.
+Both then go through your rules.
+
+Algorithm Lab > **v2 vs v3**:
+- Type how many pictures (default 1,000; the newest, or random) and tap **Start**. It takes them from the camera,
+  screenshots, downloads, WhatsApp (received and sent) and other pictures, and runs both algorithms on each: about 2-5
+  seconds a picture, so 1,000 take about an hour. Keep the page open (the screen stays on). **Stop** and later
+  **Continue** carry on where it stopped; the cards and your marks are kept in the app's own storage.
+- On top: the score, **v2 : v3**, and how many are compared, left to mark, skipped and where both suggest the same.
+- A card shows the picture, and v2's category and suggestion on the left, v3's on the right, with why. Tap **v2 is
+  right** or **v3 is right**, or swipe the card towards the side that is right (left: v2, right: v3); the next card
+  comes. **Skip** when you cannot tell, **Undo** to take back the last mark.
+- Pictures where both suggest the same are counted, not shown (tick "Also show pictures where v2 and v3 suggest the
+  same" to mark those too). You can mark cards while the run goes on.
+- At the end the page shows the final score. **Save the score and marks to the Lab log** writes it, with every marked
+  picture, to the log you can save or share; the first 150 pictures' full details are in the log too.
+- **New run** forgets the cards and marks and lets you pick a new number.
+
+`VersusTest` checks that cards are saved and read back unchanged, the score and the order cards come in, both
+algorithms on one picture (with a saved Mirage answer), and which pictures a run takes.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.

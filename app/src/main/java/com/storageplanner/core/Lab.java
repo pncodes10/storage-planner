@@ -32,6 +32,11 @@ public final class Lab {
         public FileItem file;                                  // "Picture category": the picture as the sorter left it
         public final List<Option> options = new ArrayList<Option>();   // "Rules": what the plan would suggest for it
         public final List<String> matched = new ArrayList<String>();   // "Rules": names of the rules that match
+        // "Mirage verdict": both algorithms' category and the plan's options (v3 null when Mirage did not run)
+        public PhotoCategory.Result v2, v3;
+        public final List<Option> v2Options = new ArrayList<Option>(), v3Options = new ArrayList<Option>();
+        public String v3Note;
+        public long v3Ms;
     }
 
     // ------------------------------------------------------------------ files the Lab makes of picked pictures
@@ -804,9 +809,9 @@ public final class Lab {
 
         PhotoCategory.Result withMirage = null;
         if (a != null) {
-            Mirage.Clean c = Mirage.clean(a.text);
-            String style = Mirage.style(a);
-            int people = Mirage.people(a);
+            AlgorithmV3.Result v3 = AlgorithmV3.sort(f, s, prep.aspect, read, a, now);
+            Mirage.Clean c = v3.clean;
+            TextRules.Verdict vm = v3.text;
             o.line(f("  Mirage: %d ms on a %d x %d copy; scene: %s", ms, d[2], d[3], a.scene.isEmpty() ? "(nothing said)" : Mirage.join(a.scene, "; ")));
             StringBuilder ob = new StringBuilder();
             for (Mirage.Thing t : a.objects) if (!"text".equals(t.name) && ob.indexOf(t.name) < 0) ob.append(ob.length() == 0 ? "" : ", ").append(t.name);
@@ -815,45 +820,24 @@ public final class Lab {
             for (Mirage.Thing t : c.kept) tb.append(tb.length() == 0 ? "" : " | ").append(t.name);
             o.line(f("  text, %d line%s after clean-up (%d repeat%s merged, %d short fragment%s dropped): %s", c.kept.size(), c.kept.size() == 1 ? "" : "s",
                     c.merged, c.merged == 1 ? "" : "s", c.fragments, c.fragments == 1 ? "" : "s", tb.length() == 0 ? "(none)" : cut(tb.toString(), 400)));
-            boolean graphic = "graphic".equals(style);
-            TextRules.Verdict vm = TextRules.classify(Mirage.words(c.kept), prep.aspect, photoLike || graphic, PhotoCategory.isScreenshot(f), chat, now);
-            // the pixel checks can call a real picture "accidental" (smooth, little contrast); what Mirage recognised overrules that
-            String seen = recognised(a, vm);
-            boolean accidental = PhotoCategory.accidental(s);
-            boolean useText = read || accidental && seen != null && !PhotoCategory.isCamera(f);
             o.line("  Mirage's text says: " + (vm.kind == null ? "nothing specific" : PhotoCategory.label(vm.kind)) + (vm.why.isEmpty() ? "" : " — evidence " + vm.why)
                     + (vm.date > 0 ? "; date " + Report.day(vm.date) : "") + f(" (%d words read confidently)", vm.goodWords)
-                    + (useText ? "" : "; not used: a scan does not go by the text of a picture like this (" + (PhotoCategory.isCamera(f) ? "a camera photo" : "nothing recognised") + ")"));
-            withMirage = PhotoCategory.classify(f, s, f.code, useText ? vm : null, f.faces);
-            if (PhotoCategory.ACCIDENTAL.equals(withMirage.category) && seen != null) {
-                withMirage = PhotoCategory.classify(f, null, f.code, useText ? vm : null, f.faces);
-                if (PhotoCategory.PHOTO.equals(withMirage.category) && people > 0) withMirage.category = PhotoCategory.PEOPLE;
-                if (withMirage.why == null || withMirage.why.isEmpty()) withMirage.why = "Mirage recognised " + seen + ": not an accidental shot";
-            }
-            String cat = withMirage.category;
-            // a meme or forward: received in a chat, drawn (people in it are drawings), or a collage with captions (a comic
-            // strip; a collage of photos has little text), and its text is not a ticket, bill, ID... (those keep their kind)
-            boolean captioned = "collage".equals(style) && vm.goodWords >= MEME_WORDS;
-            boolean saved = chat || "download".equals(f.area) || "pictures".equals(f.area);     // received or saved, not your own photos
-            if (saved && vm.kind == null && (graphic || captioned) && !PhotoCategory.ID.equals(cat) && !PhotoCategory.QR.equals(cat)) {
-                withMirage.category = PhotoCategory.GRAPHIC;
-                withMirage.why = "Mirage: " + (graphic ? "drawn as \"" + styleWords(a) + "\", not a photograph" : "a collage with captions (" + vm.goodWords + " words)")
-                        + (chat ? ", received in a chat" : ", saved") + ": a meme or forward";
-            } else if (vm.kind == null && (graphic || captioned) && PhotoCategory.DOCUMENT.equals(cat) && withMirage.why != null && withMirage.why.endsWith(" words")) {
-                withMirage.category = PhotoCategory.GRAPHIC;       // lots of words, but in a drawn picture or comic, not a page of text
-                withMirage.why = "Mirage: " + (graphic ? "drawn as \"" + styleWords(a) + "\"" : "a collage with captions") + ", not a page of text";
-            }
-            o.line("  Mirage saw" + (style == null ? "" : " a " + style) + (people > 0 ? f(", %d %s", people, people == 1 ? "person" : "people") : ", no people")
+                    + (v3.textUsed ? "" : "; not used: a scan does not go by the text of a picture like this (" + (PhotoCategory.isCamera(f) ? "a camera photo" : "nothing recognised") + ")"));
+            o.line("  Mirage saw" + (v3.style == null ? "" : " a " + v3.style) + (v3.people > 0 ? f(", %d %s", v3.people, v3.people == 1 ? "person" : "people") : ", no people")
                     + (Mirage.reference(a).isEmpty() ? "" : "; things photographed to remember? " + Mirage.join(Mirage.reference(a), ", ") + " (no rule uses this yet)")
                     + (a.objects.isEmpty() && a.text.isEmpty() ? "; nothing recognised in it" : ""));
+            withMirage = v3.category;
         }
 
         o.line("  category today (the app's text reader" + (read ? "" : ", not needed here") + "): " + catLine(today));
         if (withMirage != null) o.line("  category with Mirage: " + catLine(withMirage) + (withMirage.category != null && withMirage.category.equals(today.category) ? "  (the same)" : "  <- CHANGED"));
 
         List<Option> before = planFor(f, today, rules, now, o, "today");
+        sh.v2 = today; sh.v2Options.addAll(before); sh.v3Ms = ms;
+        sh.v3Note = a != null ? null : json == null ? (pf.mirageNote() == null ? "Mirage is not available" : pf.mirageNote()) : "Mirage's answer could not be read";
         if (withMirage != null) {
             List<Option> after = planFor(f, withMirage, rules, now, o, "with Mirage");
+            sh.v3 = withMirage; sh.v3Options.addAll(after);
             sh.options.addAll(after);
             o.line("  => VERDICT with Mirage: " + verdict(after, withMirage) + (verdict(before, today).equals(verdict(after, withMirage)) ? " (same as today)" : " (today: " + verdict(before, today) + ")"));
         } else {
@@ -863,21 +847,6 @@ public final class Lab {
         f.category = withMirage != null ? withMirage.category : today.category;
         sh.file = f;
         return sh;
-    }
-
-    /** What Mirage clearly recognised (readable text, or an object named with a good score), or null. */
-    static String recognised(Mirage.Answer a, TextRules.Verdict text) {
-        if (text.goodWords >= 3) return text.goodWords + " words";
-        for (Mirage.Thing t : a.objects) if (!"text".equals(t.name) && t.score >= 0.5) return "a " + t.name;
-        return null;
-    }
-
-    /** A collage is a comic strip or meme, not a photo collage, from this many words read confidently. */
-    static final int MEME_WORDS = 8;
-
-    static String styleWords(Mirage.Answer a) {
-        for (String x : a.scene) if (x.startsWith("style ")) return x.substring(6);
-        return "a graphic";
     }
 
     static String catLine(PhotoCategory.Result r) {

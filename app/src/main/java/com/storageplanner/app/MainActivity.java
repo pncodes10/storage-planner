@@ -181,6 +181,7 @@ public final class MainActivity extends Activity {
         if (d.equals("rules")) return new RulesScreen(this);
         if (d.equals("lab")) return new LabScreen(this);
         if (d.equals("sample")) return new SampleScreen(this);
+        if (d.equals("versus")) return new VersusScreen(this);
         if (d.equals("videolab")) return new VideoLabScreen(this);
         if (d.equals("ziplab")) return new ZipLabScreen(this);
         if (d.equals("motionlab")) return new MotionLabScreen(this);

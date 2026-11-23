@@ -121,6 +121,10 @@ public final class LabScreen extends Screen {
         sample.setContentDescription("Open Try on my pictures: run the sorting and your rules on a number of pictures picked at random from camera, screenshots, downloads and WhatsApp");
         sample.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new SampleScreen(a)); } });
         add(root, sample, 6);
+        Button versus = Ui.button(a, "v2 vs v3: compare the current sorting with Mirage's, card by card", true);
+        versus.setContentDescription("Open v2 versus v3: run both sorting algorithms on your pictures and mark which one is right");
+        versus.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new VersusScreen(a)); } });
+        add(root, versus, 6);
 
         Ui.add(root, Ui.heading(a, "Pictures", 17), 14);
         LinearLayout pickRow = Ui.row(a);
