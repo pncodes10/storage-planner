@@ -92,6 +92,7 @@ final class Sorter {
             FileItem f = pics.get(k);
             FileItem p = Scanner.same(f, opt.previous);
             if (p != null && p.sceneVersion == SCENE_VERSION) { f.scene = p.scene; f.aesthetic = p.aesthetic; f.sceneVersion = p.sceneVersion; }
+            if (p != null && p.mirageVersion == AlgorithmV3.VERSION && p.sortVersion >= VERSION) copyMirage(p, f);   // v3 builds on this sorting
             if (current(p)) {                                                  // unchanged and fully sorted last time, by the current rules
                 copyOver(p, f);
                 continue;
@@ -173,6 +174,57 @@ final class Sorter {
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
         scenes(pf, pr, pics, opt);
+        mirage(pf, pr, pics, opt, r.now);
+    }
+
+    /** Whether Mirage looks at this picture in a scan: every sorted picture (photos, screenshots, chats, downloads...). */
+    static boolean mirageWorthy(FileItem f) { return f.category != null && f.mirageVersion != AlgorithmV3.VERSION; }
+
+    /**
+     * Pass 4: Mirage (AlgorithmV3) on each sorted picture, for the mirage_* tags and v3's category: screenshots, chat
+     * images, downloads and other pictures first, then camera photos, newest first within each, within opt.mirageBudgetMs;
+     * the rest is looked at in the next scan. One picture at a time (the engine is not shared between threads). Stops at
+     * once on a phone where Mirage cannot run (not 64-bit ARM, or not in this build): those tags then stay unknown.
+     */
+    static void mirage(Platform pf, Scanner.Progress pr, List<FileItem> pics, Scanner.Options opt, long now) {
+        if (opt.mirageBudgetMs <= 0) return;
+        List<FileItem> todo = new ArrayList<FileItem>();
+        for (FileItem f : pics) if (mirageWorthy(f)) todo.add(f);
+        if (todo.isEmpty()) return;
+        Collections.sort(todo, new Comparator<FileItem>() {
+            public int compare(FileItem a, FileItem b) {
+                boolean ca = PhotoCategory.isCamera(a), cb = PhotoCategory.isCamera(b);
+                if (ca != cb) return ca ? 1 : -1;
+                return Long.compare(b.mtime, a.mtime);
+            }
+        });
+        long end = System.currentTimeMillis() + opt.mirageBudgetMs;
+        int[] dims = new int[4];
+        boolean worked = false;
+        for (int k = 0; k < todo.size(); k++) {
+            if (pr.cancelled() || System.currentTimeMillis() > end) return;
+            pr.update("Looking at pictures with Mirage", k + 1, todo.size());
+            FileItem f = todo.get(k);
+            int[] px;
+            try { px = pf.argb(f.abs, TEXT_EDGE, dims); } catch (Throwable t) { px = null; }
+            if (px == null) continue;
+            String json;
+            try { json = pf.mirage(px, dims[2], dims[3], Mirage.OPTIONS); } catch (Throwable t) { json = null; }
+            if (json == null) { if (!worked) return; continue; }     // not on this phone: stop; one picture failing: go on
+            worked = true;
+            try {
+                Mirage.Answer a = Mirage.read(json);
+                ImageSignals.S s = f.signals;
+                double aspect = f.width > 0 && f.height > 0 ? f.width / (double) f.height : dims[2] / (double) Math.max(1, dims[3]);
+                AlgorithmV3.Result v3 = AlgorithmV3.sort(f, s, aspect, s != null && PhotoCategory.worthReading(f, s), a, now);
+                AlgorithmV3.record(f, v3, a);
+            } catch (RuntimeException ignored) {}
+        }
+    }
+
+    private static void copyMirage(FileItem p, FileItem f) {
+        f.mirageVersion = p.mirageVersion; f.mirageStyle = p.mirageStyle; f.miragePeople = p.miragePeople; f.mirageObjects = p.mirageObjects;
+        f.mirageScene = p.mirageScene; f.mirageReference = p.mirageReference; f.mirageSees = p.mirageSees; f.v3Category = p.v3Category; f.v3Date = p.v3Date;
     }
 
     /** Whether the scene network looks at this picture: photos (not screenshots, papers, chats or graphics). */

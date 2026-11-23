@@ -48,6 +48,17 @@ public final class FileItem {
     public int smiling = -1;      // of the judged faces (as for eyes), how many smile; -1 = not looked at
     public int looking = -1;      // of the judged faces, how many look at the camera (head turned to it, eyes open); -1 = not looked at
 
+    // ---- what Mirage (AlgorithmV3) saw (1.11): only when it looked (mirageVersion > 0)
+    public int mirageVersion;     // AlgorithmV3.VERSION when Mirage looked at this picture; 0 = not looked at
+    public String mirageStyle;    // photograph, drawn, collage, screenshot or unspecified (what Mirage said the picture is)
+    public int miragePeople = -1; // people Mirage named with a good score (AlgorithmV3.PERSON_SCORE); -1 = not looked at
+    public String mirageObjects;  // the things it named, comma-separated (no "text"); "" = none
+    public String mirageScene;    // its scene words ("setting outdoor festival; lighting night"); "" = none
+    public boolean mirageReference;  // a photo taken to remember something (a sign, price tag, screen...): no people, not drawn
+    public boolean mirageSees;    // it clearly recognised something: people, an object with a good score, or 3+ words of text
+    public String v3Category;     // the category v3 gives (AlgorithmV3); the scan's own category stays v2's
+    public long v3Date;           // a date v3 read in the picture, 0 if none
+
     public String apkPackage;     // for .apk files: the package inside
     public long apkVersion;
 

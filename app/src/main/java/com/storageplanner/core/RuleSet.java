@@ -72,6 +72,7 @@ public final class RuleSet {
         for (Rule r : rules) {
             if (!r.enabled || r.problem() != null) continue;
             if (r.action == Action.KEEP) c.keep.add(r);
+            else if (r.action == Action.PROTECT) c.protect.add(r);
             else if (r.action == Action.DELETE) c.deletes.add(r);
             else c.compress.add(r);
         }
@@ -79,7 +80,7 @@ public final class RuleSet {
     }
 
     public static final class Compiled {
-        final List<Rule> keep = new ArrayList<Rule>(), deletes = new ArrayList<Rule>(), compress = new ArrayList<Rule>();
+        final List<Rule> keep = new ArrayList<Rule>(), deletes = new ArrayList<Rule>(), compress = new ArrayList<Rule>(), protect = new ArrayList<Rule>();
 
         public void apply(Unit u, FileItem f, Tags.T t, Tags.Context ctx, Estimates est, long now) {
             for (int i = 0; i < keep.size(); i++) if (keep.get(i).matches(t)) { u.options.clear(); return; }
@@ -94,12 +95,23 @@ public final class RuleSet {
                 emit(u, r, f, t, ctx, est, now);
                 break;
             }
+            for (int i = 0; i < protect.size(); i++) {
+                if (!protect.get(i).matches(t)) continue;
+                for (Iterator<Option> it = u.options.iterator(); it.hasNext(); ) if (protectedFrom(it.next())) it.remove();
+                break;
+            }
             if (t.idDocument) {                                  // ID documents: only an identical extra copy may go
                 for (Iterator<Option> it = u.options.iterator(); it.hasNext(); ) {
                     Option o = it.next();
                     if (o.action.equals("delete") && !o.technique.equals(Techniques.DUPLICATES)) it.remove();
                 }
             }
+        }
+
+        /** A delete a protect rule takes away: all but an identical copy, a sent copy (the original is kept) or a worse shot of a burst. */
+        static boolean protectedFrom(Option o) {
+            return o.action.equals("delete") && !o.technique.equals(Techniques.DUPLICATES) && !o.technique.equals(Techniques.SENT)
+                    && !o.technique.equals(Techniques.BURSTS);
         }
 
         private static void emit(Unit u, Rule r, FileItem f, Tags.T t, Tags.Context ctx, Estimates est, long now) {
@@ -276,7 +288,7 @@ public final class RuleSet {
     private static boolean hit(Matches m, Rule r, FileItem f, Tags.T t, Estimates est) {
         if (!r.matches(t)) return false;
         if (r.action == Action.DELETE && t.idDocument) { m.idProtected++; return false; }     // the ID document rail
-        long saved = r.action == Action.KEEP ? f.size : effectiveSaving(r).of(f, est);
+        long saved = r.action == Action.KEEP || r.action == Action.PROTECT ? f.size : effectiveSaving(r).of(f, est);
         if (saved <= 0) return false;                                                           // no option would be made
         m.count++; m.bytes += f.size; m.saved += saved;
         return true;

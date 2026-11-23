@@ -549,7 +549,8 @@ the phone through the Cactus engine, linked into a small native library (`lib/ar
 64-bit ARM phones only; on others the Lab says it is not available. Nothing leaves the phone, and the app still has no
 `INTERNET` permission.
 
-It is in the Algorithm Lab only, for trying it on your own pictures; the scan does not use it.
+In the Lab you can try it on any picture (below). Since 1.11 the analysis also runs it and turns what it sees into tags
+for the rules ("Mirage in the decision engine", below); the picture category the plan uses stays the app's own (v2).
 - **Mirage: scene, objects, text (22 MB model)** on the selected picture: how long it took, the scene (background,
   lighting, style), each object it named with its detection score and description, and each line of text with its score
   and box. Then the app's own text reader (Tesseract) on the same copy, with its time and the words it read, to compare.
@@ -625,6 +626,57 @@ such photo of a person came out as "Photos without faces". Now faces are looked 
 accidental shots or flat drawn graphics such as memes and posters). Pictures already sorted are sorted again once at the
 next analysis.
 
+## Mirage in the decision engine (new in 1.11)
+
+The analysis runs Mirage (v3, `AlgorithmV3`) on every sorted picture and keeps what it saw as **tags** the rules can test.
+The picture category the plan uses stays **v2's** (the app's own sorting); v3's category is a tag of its own, so nothing
+in your plan changes by category until you decide v3 is better (see v2 vs v3).
+
+**How it runs.** After the scene pass: screenshots, chat images, downloads and other pictures first, then camera
+photos, newest first in each, within 20 minutes a scan (`Scanner.Options.mirageBudgetMs`); the rest is done at the next
+analysis, and pictures already looked at are not looked at again (unless the picture or the sorting changed). About
+0.3-1.7 s a picture on a recent phone. On a phone where Mirage cannot run (not 64-bit ARM) the pass stops at once and the
+Mirage tags stay unknown. Only short facts are kept, never the text Mirage read, so names, booking IDs and number plates
+are not saved (results format 11).
+
+**Faces and people are separate.** Mirage has no face detector: it names whole people ("man", "woman", "child"). The
+app's face detector (YuNet) still gives `faces`, eyes open, smiles and looking at the camera; Mirage gives
+`mirage_people`, which also counts people with their back turned and small or dim faces the detector misses.
+
+| Tag | Type | What it is |
+|---|---|---|
+| `mirage_looked` | yes/no, always known | Mirage looked at the picture |
+| `mirage_sees` | yes/no, always known | Mirage clearly sees something: a person, a thing it names with a score of 0.5+, or 3+ words. "no" where it has not looked |
+| `mirage_style` | text | photograph, drawn, collage, screenshot or unspecified |
+| `mirage_people` | number | people it names with a score of 0.5 or more |
+| `mirage_objects` | text | the things it names (score 0.3+), e.g. "woman, man, red car"; test with `contains` |
+| `mirage_scene` | text | its scene words, e.g. "setting outdoor festival; lighting bright; time of day night" |
+| `reference_photo` | yes/no | a photo taken to remember something: a sign, price tag, label, screen, notice, menu... with nobody in it, not drawn, not a screenshot |
+| `mirage_category` | text | the category v3 gives (the same 15 categories as `category`) |
+
+Every tag but `mirage_looked` and `mirage_sees` is unknown until Mirage has looked, and an unknown tag never matches.
+
+**New comparison `contains`** for text tags: `mirage_objects contains car, price tag` is true when any of the listed
+words or phrases appears as whole words ("car" finds "red car", not "carpet").
+
+**New action "Never delete" (protect).** A protect rule takes away every delete suggestion for the files it matches,
+except an identical copy, a sent copy (the original is kept) or a worse shot of a burst; compressing is still suggested.
+(A keep rule takes away every suggestion, compressing included.)
+
+**Built-in rules that use Mirage:**
+- **Accidental shot** now also needs `mirage_sees is no`: a picture the pixel checks call an accidental shot is not
+  suggested when Mirage clearly sees people, things or text in it. Where Mirage has not looked, the rule works as before.
+- **Old photo taken to remember something** (new, delete, your call): `reference_photo is yes` AND `age_days > 60`.
+- **People seen by Mirage: never delete** (new, protect): `mirage_people >= 1` AND NOT `mirage_style in drawn, collage`
+  (drawn people in comics and memes are not protected).
+
+Rule ideas: `mirage_objects contains car` AND `source = download` -> delete; `mirage_style = drawn` AND `chat_media is yes`
+AND `age_days > 30` -> delete; `mirage_category = greeting` -> delete (v3's greetings).
+
+In the Lab, **Mirage verdict** now shows the Mirage tags of the picture and three plans: today (v2, no Mirage tags), the
+scan now (v2's category with Mirage's tags) and with Mirage (v3's category and tags). `MirageTagsTest` checks the tags,
+`contains`, the protect action, the three rules, saving and loading, and the Mirage pass of a scan with a saved answer.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.
@@ -665,7 +717,7 @@ The planner uses the lowest tier that can reach the target. Within that tier it 
 
 ## Rules (new)
 
-The suggestions for single files are now **rules**, and you will be able to add your own. A rule is a list of conditions that must **all** be true, plus one action. Each condition tests one tag of a file (see Tags: `age_days`, `source`, `category`, `faces`, `blur`, `brightness`, `size_mb`, ...) and can be turned around with NOT. If you need "or", write two rules. The actions are delete, re-encode (photo, lossless image, video, audio) and keep. For example:
+The suggestions for single files are now **rules**, and you will be able to add your own. A rule is a list of conditions that must **all** be true, plus one action. Each condition tests one tag of a file (see Tags: `age_days`, `source`, `category`, `faces`, `blur`, `brightness`, `size_mb`, ...) and can be turned around with NOT. If you need "or", write two rules. The actions are delete, re-encode (photo, lossless image, video, audio), keep, and never delete (protect: no delete suggestion, compressing allowed). For example:
 
 - `source = chat image (received)` AND `category = greeting` AND `age_days > 3` AND NOT `faces > 0` -> delete
 - `camera_photo = yes` AND `blur > 70` AND `brightness < 20` -> delete
@@ -678,6 +730,7 @@ The suggestions for single files are now **rules**, and you will be able to add 
 **Limits on your rules**, enforced in the core and not only on screen:
 - A delete from your rule is always R4: it needs your confirmation. A re-encode is always R2. Its technique is shown as "My rule: name".
 - A keep rule removes every suggestion for the files it matches, built-in ones included.
+- A never-delete (protect) rule removes every delete suggestion except an identical copy, a sent copy or a worse burst shot; compressing stays.
 - ID documents never get a delete suggestion from any rule; only an identical extra copy may go.
 
 Rules are saved as plain text (`RuleSet.toText()`, one block per rule, versioned). A rule that names a tag this version does not know is loaded switched off.

@@ -155,9 +155,13 @@ public final class LegacyUnitBuilder {
                     u.add(new Option("delete", Techniques.GREETINGS, s, Option.R4, true, "Greeting image received " + Math.round(age) + " days ago"));
                 else if (c.equals(PhotoCategory.GRAPHIC) && age > 7 && (a.equals("wa_image") || a.equals("telegram_media") || a.equals("download") || a.equals("pictures")))
                     u.add(new Option("delete", Techniques.FORWARDS, s, Option.R4, true, "Meme or forwarded image, " + Math.round(age) + " days old"));   // 1.11
-                else if (c.equals(PhotoCategory.ACCIDENTAL))
+                else if (c.equals(PhotoCategory.ACCIDENTAL) && !(f.mirageVersion > 0 && f.mirageSees))     // 1.11: not when Mirage sees something
                     u.add(new Option("delete", Techniques.ACCIDENTAL, s, Option.R4, true, "Almost nothing visible in this shot"));
             }
+            boolean image = Tags.IMAGE.equals(Tags.kind(f));
+            if (image && f.mirageVersion > 0 && f.mirageReference && age > 60)                                 // 1.11: Mirage reference photos
+                u.add(new Option("delete", Techniques.REFERENCE, s, Option.R4, true,
+                        "Photo of something to remember (a sign, label, screen...), " + Math.round(age) + " days old"));
             if (a.equals("download") && age > OLD_DOWNLOAD_DAYS && s >= OLD_DOWNLOAD_MIN && u.options.isEmpty())
                 u.add(new Option("delete", Techniques.OLD_DOWNLOADS, s, Option.R4, true, "Download untouched for " + Math.round(age) + " days"));
 
@@ -180,6 +184,13 @@ public final class LegacyUnitBuilder {
                     double m = est.music(f);
                     if (m > 0) u.add(new Option("reencode_audio", Techniques.MUSIC, (long) (s * m), Option.R3, false,
                             String.format("%d kbps -> 128 kbps; small audible trade-off for some listeners", f.bitrate / 1000)));
+                }
+            }
+            if (image && f.mirageVersion > 0 && f.miragePeople >= 1 && !"drawn".equals(f.mirageStyle) && !"collage".equals(f.mirageStyle)) {
+                for (java.util.Iterator<Option> it = u.options.iterator(); it.hasNext(); ) {   // 1.11: people seen by Mirage, never deleted
+                    Option o = it.next();
+                    if (o.action.equals("delete") && !o.technique.equals(Techniques.DUPLICATES) && !o.technique.equals(Techniques.SENT)
+                            && !o.technique.equals(Techniques.BURSTS)) it.remove();
                 }
             }
             if (PhotoCategory.ID.equals(f.category)) {             // ID documents: only an identical extra copy may go

@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 10;            // 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts; 9: favourite, date taken, Motion Photo video; 10: scene, aesthetic score, smiles, faces looking at the camera, face size (and smiles in the near-identical shots' measurements)
+    public static final int VERSION = 11;            // 11: what Mirage saw (style, people, objects, scene, reference photo, v3 category); 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts; 9: favourite, date taken, Motion Photo video; 10: scene, aesthetic score, smiles, faces looking at the camera, face size (and smiles in the near-identical shots' measurements)
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -121,6 +121,13 @@ public final class ResultStore {
                 if (f.scene != null) for (float x : f.scene) out.writeFloat(x);
                 out.writeFloat(f.aesthetic); out.writeInt(f.sceneVersion);
                 out.writeFloat(f.faceSize); out.writeInt(f.smiling); out.writeInt(f.looking);
+            }
+            if (version >= 11) {
+                out.writeInt(f.mirageVersion);
+                if (f.mirageVersion > 0) {
+                    str(out, f.mirageStyle); out.writeInt(f.miragePeople); str(out, f.mirageObjects); str(out, f.mirageScene);
+                    out.writeBoolean(f.mirageReference); out.writeBoolean(f.mirageSees); pool.write(out, f.v3Category); out.writeLong(f.v3Date);
+                }
             }
         }
 
@@ -236,6 +243,15 @@ public final class ResultStore {
                 if (!(f.aesthetic == -1 || f.aesthetic >= 0 && f.aesthetic <= 10) || f.sceneVersion < 0 || !(f.faceSize == -1 || f.faceSize >= 0 && f.faceSize <= 10)
                         || f.smiling < -1 || f.looking < -1 || f.smiling > Math.max(0, f.eyeFaces) || f.looking > Math.max(0, f.eyeFaces))
                     throw new IOException("results file damaged (people and scene)");
+            }
+            if (v >= 11) {
+                f.mirageVersion = in.readInt();
+                if (f.mirageVersion < 0) throw new IOException("results file damaged (Mirage)");
+                if (f.mirageVersion > 0) {
+                    f.mirageStyle = str(in); f.miragePeople = in.readInt(); f.mirageObjects = str(in); f.mirageScene = str(in);
+                    f.mirageReference = in.readBoolean(); f.mirageSees = in.readBoolean(); f.v3Category = pooled(in, pool); f.v3Date = in.readLong();
+                    if (f.miragePeople < 0 || f.mirageStyle == null || f.v3Date < 0) throw new IOException("results file damaged (Mirage)");
+                }
             }
             r.files.add(f);
         }

@@ -25,7 +25,9 @@ import java.util.Set;
  */
 public final class Rule {
     public enum Op {
-        EQ("="), NE("!="), GT(">"), GE(">="), LT("<"), LE("<="), IS_YES("is yes"), IS_NO("is no"), IN("in"), KNOWN("is known");
+        EQ("="), NE("!="), GT(">"), GE(">="), LT("<"), LE("<="), IS_YES("is yes"), IS_NO("is no"), IN("in"), KNOWN("is known"),
+        /** Text tags: the value contains one of the listed words or phrases (whole words; "car" finds "red car", not "carpet"). */
+        CONTAINS("contains");
         public final String text;
         Op(String t) { text = t; }
         static Op of(String t) { for (Op o : values()) if (o.text.equals(t)) return o; return null; }
@@ -33,14 +35,16 @@ public final class Rule {
 
     public enum Action {
         DELETE("delete", "delete"), REENCODE_PHOTO("reencode_photo", "reencode_photo"), LOSSLESS_IMAGE("lossless_image", "lossless_image"),
-        REENCODE_VIDEO("reencode_video", "reencode_video"), REENCODE_AUDIO("reencode_audio", "reencode_audio"), KEEP("keep", null);
+        REENCODE_VIDEO("reencode_video", "reencode_video"), REENCODE_AUDIO("reencode_audio", "reencode_audio"), KEEP("keep", null),
+        /** Never delete: drops delete suggestions for the file except an identical copy, a sent copy or a worse burst shot; compressing still allowed. */
+        PROTECT("protect", null);
         public final String text;
         /** The Option.action string this produces (null for KEEP, which makes no option). */
         public final String option;
         Action(String t, String o) { text = t; option = o; }
         public static Action of(String t) { for (Action a : values()) if (a.text.equals(t)) return a; return null; }
         /** A re-encode (not delete, not keep). */
-        public boolean compress() { return this != DELETE && this != KEEP; }
+        public boolean compress() { return this != DELETE && this != KEEP && this != PROTECT; }
     }
 
     /** How many bytes the option saves. FILE_SIZE is exact; the others are fractions from Estimates, so estimates. */
@@ -104,6 +108,7 @@ public final class Rule {
                 case KNOWN: return null;
                 case IS_YES: case IS_NO: return type == Tags.Type.FLAG ? null : tag + " is not a yes/no tag";
                 case IN: return type == Tags.Type.TEXT && !list.isEmpty() ? null : "\"in\" needs a text tag and a list";
+                case CONTAINS: return type == Tags.Type.TEXT && !list.isEmpty() ? null : "\"contains\" needs a text tag and words";
                 case EQ: case NE:
                     if (type == Tags.Type.FLAG) return yesNo() != null ? null : "use yes or no with " + tag;
                     if (type == Tags.Type.NUMBER) return Double.isNaN(num) ? "\"" + value + "\" is not a number" : null;
@@ -164,20 +169,38 @@ public final class Rule {
                         case EQ: return same(v);
                         case NE: return !same(v);
                         case IN: return inList(v);
+                        case CONTAINS: return contains(v);
                         default: return null;
                     }
                 }
             }
         }
 
+        private boolean categoryTag() { return tag.equals(Tags.CATEGORY) || tag.equals(Tags.V3_CATEGORY); }
+
         private boolean same(String v) {
             if (v.equalsIgnoreCase(value)) return true;
-            return tag.equals(Tags.CATEGORY) && PhotoCategory.label(v).equalsIgnoreCase(value);
+            return categoryTag() && PhotoCategory.label(v).equalsIgnoreCase(value);
         }
 
         private boolean inList(String v) {
             if (list.contains(v.toLowerCase(Locale.ROOT))) return true;
-            return tag.equals(Tags.CATEGORY) && list.contains(PhotoCategory.label(v).toLowerCase(Locale.ROOT));
+            return categoryTag() && list.contains(PhotoCategory.label(v).toLowerCase(Locale.ROOT));
+        }
+
+        /** Any listed word or phrase appears in v as whole words. */
+        private boolean contains(String v) {
+            String t = v.toLowerCase(Locale.ROOT);
+            for (String w : list) {
+                int i = t.indexOf(w);
+                while (i >= 0) {
+                    int e = i + w.length();
+                    boolean start = i == 0 || !Character.isLetterOrDigit(t.charAt(i - 1)), end = e >= t.length() || !Character.isLetterOrDigit(t.charAt(e));
+                    if (start && end) return true;
+                    i = t.indexOf(w, i + 1);
+                }
+            }
+            return false;
         }
 
         /** "NOT faces > 0", "area in camera,pictures", "screenshot is yes". */
@@ -199,7 +222,7 @@ public final class Rule {
             if (sp <= 0) return null;
             String tag = s.substring(0, sp), rest = s.substring(sp + 1).trim();
             // longest operator first: ">=" before ">", "is yes" before "is known" does not matter (different words)
-            String[] ops = {"is known", "is yes", "is no", ">=", "<=", "!=", "=", ">", "<", "in"};
+            String[] ops = {"is known", "is yes", "is no", "contains", ">=", "<=", "!=", "=", ">", "<", "in"};
             for (String o : ops) {
                 if (!rest.startsWith(o)) continue;
                 String after = rest.substring(o.length());
@@ -317,7 +340,7 @@ public final class Rule {
 
     /** The risk tier of the options this rule makes in the plan (user rules: R4 for a delete, R2 for a re-encode), or -1 for a keep rule. */
     public int effectiveRisk() {
-        if (action == null || action == Action.KEEP) return -1;
+        if (action == null || action == Action.KEEP || action == Action.PROTECT) return -1;
         if (builtIn) return risk;
         return action == Action.DELETE ? Option.R4 : Option.R2;
     }

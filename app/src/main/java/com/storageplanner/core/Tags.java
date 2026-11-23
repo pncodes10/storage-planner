@@ -34,7 +34,10 @@ public final class Tags {
             ID_DOCUMENT = "id_document", EYES_CLOSED = "eyes_closed", SCREENSHOT = "screenshot", CHAT_MEDIA = "chat_media", CAMERA_PHOTO = "camera_photo",
             SIZE_MB = "size_mb", FILE_TYPE = "file_type", BITS_PER_PIXEL = "bits_per_pixel", VIDEO_CODEC = "video_codec",
             BITRATE_KBPS = "bitrate_kbps", DATE_IN_PICTURE = "date_in_picture", DAYS_SINCE_DATE = "days_since_date_in_picture",
-            APK_PACKAGE = "apk_package";
+            APK_PACKAGE = "apk_package",
+            // what Mirage (v3, AlgorithmV3) saw; known only after it looked, except the two yes/no tags marked "always known"
+            MIRAGE_LOOKED = "mirage_looked", MIRAGE_SEES = "mirage_sees", MIRAGE_STYLE = "mirage_style", MIRAGE_PEOPLE = "mirage_people",
+            MIRAGE_OBJECTS = "mirage_objects", MIRAGE_SCENE = "mirage_scene", REFERENCE_PHOTO = "reference_photo", V3_CATEGORY = "mirage_category";
 
     public static final int UNKNOWN = -1;
 
@@ -149,6 +152,14 @@ public final class Tags {
         public double aesthetic = UNKNOWN;              // learned aesthetic score 1..10; UNKNOWN = not looked at yet
         public double smiling = UNKNOWN;                // faces smiling; UNKNOWN = no faces judged or no mouth positions
         public double looking = UNKNOWN;                // faces looking at the camera; UNKNOWN as for smiling
+        public boolean mirageLooked;                    // Mirage looked at this picture (always known)
+        public boolean mirageSees;                      // it clearly recognised something; no when it did not look (always known)
+        public String mirageStyle;                      // photograph, drawn, collage, screenshot, unspecified; null = not looked at
+        public int miragePeople = UNKNOWN;              // people Mirage named with a good score; UNKNOWN = not looked at
+        public String mirageObjects;                    // things it named, comma-separated ("" = none); null = not looked at
+        public String mirageScene;                      // its scene words ("" = none); null = not looked at
+        public Boolean referencePhoto;                  // a photo taken to remember something; null = not looked at
+        public String v3Category;                       // v3's category (PhotoCategory id); null = not looked at
 
         /** All tags in a fixed order, unknown ones included (for rules and tests). */
         public List<Entry> all() {
@@ -206,6 +217,14 @@ public final class Tags {
             l.add(num(AESTHETIC, "Aesthetic score", aesthetic, String.format(Locale.US, "%.1f of 10", aesthetic)));
             l.add(num(SMILING, "Faces smiling", smiling, String.valueOf((int) smiling)));
             l.add(num(LOOKING, "Faces looking at the camera", looking, String.valueOf((int) looking)));
+            l.add(flag(MIRAGE_LOOKED, "Mirage looked at it", mirageLooked, null));
+            l.add(flag(MIRAGE_SEES, "Mirage clearly sees something (people, things or text)", mirageSees, null));
+            l.add(text(MIRAGE_STYLE, "Kind of picture (Mirage)", mirageStyle));
+            l.add(num(MIRAGE_PEOPLE, "People seen by Mirage", miragePeople, String.valueOf(miragePeople)));
+            l.add(text(MIRAGE_OBJECTS, "Things seen by Mirage", mirageObjects == null ? null : mirageObjects.isEmpty() ? "none" : mirageObjects));
+            l.add(text(MIRAGE_SCENE, "Scene (Mirage)", mirageScene == null ? null : mirageScene.isEmpty() ? "none" : mirageScene));
+            l.add(flag(REFERENCE_PHOTO, "Photo taken to remember something (Mirage)", referencePhoto, null));
+            l.add(text(V3_CATEGORY, "Picture category by v3 (Mirage)", v3Category == null ? null : PhotoCategory.label(v3Category)));
             return l;
         }
 
@@ -236,6 +255,7 @@ public final class Tags {
                 case AESTHETIC: return aesthetic;
                 case SMILING: return smiling;
                 case LOOKING: return looking;
+                case MIRAGE_PEOPLE: return miragePeople;
                 default: return UNKNOWN;
             }
         }
@@ -255,6 +275,10 @@ public final class Tags {
                 case SCREENSHOT_APP: return screenshotApp;
                 case CODE_TYPE: return codeType;
                 case SCENE: return scene;
+                case MIRAGE_STYLE: return mirageStyle;
+                case MIRAGE_OBJECTS: return mirageObjects;
+                case MIRAGE_SCENE: return mirageScene;
+                case V3_CATEGORY: return v3Category;
                 default: return null;
             }
         }
@@ -279,6 +303,9 @@ public final class Tags {
                 case DATE_IN_PICTURE: return dateInPicture;
                 case FAVOURITE: return favourite;
                 case MOTION_PHOTO: return motionPhoto;
+                case MIRAGE_LOOKED: return mirageLooked;
+                case MIRAGE_SEES: return mirageSees;
+                case REFERENCE_PHOTO: return referencePhoto;
                 default: return null;
             }
         }
@@ -318,10 +345,12 @@ public final class Tags {
     static {
         for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, GLARE_SHARE, COLOURFULNESS,
                 GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE, TAKEN_DAYS, MOTION_VIDEO_MB,
-                AESTHETIC, SMILING, LOOKING}) TYPES.put(id, Type.NUMBER);
-        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE, SCENE}) TYPES.put(id, Type.TEXT);
+                AESTHETIC, SMILING, LOOKING, MIRAGE_PEOPLE}) TYPES.put(id, Type.NUMBER);
+        for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE, SCENE,
+                MIRAGE_STYLE, MIRAGE_OBJECTS, MIRAGE_SCENE, V3_CATEGORY}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
-                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE, FAVOURITE, MOTION_PHOTO}) TYPES.put(id, Type.FLAG);
+                ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE, FAVOURITE, MOTION_PHOTO,
+                MIRAGE_LOOKED, MIRAGE_SEES, REFERENCE_PHOTO}) TYPES.put(id, Type.FLAG);
     }
 
     /** The type of the tag with this id; null if there is no such tag. */
@@ -353,7 +382,11 @@ public final class Tags {
         {FAVOURITE, "", "is a favourite in your gallery"}, {TAKEN_DAYS, "days", "time since it was taken"},
         {SCREENSHOT_APP, "", "app in the screenshot"}, {MOTION_PHOTO, "", "is a motion photo"}, {MOTION_VIDEO_MB, "MB", "size of its motion photo video"},
         {CODE_TYPE, "", "kind of code"}, {SCENE, "", "scene"}, {AESTHETIC, "of 10", "aesthetic score"},
-        {SMILING, "", "number of smiling faces"}, {LOOKING, "", "number of faces looking at the camera"}};
+        {SMILING, "", "number of smiling faces"}, {LOOKING, "", "number of faces looking at the camera"},
+        {MIRAGE_LOOKED, "", "has been looked at by Mirage"}, {MIRAGE_SEES, "", "has something Mirage clearly sees"},
+        {MIRAGE_STYLE, "", "kind of picture (Mirage)"}, {MIRAGE_PEOPLE, "", "number of people seen by Mirage"},
+        {MIRAGE_OBJECTS, "", "things seen by Mirage"}, {MIRAGE_SCENE, "", "scene seen by Mirage"},
+        {REFERENCE_PHOTO, "", "is a photo taken to remember something"}, {V3_CATEGORY, "", "picture category by v3"}};
 
     private static List<Info> LIST;
 
@@ -413,6 +446,8 @@ public final class Tags {
             case FILE_TYPE: for (String c : FILE_TYPES) l.add(new Choice(c, c)); break;
             case CODE_TYPE: for (String c : PhotoMeta.CODE_TYPES) l.add(new Choice(c, c)); break;
             case SCENE: for (String c : Scene.ALL) l.add(new Choice(c, c)); break;
+            case MIRAGE_STYLE: for (String c : AlgorithmV3.STYLES) l.add(new Choice(c, c)); break;
+            case V3_CATEGORY: for (String c : PhotoCategory.ALL) l.add(new Choice(c, PhotoCategory.label(c))); break;
             default: break;
         }
         return l;
@@ -420,7 +455,7 @@ public final class Tags {
 
     /** What to show for a value of a text tag: the name of a picture category, the name of a storage area, else the value itself. */
     public static String valueLabel(String id, String value) {
-        if (CATEGORY.equals(id)) { for (String c : PhotoCategory.ALL) if (c.equalsIgnoreCase(value)) return PhotoCategory.label(c); }
+        if (CATEGORY.equals(id) || V3_CATEGORY.equals(id)) { for (String c : PhotoCategory.ALL) if (c.equalsIgnoreCase(value)) return PhotoCategory.label(c); }
         if (AREA.equals(id)) { String s = SOURCES.get(value); if (s != null) return s; }
         return value;
     }
@@ -524,6 +559,15 @@ public final class Tags {
         if (f.aesthetic >= 0) t.aesthetic = Math.round(f.aesthetic * 10) / 10.0;
         if (f.eyeFaces > 0 && f.smiling >= 0) t.smiling = f.smiling;
         if (f.eyeFaces > 0 && f.looking >= 0) t.looking = f.looking;
+        t.mirageLooked = f.mirageVersion > 0;
+        t.mirageSees = f.mirageVersion > 0 && f.mirageSees;
+        if (f.mirageVersion > 0) {
+            t.mirageStyle = f.mirageStyle; t.miragePeople = Math.max(0, f.miragePeople);
+            t.mirageObjects = f.mirageObjects == null ? "" : f.mirageObjects;
+            t.mirageScene = f.mirageScene == null ? "" : f.mirageScene;
+            t.referencePhoto = f.mirageReference;
+            t.v3Category = f.v3Category;
+        }
         return t;
     }
 

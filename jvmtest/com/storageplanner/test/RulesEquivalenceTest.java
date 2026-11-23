@@ -118,6 +118,15 @@ public final class RulesEquivalenceTest {
             // (the rules' file types rely on this; a category on a video or a bitrate on a JPEG never occurs)
             if (!Tags.IMAGE.equals(Tags.kind(f))) { f.category = null; f.catDate = 0; }
             if (area.equals("music") && !Tags.AUDIO.equals(Tags.kind(f))) f.bitrate = 0;
+            // what Mirage saw (1.11), on some sorted pictures: people (photo or drawn), something seen, a reference photo
+            if (f.category != null && rnd.nextInt(3) == 0) {
+                f.mirageVersion = AlgorithmV3.VERSION;
+                f.mirageStyle = AlgorithmV3.STYLES[rnd.nextInt(AlgorithmV3.STYLES.length)];
+                f.miragePeople = new int[] {0, 0, 1, 3}[rnd.nextInt(4)];
+                f.mirageSees = f.miragePeople > 0 || rnd.nextBoolean();
+                f.mirageReference = f.miragePeople == 0 && rnd.nextInt(3) == 0;
+                f.mirageObjects = f.mirageReference ? "sign, price tag" : ""; f.mirageScene = ""; f.v3Category = f.category;
+            }
             // size to land bits per pixel on a threshold
             if (f.width > 0 && rnd.nextInt(2) == 0) {
                 double bpp = new double[] {0.1, 0.4999, 0.5, 0.5001, 1.0, 0.9999, 1.0001, 3}[rnd.nextInt(8)];
@@ -125,6 +134,8 @@ public final class RulesEquivalenceTest {
                 g.area = f.area; g.type = f.type; g.sha256 = f.sha256; g.width = f.width; g.height = f.height; g.pkg = f.pkg; g.faces = f.faces;
                 g.category = f.category; g.catDate = f.catDate; g.apkPackage = f.apkPackage; g.apkVersion = f.apkVersion;
                 g.vcodec = f.vcodec; g.bitrate = f.bitrate;
+                g.mirageVersion = f.mirageVersion; g.mirageSees = f.mirageSees; g.mirageReference = f.mirageReference; g.miragePeople = f.miragePeople;
+                g.mirageStyle = f.mirageStyle; g.mirageObjects = f.mirageObjects; g.mirageScene = f.mirageScene; g.v3Category = f.v3Category;
                 f = g;
             }
             r.files.add(f);

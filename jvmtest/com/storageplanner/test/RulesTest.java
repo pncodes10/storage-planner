@@ -219,7 +219,7 @@ public final class RulesTest {
                     && opt(ub, gr.rel, "delete").technique.equals(Techniques.GREETINGS) && opt(ub, gr2.rel, "delete") == null);
             check("the why text follows the file", opt(ub, gr.rel, "delete").why.equals("Greeting image received 5 days ago"));
             check("defaults() gives fresh rules each time (edits do not leak)", RuleSet.defaults().find("old_greeting").when.get(1).value.equals("7"));
-            check("built-in rules: 28 with unique ids, every technique a known constant", builtInsOk());
+            check("built-in rules: 30 with unique ids, every technique a known constant", builtInsOk());
         }
 
         // ---------------------------------------------------------------- text format
@@ -266,13 +266,13 @@ public final class RulesTest {
             check("unknown action, no operator, no conditions: loaded but off", !l.find("user_3").enabled && !l.find("user_4").enabled && !l.find("user_5").enabled);
             check("an unknown built-in is skipped, a known one takes the saved values", l.find("gone_in_this_version") == null && !l.find("old_greeting").enabled
                     && l.find("old_greeting").when.get(1).value.equals("9") && l.find("trash").enabled);
-            check("all built-ins are there, in order, even if the text lacks them", l.rules.get(0).id.equals("junk_thumbnails") && l.rules.get(27).id.equals("reencode_music"));
+            check("all built-ins are there, in order, even if the text lacks them", l.rules.get(0).id.equals("junk_thumbnails") && l.rules.get(29).id.equals("reencode_music"));
             check("a text cut off inside a rule is reported, not fatal", l.find("user_6") == null && !l.warnings.isEmpty());
             check("the unknown action survives saving", l.toText().contains("action explode") && l.toText().contains("when shoe_size > 40") && l.toText().contains("when age_days around 3"));
             RuleSet again = RuleSet.fromText(l.toText());
             check("loading what was written after a bad load is stable", again.toText().equals(l.toText()));
-            check("garbage, empty, a newer version: built-in rules and a warning, no crash", RuleSet.fromText("hello").rules.size() == 28 && !RuleSet.fromText("hello").warnings.isEmpty()
-                    && RuleSet.fromText("").rules.size() == 28 && RuleSet.fromText(null).rules.size() == 28 && RuleSet.fromText("storage-planner-rules 99\nrule x\nend\n").rules.size() == 28
+            check("garbage, empty, a newer version: built-in rules and a warning, no crash", RuleSet.fromText("hello").rules.size() == 30 && !RuleSet.fromText("hello").warnings.isEmpty()
+                    && RuleSet.fromText("").rules.size() == 30 && RuleSet.fromText(null).rules.size() == 30 && RuleSet.fromText("storage-planner-rules 99\nrule x\nend\n").rules.size() == 30
                     && !RuleSet.fromText("storage-planner-rules 99\n").warnings.isEmpty());
             Random rnd = new Random(5);                         // random damage never throws
             boolean ok = true;
@@ -320,7 +320,7 @@ public final class RulesTest {
             LegacyUnitBuilder old = new LegacyUnitBuilder(r, new Estimates(), 34);
             long t2 = System.nanoTime();
             double ms = (t1 - t0) / 1e6, msOld = (t2 - t1) / 1e6;
-            System.out.printf("  speed: 50000 files, 28 built-in + 4 user rules: whole UnitBuilder %.0f ms (old code %.0f ms)%n", ms, msOld);
+            System.out.printf("  speed: 50000 files, 30 built-in + 4 user rules: whole UnitBuilder %.0f ms (old code %.0f ms)%n", ms, msOld);
             check("50000 files with 30 rules build in well under a second", ms < 1000 && withRules.units.size() > 0 && old.units.size() > 0);
         }
 
@@ -337,7 +337,7 @@ public final class RulesTest {
         for (Rule r : l) {
             if (!ids.add(r.id) || !r.builtIn || r.problem() != null || !tech.contains(r.technique) || r.name == null || r.name.length() == 0) return false;
         }
-        return l.size() == 28;
+        return l.size() == 30;
     }
 
     // ---------------------------------------------------------------- file types: a rule is for one type of file

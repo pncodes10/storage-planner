@@ -24,6 +24,41 @@ public final class AlgorithmV3 {
 
     public static final String NAME = "v3 (Mirage)", V2_NAME = "v2 (current)";
 
+    /** Version of v3 and of what it records on a picture; pictures looked at by an older one are looked at again. 1: first. */
+    public static final int VERSION = 1;
+
+    /** Styles as tags show them. */
+    public static final String PHOTOGRAPH = "photograph", DRAWN = "drawn", COLLAGE = "collage", SCREENSHOT = "screenshot", UNSPECIFIED = "unspecified";
+    public static final String[] STYLES = {PHOTOGRAPH, DRAWN, COLLAGE, SCREENSHOT, UNSPECIFIED};
+
+    /** Objects named with at least this score are kept in mirage_objects (Mirage's weakest guesses are left out). */
+    public static final double OBJECT_SCORE = 0.3;
+    public static final int MAX_OBJECTS = 24;
+
+    /**
+     * Writes what Mirage saw and v3's category onto the picture (FileItem.mirage*, v3Category), for the tags and rules.
+     * Only short facts are kept, never the text it read: names, booking IDs and number plates stay out of the results.
+     */
+    public static void record(FileItem f, Result r, Mirage.Answer a) {
+        f.mirageStyle = r.style == null ? UNSPECIFIED : "graphic".equals(r.style) ? DRAWN : r.style;
+        f.miragePeople = Mirage.people(a, PERSON_SCORE);
+        java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<String>();
+        for (Mirage.Thing t : a.objects) {
+            String n = t.name.toLowerCase(java.util.Locale.ROOT).replace(',', ' ').trim();
+            if (n.isEmpty() || n.equals("text") || n.startsWith("text ") || t.score < OBJECT_SCORE) continue;
+            if (names.size() < MAX_OBJECTS) names.add(n);
+        }
+        f.mirageObjects = Mirage.join(new java.util.ArrayList<String>(names), ", ");
+        String sc = Mirage.join(a.scene, "; ");
+        f.mirageScene = sc.length() > 200 ? sc.substring(0, 200) : sc;
+        boolean photoLike = !DRAWN.equals(f.mirageStyle) && !COLLAGE.equals(f.mirageStyle) && !SCREENSHOT.equals(f.mirageStyle);
+        f.mirageReference = photoLike && f.miragePeople == 0 && !PhotoCategory.isScreenshot(f) && !Mirage.reference(a).isEmpty();
+        f.mirageSees = r.recognised != null || f.miragePeople > 0;
+        f.v3Category = r.category.category;
+        f.v3Date = r.category.date;
+        f.mirageVersion = VERSION;
+    }
+
     /** A collage is a comic strip or meme, not a photo collage, from this many words read confidently. */
     public static final int MEME_WORDS = 8;
 

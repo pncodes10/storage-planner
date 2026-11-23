@@ -158,7 +158,7 @@ public final class RuleEditScreen extends Screen {
 
     private static Op[] opsFor(Tags.Type t) {
         if (t == Tags.Type.FLAG) return new Op[] {Op.IS_YES, Op.IS_NO, Op.KNOWN};
-        if (t == Tags.Type.TEXT) return new Op[] {Op.EQ, Op.NE, Op.IN, Op.KNOWN};
+        if (t == Tags.Type.TEXT) return new Op[] {Op.EQ, Op.NE, Op.IN, Op.CONTAINS, Op.KNOWN};
         return new Op[] {Op.GT, Op.GE, Op.LT, Op.LE, Op.EQ, Op.NE, Op.KNOWN};
     }
 
@@ -173,6 +173,7 @@ public final class RuleEditScreen extends Screen {
             case EQ: return "is";
             case NE: return "is not";
             case IN: return "is one of";
+            case CONTAINS: return "contains";
             default: return op.text;
         }
     }
@@ -220,7 +221,7 @@ public final class RuleEditScreen extends Screen {
         if (builtIn) {
             Ui.add(content, Ui.text(a, RuleText.action(base), 16, Ui.text, true), 6);
         } else {
-            final Action[] actions = {Action.DELETE, Action.REENCODE_PHOTO, Action.LOSSLESS_IMAGE, Action.REENCODE_VIDEO, Action.REENCODE_AUDIO, Action.KEEP};
+            final Action[] actions = {Action.DELETE, Action.REENCODE_PHOTO, Action.LOSSLESS_IMAGE, Action.REENCODE_VIDEO, Action.REENCODE_AUDIO, Action.KEEP, Action.PROTECT};
             final String[] labels = new String[actions.length];
             int cur = -1;
             for (int i = 0; i < actions.length; i++) { labels[i] = actionLabel(actions[i]); if (actions[i] == action) cur = i; }
@@ -247,6 +248,9 @@ public final class RuleEditScreen extends Screen {
             content.addView(rr, rl);
             if (shown.action == Action.KEEP)
                 Ui.add(content, Ui.text(a, "Files this rule matches get no suggestion at all, from any rule. ID documents are protected like this anyway.", 13, Ui.text2, false), 4);
+            if (shown.action == Action.PROTECT)
+                Ui.add(content, Ui.text(a, "Files this rule matches are never suggested for deletion by any rule, except an identical copy, a sent copy or a worse "
+                        + "shot of a burst; they can still be compressed.", 13, Ui.text2, false), 4);
         }
 
         Ui.add(content, Ui.heading(a, "File type", 18), 22);
@@ -368,6 +372,7 @@ public final class RuleEditScreen extends Screen {
             case LOSSLESS_IMAGE: return "Compress screenshot (lossless)";
             case REENCODE_VIDEO: return "Compress video";
             case REENCODE_AUDIO: return "Compress music";
+            case PROTECT: return "Never delete: no delete suggestions (compressing still allowed)";
             default: return "Keep: protect these files from every suggestion";
         }
     }
@@ -513,7 +518,7 @@ public final class RuleEditScreen extends Screen {
             styleField(e);
             e.setInputType(InputType.TYPE_CLASS_TEXT);
             e.setText(x.value);
-            e.setHint(x.op == Op.IN ? "values separated by commas" : "value");
+            e.setHint(x.op == Op.IN ? "values separated by commas" : x.op == Op.CONTAINS ? "words separated by commas (any of them)" : "value");
             e.setContentDescription(x.op == Op.IN ? "Values, separated by commas" : "Value");
             e.addTextChangedListener(new Watcher() { public void changed(String s) { x.value = s.trim(); updateReads(reads, x); edited(); } });
             return e;
@@ -693,7 +698,7 @@ public final class RuleEditScreen extends Screen {
             Ui.add(previewBox, w, 8);
         }
         if (m.alsoSuggested > 0)
-            Ui.add(previewBox, Ui.text(a, r.action == Action.KEEP
+            Ui.add(previewBox, Ui.text(a, r.action == Action.KEEP || r.action == Action.PROTECT
                     ? m.alsoSuggested + " of them are suggested by other rules now; this rule would remove those suggestions."
                     : m.alsoSuggested + " of them are already suggested by another rule.", 14, Ui.text2, false), 6);
         if (m.overridden > 0)

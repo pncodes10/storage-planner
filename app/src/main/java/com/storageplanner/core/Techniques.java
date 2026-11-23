@@ -32,6 +32,8 @@ public final class Techniques {
     public static final String EXPIRED_TICKETS = "Tickets for past trips and shows";
     public static final String GREETINGS = "Greeting images from chats";
     public static final String FORWARDS = "Memes and forwards";
+    public static final String REFERENCE = "Photos taken to remember something";
+    public static final String PEOPLE_PROTECTED = "Photos of people (never deleted)";
     public static final String ACCIDENTAL = "Accidental shots";
     /** Deletions the user picked while browsing pictures (recorded as Review.CHOSEN + PICKED). */
     public static final String PICKED = "Pictures you picked to delete";
@@ -87,6 +89,10 @@ public final class Techniques {
             "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
         put(FORWARDS, "Memes, comics, posters and other drawn or designed images received in chats or saved from the web more than a week ago (never your camera photos, screenshots or what you sent).",
             "Look through them (some may be invitations or notices you want), then delete them in your gallery, or in WhatsApp (Settings > Storage and data > Manage storage).");
+        put(REFERENCE, "Photos of a sign, price tag, label, screen or notice with nobody in them, more than 2 months old: usually taken to remember something for a while. Mirage (v3) finds them.",
+            "Look at each one; delete it in your gallery if you no longer need it.");
+        put(PEOPLE_PROTECTED, "Photos where Mirage (v3) sees people. They are never suggested for deletion, except an identical copy, a sent copy or a worse shot of a burst; compressing is still suggested.",
+            "Nothing to do: these are kept.");
         put(ACCIDENTAL, "Very dark, covered or badly shaken shots, usually taken by accident.",
             "Look at each one; delete it in your gallery if nothing is in it.");
         put(BURSTS, "Photos taken within minutes of each other that look almost identical. The better one is kept: eyes open, faces visible, sharper, better lit.",

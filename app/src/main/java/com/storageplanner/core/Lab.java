@@ -808,6 +808,7 @@ public final class Lab {
         else try { a = Mirage.read(json); } catch (IllegalArgumentException e) { o.line("  ! could not read Mirage's answer: " + e.getMessage()); }
 
         PhotoCategory.Result withMirage = null;
+        FileItem recorded = null;
         if (a != null) {
             AlgorithmV3.Result v3 = AlgorithmV3.sort(f, s, prep.aspect, read, a, now);
             Mirage.Clean c = v3.clean;
@@ -825,18 +826,27 @@ public final class Lab {
                     + (v3.textUsed ? "" : "; not used: a scan does not go by the text of a picture like this (" + (PhotoCategory.isCamera(f) ? "a camera photo" : "nothing recognised") + ")"));
             String ppl = v3.people > 0 ? f("%d %s", v3.people, v3.people == 1 ? "person" : "people") : "no people";
             o.line("  Mirage saw " + (v3.style == null ? ppl : "a " + v3.style + ", " + ppl)
-                    + (Mirage.reference(a).isEmpty() ? "" : "; things photographed to remember? " + Mirage.join(Mirage.reference(a), ", ") + " (no rule uses this yet)")
                     + (a.objects.isEmpty() && a.text.isEmpty() ? "; nothing recognised in it" : ""));
             withMirage = v3.category;
+            recorded = new FileItem(f.rel, f.abs, f.size, f.mtime);     // what a scan records (the mirage_* tags), copied onto f below
+            recorded.area = f.area;
+            AlgorithmV3.record(recorded, v3, a);
+            o.line("  Mirage tags: kind of picture " + recorded.mirageStyle + "; people " + recorded.miragePeople + "; things "
+                    + (recorded.mirageObjects.isEmpty() ? "none" : recorded.mirageObjects) + "; photo taken to remember something " + (recorded.mirageReference ? "yes" : "no")
+                    + "; clearly sees something " + (recorded.mirageSees ? "yes" : "no"));
         }
 
         o.line("  category today (the app's text reader" + (read ? "" : ", not needed here") + "): " + catLine(today));
         if (withMirage != null) o.line("  category with Mirage: " + catLine(withMirage) + (withMirage.category != null && withMirage.category.equals(today.category) ? "  (the same)" : "  <- CHANGED"));
 
+        f.mirageVersion = 0;                                                  // today: the app before Mirage
         List<Option> before = planFor(f, today, rules, now, o, "today");
         sh.v2 = today; sh.v2Options.addAll(before); sh.v3Ms = ms;
         sh.v3Note = a != null ? null : json == null ? (pf.mirageNote() == null ? "Mirage is not available" : pf.mirageNote()) : "Mirage's answer could not be read";
         if (withMirage != null) {
+            copyMirage(recorded, f);
+            List<Option> scan = planFor(f, today, rules, now, o, "in the scan now (v2's category with Mirage's tags)");
+            o.line("  => the scan now: " + verdict(scan, today));
             List<Option> after = planFor(f, withMirage, rules, now, o, "with Mirage");
             sh.v3 = withMirage; sh.v3Options.addAll(after);
             sh.options.addAll(after);
@@ -848,6 +858,11 @@ public final class Lab {
         f.category = withMirage != null ? withMirage.category : today.category;
         sh.file = f;
         return sh;
+    }
+
+    static void copyMirage(FileItem from, FileItem to) {
+        to.mirageVersion = from.mirageVersion; to.mirageStyle = from.mirageStyle; to.miragePeople = from.miragePeople; to.mirageObjects = from.mirageObjects;
+        to.mirageScene = from.mirageScene; to.mirageReference = from.mirageReference; to.mirageSees = from.mirageSees; to.v3Category = from.v3Category; to.v3Date = from.v3Date;
     }
 
     static String catLine(PhotoCategory.Result r) {

@@ -67,8 +67,13 @@ public final class BuiltInRules {
         // received or saved, never your own camera photos, screenshots or what you sent
         l.add(del("old_forward", "Old meme or forward", Techniques.FORWARDS, Option.R4, "Meme or forwarded image, {age} days old")
                 .when(Tags.CATEGORY, Op.EQ, PhotoCategory.GRAPHIC).when(Tags.AGE_DAYS, Op.GT, "7").when(Tags.AREA, Op.IN, "wa_image,telegram_media,download,pictures"));
+        // not when Mirage clearly sees people, things or text in it (mirage_sees is "no" where Mirage has not looked)
         l.add(del("accidental_shot", "Accidental shot", Techniques.ACCIDENTAL, Option.R4, "Almost nothing visible in this shot")
-                .when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL));
+                .when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL).when(Tags.MIRAGE_SEES, Op.IS_NO, ""));
+        // a photo of a sign, price tag, screen, label... with no people, kept 2 months (Mirage)
+        l.add(del("old_reference_photo", "Old photo taken to remember something", Techniques.REFERENCE, Option.R4,
+                "Photo of something to remember (a sign, label, screen...), {age} days old")
+                .when(Tags.REFERENCE_PHOTO, Op.IS_YES, "").when(Tags.AGE_DAYS, Op.GT, "60"));
         // ---- last of the deletes: only when nothing else found a reason for this file
         Rule old = del("old_download", "Old large download", Techniques.OLD_DOWNLOADS, Option.R4, "Download untouched for {age} days")
                 .when(Tags.AREA, Op.EQ, "download").when(Tags.AGE_DAYS, Op.GT, num(UnitBuilder.OLD_DOWNLOAD_DAYS))
@@ -81,6 +86,10 @@ public final class BuiltInRules {
         fav.technique = Techniques.FAVOURITES; fav.risk = Option.R0; fav.saving = Saving.FILE_SIZE; fav.why = "";
         fav.when(Tags.FAVOURITE, Op.IS_YES, "");
         l.add(fav);
+        // ---- never delete: photos where Mirage sees people (not drawings); an identical, sent or worse burst copy may still go
+        Rule people = rule("protect_people_mirage", "People seen by Mirage: never delete", Action.PROTECT, Techniques.PEOPLE_PROTECTED, Option.R0, Saving.FILE_SIZE, "");
+        people.when(Tags.MIRAGE_PEOPLE, Op.GE, "1").when(new Rule.Condition(Tags.MIRAGE_STYLE, Op.IN, AlgorithmV3.DRAWN + "," + AlgorithmV3.COLLAGE, true));
+        l.add(people);
         // ---- re-encoding: the first rule that matches a file is the only one used
         l.add(re("reencode_camera_photo", "Re-encode camera photo", Action.REENCODE_PHOTO, Techniques.PHOTOS, Option.R2, Saving.CAMERA_PHOTO,
                 "Visually identical at matched quality; {photo_source}")
@@ -114,6 +123,8 @@ public final class BuiltInRules {
         FILE_TYPE.put("old_greeting", Tags.IMAGE);
         FILE_TYPE.put("old_forward", Tags.IMAGE);
         FILE_TYPE.put("accidental_shot", Tags.IMAGE);
+        FILE_TYPE.put("old_reference_photo", Tags.IMAGE);
+        FILE_TYPE.put("protect_people_mirage", Tags.IMAGE);
         FILE_TYPE.put("installer_installed", Tags.APK);
         FILE_TYPE.put("installer_not_installed", Tags.APK);
         FILE_TYPE.put("reencode_camera_photo", "jpeg");

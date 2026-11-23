@@ -54,6 +54,8 @@ public final class Scanner {
         public long textBudgetMs = 20 * 60 * 1000L;
         /** Time allowed for looking at what photos show (scene, aesthetic score) in this scan; the rest is done next time. */
         public long sceneBudgetMs = 15 * 60 * 1000L;
+        /** Time allowed for Mirage (v3: the mirage_* tags and v3_category) in this scan; the rest is done next time. 0 = off. */
+        public long mirageBudgetMs = 20 * 60 * 1000L;
         /** Analyse only some pictures (Try on my pictures); null = everything. */
         public Sample.Limit limit;
     }

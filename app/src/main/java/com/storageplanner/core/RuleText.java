@@ -56,7 +56,8 @@ public final class RuleText {
             default: {
                 if (op == Op.KNOWN) return i.phrase + (not ? " is not known (never matches)" : " is known");
                 if (not) op = op == Op.EQ ? Op.NE : op == Op.NE ? Op.EQ : op;
-                String words = op == Op.EQ ? "is" : op == Op.NE ? "is not" : op == Op.IN ? (not ? "is none of" : "is one of") : op.text;
+                String words = op == Op.EQ ? "is" : op == Op.NE ? "is not" : op == Op.IN ? (not ? "is none of" : "is one of")
+                        : op == Op.CONTAINS ? (not ? "does not contain" : "contains") : op.text;
                 StringBuilder v = new StringBuilder();
                 for (String part : c.value.split(",")) {
                     part = part.trim();
@@ -150,6 +151,7 @@ public final class RuleText {
             case LOSSLESS_IMAGE: return "Compress screenshot (lossless)";
             case REENCODE_VIDEO: return "Compress video";
             case REENCODE_AUDIO: return "Compress music";
+            case PROTECT: return "Never delete (compressing allowed)";
             default: return "Keep (protect)";
         }
     }
@@ -159,6 +161,7 @@ public final class RuleText {
         if (r.action == null) return "Unknown action: this rule is switched off.";
         switch (r.action) {
             case KEEP: return "Keeps these files out of every suggestion. No risk: nothing is touched.";
+            case PROTECT: return "Never suggests deleting these files (an identical copy, a sent copy or a worse burst shot may still go); compressing them is still suggested. No risk.";
             case DELETE: return r.effectiveRisk() == Option.R4
                     ? "Suggests deleting. Needs your confirmation for each file." : "Suggests deleting. " + Option.TIER_NAME[r.effectiveRisk()] + ".";
             default: return "Suggests compressing. " + Option.TIER_NAME[r.effectiveRisk()] + "; the saving is an estimate.";
