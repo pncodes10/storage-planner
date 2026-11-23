@@ -133,6 +133,18 @@ public final class VersusTest {
         Mirage.Answer pets = Mirage.read("{\"objects\":[{\"name\":\"cat face\",\"score\":0.8},{\"name\":\"man\",\"score\":0.3}]}");
         check("a pet's face is no person; low scores count only as people seen", Mirage.people(pets) == 1 && Mirage.people(pets, AlgorithmV3.PERSON_SCORE) == 0);
 
+        // faces are looked for on photos received in chats too (sorting version 6), not on flat graphics
+        for (String[] k : new String[][]{{crowd.getPath(), "wa_image", "checked"}, {crowd.getPath(), "download", "checked"}, {comic.getPath(), "wa_image", "not checked"}}) {
+            Lab.Pic lp = new Lab.Pic(k[0], new File(k[0]).getName(), new File(k[0]).length(), now);
+            lp.area = k[1];
+            List<String> cl = new ArrayList<String>();
+            Lab.category(pf, lp, now, cl::add);
+            String fl = "";
+            for (String x : cl) if (x.contains("faces counted:")) fl = x;
+            boolean checked = fl.matches(".*faces counted: \\d+.*");
+            check("faces " + k[2] + ": " + new File(k[0]).getName() + " as " + k[1] + " (" + fl.trim() + ")", k[2].equals("checked") == checked);
+        }
+
         File txt = new File(dev, "elsewhere/notes.jpg");                                 // outside the phone folders the run lists
         txt.getParentFile().mkdirs();
         Files.write(txt.toPath(), "just text, not a picture".getBytes(StandardCharsets.UTF_8));

@@ -25,8 +25,12 @@ final class Sorter {
      * cards and papers held up are read (ID cards). 3: focus ignores sensor grain (night skies), glare share.
      * 4: a small sharp subject on a blurred background is not an accidental (shaken) shot.
      * 5: smiles, faces looking at the camera, and how close the biggest face is (selfies).
+     * 6: faces are looked for on received, downloaded and saved photos too (they were all "Photos without faces").
      */
-    static final int VERSION = 5;
+    static final int VERSION = 6;
+
+    /** A picture this flat (share of flat screen-like areas) is a drawn or designed graphic, not looked at for faces. */
+    static final double FLAT_GRAPHIC = 0.35;
 
     /**
      * Version of the scene network and the aesthetic score (SceneNet, Scene, Aesthetic). Pictures measured with an
@@ -63,8 +67,12 @@ final class Sorter {
         f.code = code == null ? null : Codes.describe(code[0], code[1]);
         f.faces = -1;
         f.eyeFaces = -1; f.eyesOpen = -1; f.smiling = -1; f.looking = -1; f.faceSize = -1;
-        // a page or a card is looked at for faces too: someone holding it up is a person, and an ID card has a face on it
-        if ((!PhotoCategory.worthReading(f, s) || s.page() || PhotoCategory.cardCandidate(s)) && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s))
+        // faces: on every picture that may be a photo. A page or a card too (someone holding it up is a person, an ID card
+        // has a face on it); and photos whose text is read anyway (received in a chat, downloads, Pictures), which before
+        // version 6 were never looked at for faces and all came out as "Photos without faces". Not on screenshots,
+        // accidental shots, or flat drawn or designed graphics (mostly memes and posters; their faces are drawings)
+        if ((!PhotoCategory.worthReading(f, s) || s.page() || PhotoCategory.cardCandidate(s) || s.flat < FLAT_GRAPHIC)
+                && !PhotoCategory.isScreenshot(f) && !PhotoCategory.accidental(s))
             faces(pf, f, px, w, h, l);
         Prep p = new Prep();
         p.s = s; p.aspect = dims[0] / (double) Math.max(1, dims[1]);

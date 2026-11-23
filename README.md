@@ -619,6 +619,12 @@ Algorithm Lab > **v2 vs v3**:
 `VersusTest` checks that cards are saved and read back unchanged, the score and the order cards come in, both
 algorithms on one picture (with a saved Mirage answer), and which pictures a run takes.
 
+**Faces on received and saved photos (sorting version 6).** Before, the face detector ran only on pictures whose text
+was not read, and pictures received in chats, downloads and the Pictures folder always have their text read, so every
+such photo of a person came out as "Photos without faces". Now faces are looked for on them too (not on screenshots,
+accidental shots or flat drawn graphics such as memes and posters). Pictures already sorted are sorted again once at the
+next analysis.
+
 ## Runs in the background
 
 - **Foreground service.** The analysis runs in a foreground service, so it keeps going while you use other apps or the screen is off. A notification shows the stage and progress, with a **Cancel** button; tapping it opens the app.

@@ -823,7 +823,8 @@ public final class Lab {
             o.line("  Mirage's text says: " + (vm.kind == null ? "nothing specific" : PhotoCategory.label(vm.kind)) + (vm.why.isEmpty() ? "" : " — evidence " + vm.why)
                     + (vm.date > 0 ? "; date " + Report.day(vm.date) : "") + f(" (%d words read confidently)", vm.goodWords)
                     + (v3.textUsed ? "" : "; not used: a scan does not go by the text of a picture like this (" + (PhotoCategory.isCamera(f) ? "a camera photo" : "nothing recognised") + ")"));
-            o.line("  Mirage saw" + (v3.style == null ? "" : " a " + v3.style) + (v3.people > 0 ? f(", %d %s", v3.people, v3.people == 1 ? "person" : "people") : ", no people")
+            String ppl = v3.people > 0 ? f("%d %s", v3.people, v3.people == 1 ? "person" : "people") : "no people";
+            o.line("  Mirage saw " + (v3.style == null ? ppl : "a " + v3.style + ", " + ppl)
                     + (Mirage.reference(a).isEmpty() ? "" : "; things photographed to remember? " + Mirage.join(Mirage.reference(a), ", ") + " (no rule uses this yet)")
                     + (a.objects.isEmpty() && a.text.isEmpty() ? "; nothing recognised in it" : ""));
             withMirage = v3.category;
