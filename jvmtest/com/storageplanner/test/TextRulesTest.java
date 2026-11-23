@@ -26,6 +26,12 @@ public final class TextRulesTest {
         expect("UPI payment", "Payment successful ₹1,250 Paid to Sri Balaji Stores UPI transaction ID 412345678901 From: HDFC Bank Powered by Google Pay", 0.45, false, true, false, PhotoCategory.PAYMENT);
         expect("PhonePe", "Transaction Successful Paid to Ramesh Rs. 500 Debited from SBI UTR 123456789012 PhonePe", 0.45, false, true, false, PhotoCategory.PAYMENT);
         expect("train ticket", "IRCTC e-Ticket PNR 4512345678 Train No. 12951 Date of Journey 12-Nov-2026 Coach B3 Berth 45 Booking Status CNF", 0.45, false, true, false, PhotoCategory.TICKET);
+        expect("event M-Ticket", "bookmyshow M-Ticket BOOKING ID: QWERTY12345 Hey Ravi, your booking is confirmed! View tickets in your profile "
+                + "on the app / mobile web. Summer Beats Live Venue Directions Green Lawns: Nagpur Date & Time Sat, 14 Mar, 2026 6:00pm Category "
+                + "Quantity Price GOLD - ENTRY 2 Rs 1500.00 Your ticket detail(s): Reply Forward", 0.56, false, false, true, PhotoCategory.TICKET);
+        expect("wedding invitation is no ticket", "You are cordially invited to the wedding of Asha and Vikram. Venue: Lotus Banquet Hall, Indore. "
+                + "Date & Time: Sunday, 22 Nov 2026, 7:00 pm onwards. With best compliments from the family. Please join us to bless the couple "
+                + "and share our joy on this special day.", 0.7, false, false, true, PhotoCategory.DOCUMENT);
         expect("boarding pass", "BOARDING PASS IndiGo Flight 6E 211 From DEL To BOM Gate 12 Seat 14C Boarding 18:20 Sequence 45", 0.45, false, true, false, PhotoCategory.TICKET);
         expect("receipt", "SRI KRISHNA SWEETS Bill No 1234 Cashier Ravi Qty Item Price Amount Kaju Katli 1 450.00 450.00 Samosa 4 15.00 60.00 Sub Total 510.00 CGST 2.5% 12.75 SGST 2.5% 12.75 Total 535.50 Cash 600.00 Change 64.50 Thank you come again",
                0.4, false, false, false, PhotoCategory.RECEIPT);

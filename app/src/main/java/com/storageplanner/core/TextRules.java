@@ -60,7 +60,11 @@ public final class TextRules {
             "transaction id", "payment received", "from:", "to:", "powered by", "split bill", "@ok", "@ybl", "@paytm", "@upi", "@axl", "@ibl"};
     static final String[] TICKET = {"pnr", "boarding pass", "e-ticket", "eticket", "date of journey", "train no", "coach", "berth", "gate", "seat",
             "seats", "flight", "booking id", "booking confirmed", "screen", "boarding", "departure", "arrival", "irctc", "show time",
-            "sequence", "passenger", "platform", "bus no", "quota", "cnf", "indigo", "air india", "vistara", "akasa", "pvr", "inox", "bookmyshow"};
+            "sequence", "passenger", "platform", "bus no", "quota", "cnf", "indigo", "air india", "vistara", "akasa", "pvr", "inox", "bookmyshow",
+            // events and concerts (an M-Ticket from BookMyShow, District, Paytm Insider...); "venue" and "date & time" alone
+            // are on invitations too, so they still need a third ticket word
+            "m-ticket", "mticket", "ticket", "tickets", "venue", "date & time", "booking is confirmed", "admit", "district", "paytm insider",
+            "ticketnew", "zomato live"};
     static final String[] RECEIPT = {"total", "cash", "change", "subtotal", "sub total", "qty", "receipt", "cashier", "thank you", "come again",
             "rounding", "round off", "item", "price", "amount", "tax", "gst", "cgst", "sgst", "mrp", "discount", "bill no", "table",
             "goods sold", "net amt", "payment mode", "card", "invoice", "counter"};

@@ -194,7 +194,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 | Documents & text | Mostly text (pages, notes, printouts), or a photo of a handwritten or printed page that is recognised by its look alone (see below) | No |
 | Payment screenshots | Text: paid to, UPI transaction ID, Google Pay / PhonePe / Paytm … | Yes, if older than 3 months |
 | One-time codes | Text: OTP, verification code, "do not share", plus a 4–8 digit code | Yes, if older than 1 day |
-| Tickets & passes | Text: PNR, train no., boarding pass, gate, seat, booking ID; the travel date is read | Yes, once the date has passed by a week (or 6 months after saving if no date is found) |
+| Tickets & passes | Text: PNR, train no., boarding pass, gate, seat, booking ID; for shows and events also M-Ticket, ticket(s), venue, date & time, "booking is confirmed" (any 3 of these words); the travel or show date is read | Yes, once the date has passed by a week (or 6 months after saving if no date is found) |
 | Chat screenshots | Screenshot with chat layout and many timestamps | No |
 | Greetings & forwards | A greeting ("Good morning", "Happy Diwali" …) read on an image received in a chat | Yes, if older than a week |
 | Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp (a small sharp subject on a blurred background does not count as shaken) | Yes |
