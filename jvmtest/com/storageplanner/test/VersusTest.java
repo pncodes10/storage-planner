@@ -134,7 +134,15 @@ public final class VersusTest {
         check("a pet's face is no person; low scores count only as people seen", Mirage.people(pets) == 1 && Mirage.people(pets, AlgorithmV3.PERSON_SCORE) == 0);
 
         // faces are looked for on photos received in chats too (sorting version 6), not on flat graphics
-        for (String[] k : new String[][]{{crowd.getPath(), "wa_image", "checked"}, {crowd.getPath(), "download", "checked"}, {comic.getPath(), "wa_image", "not checked"}}) {
+        File poster = new File(dev, "elsewhere/poster.png");                               // a flat designed graphic: solid colour blocks
+        BufferedImage pi = new BufferedImage(600, 800, BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D pg = pi.createGraphics();
+        int[] cols = {0xF4D03F, 0x2E86C1, 0xFFFFFF, 0xC0392B};
+        for (int k = 0; k < 4; k++) { pg.setColor(new java.awt.Color(cols[k])); pg.fillRect(0, k * 200, 600, 200); }
+        pg.setColor(java.awt.Color.BLACK); pg.fillOval(200, 260, 200, 200);
+        pg.dispose();
+        ImageIO.write(pi, "png", poster);
+        for (String[] k : new String[][]{{crowd.getPath(), "wa_image", "checked"}, {crowd.getPath(), "download", "checked"}, {poster.getPath(), "wa_image", "not checked"}}) {
             Lab.Pic lp = new Lab.Pic(k[0], new File(k[0]).getName(), new File(k[0]).length(), now);
             lp.area = k[1];
             List<String> cl = new ArrayList<String>();
