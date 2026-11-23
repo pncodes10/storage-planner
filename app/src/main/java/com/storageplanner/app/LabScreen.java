@@ -586,8 +586,19 @@ public final class LabScreen extends Screen {
         write(u, dst, size);
         long taken = exifTime(dst);
         Lab.Pic p = new Lab.Pic(dst.getAbsolutePath(), name, size >= 0 ? size : dst.length(), modified > 0 ? modified : taken > 0 ? taken : dst.lastModified());
+        String named = Lab.areaFromName(name);                  // WhatsApp's and the phone's screenshot names say where it came from
+        if (named != null) {
+            for (int i = 0; i < AREAS.length; i++) if (AREAS[i].equals(named)) area = i;
+            ui.post(new Runnable() {
+                public void run() {
+                    areaBtn.setText("Treat as: " + AREA_LABEL[area]);
+                    areaBtn.setContentDescription("How to treat the picture when sorting: " + AREA_LABEL[area] + ". Double tap to change.");
+                }
+            });
+        }
         p.area = AREAS[area];
-        LabLog.line(a, String.format(Locale.US, "picked %s -> %s (%d bytes, modified %d, EXIF taken %d)", name, dst.getName(), p.size, modified, taken));
+        LabLog.line(a, String.format(Locale.US, "picked %s -> %s (%d bytes, modified %d, EXIF taken %d)%s", name, dst.getName(), p.size, modified, taken,
+                named != null ? ", treated as " + named + " from its name" : ""));
         return p;
     }
 

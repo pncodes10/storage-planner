@@ -101,6 +101,10 @@ public final class LabFilesTest {
         // slot file names
         check("slot of p10.png is 10", Lab.slotOf("/x/cache/lab/p10.png") == 10 && Lab.slotOf("p0.jpg") == 0);
         check("not slot files: pic.jpg, p.jpg, p3, notes.txt", Lab.slotOf("pic.jpg") == -1 && Lab.slotOf("p.jpg") == -1 && Lab.slotOf("p3") == -1 && Lab.slotOf("notes.txt") == -1);
+        check("WhatsApp and screenshot names say how to treat a picked picture", "wa_image".equals(Lab.areaFromName("IMG-20261105-WA0007.jpg"))
+                && "wa_image".equals(Lab.areaFromName("IMG-20250101-WA0123 (1).jpeg")) && "screenshot".equals(Lab.areaFromName("Screenshot_20261101-093000.png"))
+                && "screenshot".equals(Lab.areaFromName("Screen Shot 2026-01-01 at 10.00.00.png")) && Lab.areaFromName("IMG_20261105_101010.jpg") == null
+                && Lab.areaFromName("1000301539.jpg") == null && Lab.areaFromName("IMG-2026-WA.jpg") == null && Lab.areaFromName(null) == null);
         check("slot name keeps a plain extension, else jpg", Lab.slotName(2, "JPG").equals("p2.jpg") && Lab.slotName(3, "").equals("p3.jpg")
                 && Lab.slotName(4, "../x").equals("p4.jpg") && Lab.slotName(5, "heic").equals("p5.heic") && Lab.slotName(6, "toolongext").equals("p6.jpg"));
     }

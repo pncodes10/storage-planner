@@ -54,6 +54,18 @@ public final class Lab {
         return -1;
     }
 
+    /**
+     * How to treat a picked picture, from its file name when the name says where it came from: WhatsApp's own names for
+     * received images (IMG-20261105-WA0007.jpg) and the phone's screenshot names. null when the name does not say.
+     */
+    public static String areaFromName(String name) {
+        if (name == null) return null;
+        String n = name.toLowerCase(Locale.ROOT);
+        if (n.matches("img-\\d{8}-wa\\d+.*\\.(jpe?g|webp|png)")) return "wa_image";
+        if (n.startsWith("screenshot") || n.startsWith("screen shot") || n.startsWith("screen_shot")) return "screenshot";
+        return null;
+    }
+
     /** File name of a slot's copy; the extension is kept (the decoder and the log show it) but only if it is plain letters and digits. */
     public static String slotName(int slot, String ext) {
         String e = ext == null ? "" : ext.toLowerCase(Locale.ROOT);

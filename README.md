@@ -572,6 +572,8 @@ It is in the Algorithm Lab only, for trying it on your own pictures; the scan do
   - it also lists what no rule uses yet: how many people, and things photographed only to remember them (a price tag,
   a sign, a screen).
   **Mirage verdict on each picture** does it for every picked picture.
+  A picked picture whose name says where it came from is treated that way by itself: WhatsApp's names for received
+  images (`IMG-20261105-WA0007.jpg`) as a WhatsApp image, `Screenshot_...` as a screenshot (Treat as changes with it).
 - The first run loads the model (a few seconds). Run everything leaves Mirage out because it is slow.
 
 What it did in a test on a desktop processor (4 cores), see `tools/mirage/README.md`: about 2 s per picture; text on
