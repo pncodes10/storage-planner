@@ -159,7 +159,7 @@ public final class MainActivity extends Activity {
 
     /** Rebuilds the stack above the setup screen; null = fresh start (open the Overview). Stale entries are skipped. */
     private void restoreStack(List<String> descriptors) {
-        if (descriptors == null) { push(new OverviewScreen(this)); return; }
+        if (descriptors == null) { push(new PlanScreen(this)); return; }
         for (String d : descriptors) {
             Screen s = null;
             try { s = fromDescriptor(d); } catch (Throwable ignored) {}
@@ -171,6 +171,12 @@ public final class MainActivity extends Activity {
     private Screen fromDescriptor(String d) {
         if (d == null) return null;
         if (d.equals("overview")) return new OverviewScreen(this);
+        if (d.equals("plan")) return new PlanScreen(this);
+        if (d.equals("settings")) return new SettingsScreen(this);
+        if (d.startsWith("plantype:")) {
+            String[] p = d.split(":", -1);
+            return p.length >= 3 ? new PlanTypeScreen(this, p[1], p[2].isEmpty() ? null : p[2]) : null;
+        }
         if (d.equals("list:APPS")) return ListScreen.apps(this);
         if (d.equals("list:KEPT")) return ListScreen.kept(this);
         if (d.equals("list:ACCEPTED")) return ListScreen.accepted(this);
@@ -222,7 +228,8 @@ public final class MainActivity extends Activity {
     private void showFreshOverview() {
         if (!stack.isEmpty()) top().onHide();
         while (stack.size() > 1) stack.remove(stack.size() - 1);
-        push(new OverviewScreen(this));
+        PlanStore.invalidate();
+        push(new PlanScreen(this));
     }
 
     private Screen top() { return stack.get(stack.size() - 1); }
@@ -250,6 +257,7 @@ public final class MainActivity extends Activity {
             ab.setHomeActionContentDescription("Back");
         }
         setTitle(s.title());                                   // announced by TalkBack on screen change
+        invalidateOptionsMenu();
         v.post(new Runnable() { public void run() { getWindow().getDecorView().sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED); } });
     }
 
@@ -263,8 +271,20 @@ public final class MainActivity extends Activity {
         } else super.onBackPressed();
     }
 
+    private static final int MENU_SETTINGS = 1;
+
+    @Override public boolean onCreateOptionsMenu(android.view.Menu menu) {
+        Screen t = stack.isEmpty() ? null : top();
+        if (t instanceof SetupScreen || t instanceof PlanScreen) {
+            MenuItem m = menu.add(0, MENU_SETTINGS, 0, "Settings");
+            m.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
+        }
+        return true;
+    }
+
     @Override public boolean onOptionsItemSelected(MenuItem item) {
         if (item.getItemId() == android.R.id.home) { onBackPressed(); return true; }
+        if (item.getItemId() == MENU_SETTINGS) { push(new SettingsScreen(this)); return true; }
         return super.onOptionsItemSelected(item);
     }
 
@@ -387,6 +407,7 @@ public final class MainActivity extends Activity {
 
     @Override protected void onActivityResult(int req, int res, Intent data) {
         super.onActivityResult(req, res, data);
+        if (req == TrashAction.REQ) { TrashAction.onResult(this, res == RESULT_OK); return; }
         if (req == REQ_PICK_FILES) {
             Screen z = pickingFiles;
             if (z == null && !stack.isEmpty() && (top() instanceof ZipLabScreen || top() instanceof MotionLabScreen)) z = top();   // the app was restarted meanwhile

@@ -101,7 +101,7 @@ public final class LabScreen extends Screen {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(14), dp(10), dp(14), dp(24));
         sv.addView(root);
-        Ui.add(root, Ui.text(a, "Debug tool. Pick one or more pictures, then run any algorithm the app uses. Results are the same as in a scan; "
+        Ui.add(root, Ui.text(a, "Developer tools. Pick one or more pictures, then run any algorithm the app uses. Results are the same as in a scan; "
                 + "everything is written to a log you can save and send.", 14, Ui.text2, false), 0);
 
         // videos, zips and Motion Photos have their own screens: no pictures need to be picked for them
@@ -125,6 +125,12 @@ public final class LabScreen extends Screen {
         versus.setContentDescription("Open v2 versus v3: run both sorting algorithms on your pictures and mark which one is right");
         versus.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new VersusScreen(a)); } });
         add(root, versus, 6);
+        Button classic = Ui.button(a, "Classic plan view (recommendations, swipe review, report)", false);
+        classic.setContentDescription("Open the classic plan view: recommendations by technique, swipe review, report");
+        classic.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { if (Session.hasResults()) a.push(new OverviewScreen(a)); else a.toast("Analyse your storage first."); }
+        });
+        add(root, classic, 6);
 
         Ui.add(root, Ui.heading(a, "Pictures", 17), 14);
         LinearLayout pickRow = Ui.row(a);

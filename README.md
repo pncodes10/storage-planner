@@ -42,6 +42,39 @@ Accessibility:
 
 Requirements: Android 8.0 or later (API 26+). Archiving apps while keeping their data needs Android 15. On older versions, idle apps can only be suggested for uninstall, which needs your confirmation.
 
+## Your plan: every file, by type and action (new in 1.12)
+
+The home screen shows your storage, your plan (once you have analysed) and one **Analyse my storage** button. After an
+analysis, **Your plan** opens:
+
+- **How much you can free**, with a bar for the three actions: **Delete**, **Compress** and **Keep**.
+- **By file type**: Photos & images, Videos, Music & audio, Documents, App installers (APK) and Other files, each with
+  how many files are set to delete, compress and keep. Installed apps and caches have their own row.
+- Tap a type: tabs **Delete · Compress · Keep**, and two views:
+  - **Gallery**: the files in a grid, grouped by why they are suggested (Exact duplicate, Old meme or forward,
+    Re-encode chat images...). Files to delete or compress are **ticked**; tap a file to untick it (it is then kept),
+    tap again to tick it. **All** / **None**, and **Tick all** / **Untick all** per group. Long-press to look at a file.
+    On Keep, tap **Select** to pick files and delete or compress them instead.
+  - **Cards**: one file at a time, large; swipe right (or tap the button) to confirm the tab's action, left to keep it;
+    undo with ↶. On Keep, right keeps and left deletes.
+- Every file starts with what the rules suggest (delete before compress before keep); your choices win and are kept
+  between sessions (`files/finalplan.tsv`). Earlier decisions from the classic review count as choices.
+- **Finalize plan** shows the totals and locks the plan (read-only screens with an **Edit plan** button). **Start
+  over** puts every file back to its suggestion.
+- **Move to Recycle bin** (after finalizing): moves the files to delete to the phone's Recycle bin (Android's trash,
+  Android 11+), where they stay 30 days and can be restored, after your confirmation and Android's own. **Not switched
+  on in this version**: the APK audit forbids every trash request (the file-deletion guardrail), and changing it is
+  waiting for the owner's approval. The step is built (`TrashAction`) but contains no trash request until then; the
+  button says so. Compressing is planned, not carried out, from these screens.
+
+**Settings** (menu or ⚙ on the home screen): the target, measuring compression, sorting pictures, your rules,
+**Developer mode**, and about. Developer mode shows the **Algorithm Lab** on the home screen and in Settings; the Lab
+holds every developer tool (model tests, Mirage, v2 vs v3, Try on my pictures, Video/Zip/Motion Photo labs, and the
+**classic plan view** with recommendations, swipe review and the report).
+
+`FinalPlanTest` checks the suggestions, choices, earlier decisions, compress only where possible, tabs, groups, totals
+and saving the choices.
+
 ## View files in the app
 
 Tap any file's preview, or the **View** button on its details page, to open the in-app viewer:

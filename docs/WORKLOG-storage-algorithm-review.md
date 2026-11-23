@@ -164,6 +164,27 @@ Decision: **option (a)**: the plan keeps v2's category; Mirage's findings become
 - **Lab Mirage verdict** shows the Mirage tags and three plans: today (v2, no Mirage tags), the scan now (v2 + Mirage
   tags), with Mirage (v3 + tags). The v2 vs v3 page's v3 side uses Mirage's tags too.
 
+### 3.9 Product UI: the final plan (23 Nov)
+- Home (`SetupScreen`) rebuilt: storage card with meter, permissions only while missing, plan card, one Analyse
+  button, ⚙ Settings; the Algorithm Lab only in developer mode.
+- `core/FinalPlan`: every file's suggested action (delete > compress > keep, from the unit's options), your choice
+  (`PlanStore`, `files/finalplan.tsv`), earlier kept/approved decisions as choices, compress only where an option
+  exists, totals per type and action, tab lists (unticked files stay in their tab), groups by reason. `FinalPlanTest` (21).
+- `PlanScreen` (Your plan): freed space, three-action bar, file-type rows with action chips, installed apps,
+  Finalize plan / Edit plan / Start over, Move to Recycle bin.
+- `PlanTypeScreen`: Delete / Compress / Keep tabs; Gallery (ListView rows of 3, reason headers with Tick all / Untick
+  all, ticks red for delete and blue for compress, unticked dimmed, long-press opens the viewer, Keep tab Select ->
+  Delete / Compress) and Cards (swipe, buttons, undo); read-only with a banner when finalized.
+- `SettingsScreen`: target, measure, sort pictures, Your rules, Developer mode switch, About. Settings in the action bar
+  menu on Home and Your plan. After an analysis the app opens Your plan; the classic overview is in the Lab.
+- `TrashAction`: looks files up in MediaStore and would ask Android to move them to its trash (30 days, restorable),
+  in batches of 1,000, removing moved files from the results and the plan afterwards. **Not switched on**: changing
+  the APK audit to allow `MediaStore.createTrashRequest` (from TrashAction only) was refused by the session's
+  permission check because the owner's standing rule says the file-deletion guardrail must not be loosened. The build
+  has no trash request (`request()` returns null, `enabled()` false) until the owner approves; then: allow it in
+  `tools/audit_apk.py` for `Lcom/storageplanner/app/TrashAction;` only, keep delete/write requests forbidden, and
+  call `MediaStore.createTrashRequest(cr, uris, true)` in `request()`.
+
 ---
 
 ## 4. Decisions and reasons
@@ -232,6 +253,8 @@ java -cp <out> com.storageplanner.test.MirageTagsTest
 - Never loosen the APK audit's file-deletion guardrail. Nothing in the app deletes originals; plans only suggest.
 
 ## 8. Open items and next steps
+0. **Owner decision pending**: approve changing the APK audit so "Move to Recycle bin" can use Android's trash request
+   (see 3.9). Until then the final plan cannot delete anything.
 1. Run **v2 vs v3** (New run) on ~1,000 pictures and mark the cards; if v3 wins, add a setting to use v3's category in the plan.
 2. Eyes-closed check is eager on lowered or sideways eyes (seen on the one-person WhatsApp photo).
 3. Mirage's scene words can be wrong (a night photo described as sunny); nothing decides on them yet.

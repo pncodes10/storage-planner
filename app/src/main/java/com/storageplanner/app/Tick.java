@@ -14,6 +14,8 @@ import android.view.accessibility.AccessibilityNodeInfo;
  */
 final class Tick extends View {
     private boolean checked;
+    private int color = 0xFFB3261E;
+    private String onWords = "ticked, will be deleted", offWords = "not ticked, will be kept";
     private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG), line = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final RectF box = new RectF();
@@ -31,11 +33,14 @@ final class Tick extends View {
 
     boolean isChecked() { return checked; }
 
+    /** Colour of the ticked box, and what TalkBack says for ticked / not ticked. */
+    void style(int c, String on, String off) { color = c; onWords = on; offWords = off; invalidate(); }
+
     void setChecked(boolean c) {
         if (c == checked) return;
         checked = c;
         invalidate();
-        if (android.os.Build.VERSION.SDK_INT >= 30) setStateDescription(c ? "ticked, will be deleted" : "not ticked, will be kept");
+        if (android.os.Build.VERSION.SDK_INT >= 30) setStateDescription(c ? onWords : offWords);
     }
 
     @Override protected void onMeasure(int ws, int hs) {
@@ -46,7 +51,7 @@ final class Tick extends View {
     @Override protected void onDraw(Canvas c) {
         float s = 26 * dp, cx = getWidth() / 2f, cy = getHeight() / 2f;
         box.set(cx - s / 2, cy - s / 2, cx + s / 2, cy + s / 2);
-        fill.setColor(checked ? 0xFFB3261E : 0x99000000);
+        fill.setColor(checked ? color : 0x99000000);
         c.drawRoundRect(box, 6 * dp, 6 * dp, fill);
         line.setStrokeWidth(2.5f * dp);
         c.drawRoundRect(box, 6 * dp, 6 * dp, line);
