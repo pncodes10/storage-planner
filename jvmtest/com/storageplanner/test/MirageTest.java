@@ -127,6 +127,15 @@ public final class MirageTest {
                 && "photograph".equals(Mirage.style(Mirage.read("{\"scene\":{\"style\":\"photograph\"}}")))
                 && "screenshot".equals(Mirage.style(Mirage.read("{\"scene\":{\"style\":\"screenshot\"}}")))
                 && Mirage.style(Mirage.read("{\"scene\":{\"setting\":\"indoor\"}}")) == null);
+        String[][] styles = {{"portrait", "photograph"}, {"close-up portrait", "photograph"}, {"food photography", "photograph"}, {"collage", "collage"},
+                {"comic strip", "graphic"}, {"cartoon", "graphic"}, {"graphic design", "graphic"}, {"abstract art", "graphic"}, {"poster", "graphic"},
+                {"mobile app interface", "screenshot"}, {"cozy", null}};
+        boolean stylesOk = true;
+        for (String[] st : styles) {
+            String got = Mirage.style(Mirage.read("{\"scene\":{\"style\":\"" + st[0] + "\"}}"));
+            if (st[1] == null ? got != null : !st[1].equals(got)) { stylesOk = false; System.out.println("  style " + st[0] + " -> " + got); }
+        }
+        check("style words: real photos (portrait, food photography) are photographs, drawings are graphics, collage stays a collage", stylesOk);
         Mirage.Answer ppl = Mirage.read("{\"objects\":[{\"name\":\"man\",\"bbox\":[1,1,5,5]},{\"name\":\"woman\",\"bbox\":[6,1,9,5]},"
                 + "{\"name\":\"price tag\"},{\"name\":\"manhole\"},{\"name\":\"door\"}]}");
         check("people and things photographed to remember", Mirage.people(ppl) == 2 && Mirage.reference(ppl).toString().equals("[price tag]"));
@@ -145,7 +154,7 @@ public final class MirageTest {
         ImageIO.write(di, "png", drawn);
         long now = System.currentTimeMillis(), old = now - 30L * 86400000L;
         RuleSet rules = RuleSet.defaults();
-        String[][] cases = {
+        String[][] cases = new String[][]{
             {"wa_image", "{\"scene\":{\"style\":\"graphic design\"},\"objects\":[{\"name\":\"flower\",\"score\":0.6}],"
                 + "\"text\":[{\"string\":\"Good Morning\",\"bbox\":[100,100,900,200],\"score\":0.7},{\"string\":\"Have a blessed day\",\"bbox\":[100,800,900,880],\"score\":0.6}]}"},
             {"screenshot", "{\"scene\":{\"style\":\"screenshot\"},\"objects\":[],"
@@ -154,7 +163,16 @@ public final class MirageTest {
             {"camera", "{\"scene\":{\"setting\":\"indoor\",\"style\":\"photograph\"},\"objects\":[{\"name\":\"man\",\"score\":0.78},{\"name\":\"door\",\"score\":0.57}],\"text\":[]}"},
             {"wa_image", "{\"scene\":{\"style\":\"flat vector illustration\"},\"objects\":[{\"name\":\"circle\",\"score\":0.5}],\"text\":[]}"},
         };
-        String[] want = {"SUGGEST DELETING", "SUGGEST DELETING", "KEEP", null};
+        String comic = "{\"scene\":{\"style\":\"collage\",\"background\":\"white\"},\"objects\":[{\"name\":\"man\",\"bbox\":[1,194,300,698],\"score\":0.78},"
+                + "{\"name\":\"man\",\"bbox\":[333,257,555,726],\"score\":0.71},{\"name\":\"laptop\",\"score\":0.55}],\"text\":["
+                + "{\"string\":\"1990\",\"bbox\":[100,20,250,60],\"score\":0.61},{\"string\":\"2020\",\"bbox\":[700,20,850,60],\"score\":0.6},"
+                + "{\"string\":\"WROTE LETTERS BY HAND\",\"bbox\":[20,800,320,850],\"score\":0.7},{\"string\":\"SENDS ONLY EMOJIS\",\"bbox\":[660,800,980,850],\"score\":0.64},"
+                + "{\"string\":\"EVERY SUNDAY\",\"bbox\":[20,860,320,900],\"score\":0.6},{\"string\":\"TO HIS MOTHER\",\"bbox\":[660,860,980,900],\"score\":0.6}]}";
+        String family = "{\"scene\":{\"style\":\"collage\"},\"objects\":[{\"name\":\"woman\",\"bbox\":[1,1,400,500],\"score\":0.8},"
+                + "{\"name\":\"man\",\"bbox\":[500,1,900,500],\"score\":0.8},{\"name\":\"child\",\"bbox\":[1,500,400,999],\"score\":0.7}],"
+                + "\"text\":[{\"string\":\"Goa 2024\",\"bbox\":[600,900,900,950],\"score\":0.6}]}";
+        cases = new String[][]{cases[0], cases[1], cases[2], cases[3], {"wa_image", comic}, {"wa_image", family}, {"download", comic}, {"camera", comic}};
+        String[] want = {"SUGGEST DELETING", "SUGGEST DELETING", "KEEP", null, null, null, null, null};
         for (int k = 0; k < cases.length; k++) {
             Files.write(saved.toPath(), cases[k][1].getBytes(StandardCharsets.UTF_8));
             System.setProperty("mirage", saved.getPath());
@@ -171,6 +189,12 @@ public final class MirageTest {
             if (k == 1) check("one-time code screenshot", vo.contains("category with Mirage: One-time codes") && verdictLine.contains(want[1]) && vo.contains("\"otp\""));
             if (k == 2) check("a photo of a person is kept, its text not used", verdictLine.contains("KEEP") && vo.contains("1 person"));
             if (k == 3) check("a chat image drawn as a graphic is a forward", vo.contains("category with Mirage: Graphics & images (Mirage: drawn as \"flat vector illustration\""));
+            if (k == 4) check("a comic strip from a chat (a collage with captions, drawn people) is a meme, suggested for deletion",
+                    vo.contains("category with Mirage: Graphics & images (Mirage: a collage with captions") && vo.contains("received in a chat: a meme or forward")
+                    && verdictLine.contains("SUGGEST DELETING (Memes and forwards)"));
+            if (k == 5) check("a photo collage of the family from a chat is not a meme", !vo.contains("category with Mirage: Graphics") && !verdictLine.contains("DELETING"));
+            if (k == 6) check("a comic saved in Download is a meme too", vo.contains("saved: a meme or forward") && verdictLine.contains("SUGGEST DELETING (Memes and forwards)"));
+            if (k == 7) check("a comic in the camera folder is never a meme deletion", !verdictLine.contains("DELETING") && !vo.contains("a meme or forward"));
         }
         // the gradient picture looks "accidental" to the pixel checks; Mirage reading a greeting on it overrules that
         Files.write(saved.toPath(), cases[0][1].getBytes(StandardCharsets.UTF_8));

@@ -153,6 +153,8 @@ public final class LegacyUnitBuilder {
                             f.catDate > 0 ? "Ticket for " + Report.day(f.catDate) + ", which has passed" : "Ticket saved " + Math.round(age) + " days ago"));
                 else if (c.equals(PhotoCategory.GREETING) && age > 7 && (a.startsWith("wa_") || a.equals("telegram_media")))
                     u.add(new Option("delete", Techniques.GREETINGS, s, Option.R4, true, "Greeting image received " + Math.round(age) + " days ago"));
+                else if (c.equals(PhotoCategory.GRAPHIC) && age > 7 && (a.equals("wa_image") || a.equals("telegram_media") || a.equals("download") || a.equals("pictures")))
+                    u.add(new Option("delete", Techniques.FORWARDS, s, Option.R4, true, "Meme or forwarded image, " + Math.round(age) + " days old"));   // 1.11
                 else if (c.equals(PhotoCategory.ACCIDENTAL))
                     u.add(new Option("delete", Techniques.ACCIDENTAL, s, Option.R4, true, "Almost nothing visible in this shot"));
             }

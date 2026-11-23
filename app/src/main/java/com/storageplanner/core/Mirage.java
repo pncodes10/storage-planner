@@ -134,14 +134,27 @@ public final class Mirage {
         return w;
     }
 
-    /** What Mirage's scene says about the kind of picture: "photograph", "screenshot", "graphic", or null when it did not say. */
+    /** Style words Mirage uses for real photos, and for drawn or designed pictures. */
+    static final java.util.regex.Pattern PHOTO_STYLE = java.util.regex.Pattern.compile(
+            "photo|portrait|close-up|closeup|selfie|landscape|macro|candid|snapshot|street|aerial|wide shot|wide-angle|documentary|realistic");
+    static final java.util.regex.Pattern DRAWN_STYLE = java.util.regex.Pattern.compile(
+            "illustration|cartoon|comic|drawing|drawn|sketch|painting|watercolou?r|anime|vector|clip ?art|graphic|design|poster|meme|typograph|"
+            + "abstract|minimalist|digital art|art\\b|infographic|flyer|banner|logo|icon|render|3d|pattern");
+
+    /**
+     * What Mirage's scene says about the kind of picture: "photograph", "screenshot", "graphic" (drawn or designed),
+     * "collage" (several pictures in one: a comic strip or a photo collage, it cannot tell), or null when it did not say
+     * or used words that say neither.
+     */
     public static String style(Answer a) {
         String s = null;
         for (String p : a.scene) if (p.startsWith("style ")) s = p.substring(6).toLowerCase(Locale.ROOT);
         if (s == null) return null;
         if (s.contains("screenshot") || s.contains("interface")) return "screenshot";
-        if (s.contains("photo")) return "photograph";
-        return "graphic";         // graphic design, flat vector illustration, abstract art, poster, minimalist...
+        if (s.contains("collage")) return "collage";
+        if (DRAWN_STYLE.matcher(s).find() && !s.contains("photo")) return "graphic";
+        if (PHOTO_STYLE.matcher(s).find()) return "photograph";
+        return null;
     }
 
     static final java.util.regex.Pattern PERSON = java.util.regex.Pattern.compile("\\b(man|woman|person|people|boy|girl|child|baby|kid|lady|men|women|face|bride|groom)\\b");

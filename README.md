@@ -199,7 +199,8 @@ The overview has a **Your pictures** section. It shows every category with its c
 | Greetings & forwards | A greeting ("Good morning", "Happy Diwali" …) read on an image received in a chat | Yes, if older than a week |
 | Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp (a small sharp subject on a blurred background does not count as shaken) | Yes |
 | ID documents (sensitive) | Text: Government of India (also "Government of" with the country cut off), Aadhaar, PAN, passport, licence, VID; Aadhaar and PAN number patterns; the gender written after its Indian-language word ("पुरुष / MALE"). A card held up in a photo is read when it has a face on it (see below) | **Never.** Other suggestions are removed too; only an identical extra copy may go |
-| Other screenshots, Graphics | Everything else from screenshots, downloads and chat apps | No |
+| Graphics & images | Flat, drawn or designed images (memes, posters, cartoons) that are not screenshots or camera photos; with Mirage also comics and captioned collages | Yes (new), if received in a chat or saved in Download or Pictures more than a week ago: "Old meme or forward". Never camera photos, screenshots or what you sent |
+| Other screenshots | Everything else from screenshots | No |
 
 **Browsing.**
 - Tap a category for a photo grid (newest first). It has an age filter: any, older than a month, three months or a year.
@@ -560,7 +561,12 @@ It is in the Algorithm Lab only, for trying it on your own pictures; the scan do
     icon fragments below 0.45 are dropped; other low scores are kept, they are not a reliable sign of a wrong reading),
     goes through the same text rules as Tesseract's (one-time codes, payments, tickets with their date, receipts, bills,
     greetings, ID documents);
-  - a chat image Mirage calls a drawn graphic (not a photograph), without people, is a forward (Graphics & images);
+  - a meme or forward: a picture received in a chat or saved (Download, Pictures) that Mirage calls drawn ("illustration",
+    "cartoon", "graphic design", "poster"...; people in it are drawings), or a collage with captions (8 or more words: a
+    comic strip; a photo collage of your family has little text and stays a photo), and whose text is not a ticket, bill,
+    ID... is Graphics & images, and the new built-in rule "Old meme or forward" suggests deleting it after a week.
+    Mirage's words for real photos ("portrait", "food photography", "close-up") count as photographs;
+  - a comic or drawn picture with many words is Graphics & images, not Documents & text;
   - a picture the pixel checks call an accidental shot is not one when Mirage reads its text or names something in it
     clearly (a camera photo where it sees a man becomes People, and is not suggested for deletion);
   - it also lists what no rule uses yet: how many people, and things photographed only to remember them (a price tag,

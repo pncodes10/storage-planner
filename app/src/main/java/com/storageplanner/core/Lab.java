@@ -819,9 +819,17 @@ public final class Lab {
                 if (withMirage.why == null || withMirage.why.isEmpty()) withMirage.why = "Mirage recognised " + seen + ": not an accidental shot";
             }
             String cat = withMirage.category;
-            if (chat && graphic && people == 0 && f.faces <= 0 && (PhotoCategory.PHOTO.equals(cat) || PhotoCategory.DOCUMENT.equals(cat) && vm.kind == null)) {
+            // a meme or forward: received in a chat, drawn (people in it are drawings), or a collage with captions (a comic
+            // strip; a collage of photos has little text), and its text is not a ticket, bill, ID... (those keep their kind)
+            boolean captioned = "collage".equals(style) && vm.goodWords >= MEME_WORDS;
+            boolean saved = chat || "download".equals(f.area) || "pictures".equals(f.area);     // received or saved, not your own photos
+            if (saved && vm.kind == null && (graphic || captioned) && !PhotoCategory.ID.equals(cat) && !PhotoCategory.QR.equals(cat)) {
                 withMirage.category = PhotoCategory.GRAPHIC;
-                withMirage.why = "Mirage: drawn as \"" + styleWords(a) + "\", not a photograph, received in a chat (a forward)";
+                withMirage.why = "Mirage: " + (graphic ? "drawn as \"" + styleWords(a) + "\", not a photograph" : "a collage with captions (" + vm.goodWords + " words)")
+                        + (chat ? ", received in a chat" : ", saved") + ": a meme or forward";
+            } else if (vm.kind == null && (graphic || captioned) && PhotoCategory.DOCUMENT.equals(cat) && withMirage.why != null && withMirage.why.endsWith(" words")) {
+                withMirage.category = PhotoCategory.GRAPHIC;       // lots of words, but in a drawn picture or comic, not a page of text
+                withMirage.why = "Mirage: " + (graphic ? "drawn as \"" + styleWords(a) + "\"" : "a collage with captions") + ", not a page of text";
             }
             o.line("  Mirage saw" + (style == null ? "" : " a " + style) + (people > 0 ? f(", %d %s", people, people == 1 ? "person" : "people") : ", no people")
                     + (Mirage.reference(a).isEmpty() ? "" : "; things photographed to remember? " + Mirage.join(Mirage.reference(a), ", ") + " (no rule uses this yet)")
@@ -851,6 +859,9 @@ public final class Lab {
         for (Mirage.Thing t : a.objects) if (!"text".equals(t.name) && t.score >= 0.5) return "a " + t.name;
         return null;
     }
+
+    /** A collage is a comic strip or meme, not a photo collage, from this many words read confidently. */
+    static final int MEME_WORDS = 8;
 
     static String styleWords(Mirage.Answer a) {
         for (String x : a.scene) if (x.startsWith("style ")) return x.substring(6);

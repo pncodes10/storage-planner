@@ -64,6 +64,9 @@ public final class BuiltInRules {
                 .when(Tags.CATEGORY, Op.EQ, PhotoCategory.TICKET).when(Tags.DATE_IN_PICTURE, Op.IS_NO, "").when(Tags.AGE_DAYS, Op.GT, "180"));
         l.add(del("old_greeting", "Old greeting image from a chat", Techniques.GREETINGS, Option.R4, "Greeting image received {age} days ago")
                 .when(Tags.CATEGORY, Op.EQ, PhotoCategory.GREETING).when(Tags.AGE_DAYS, Op.GT, "7").when(Tags.CHAT_MEDIA, Op.IS_YES, ""));
+        // received or saved, never your own camera photos, screenshots or what you sent
+        l.add(del("old_forward", "Old meme or forward", Techniques.FORWARDS, Option.R4, "Meme or forwarded image, {age} days old")
+                .when(Tags.CATEGORY, Op.EQ, PhotoCategory.GRAPHIC).when(Tags.AGE_DAYS, Op.GT, "7").when(Tags.AREA, Op.IN, "wa_image,telegram_media,download,pictures"));
         l.add(del("accidental_shot", "Accidental shot", Techniques.ACCIDENTAL, Option.R4, "Almost nothing visible in this shot")
                 .when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL));
         // ---- last of the deletes: only when nothing else found a reason for this file
@@ -109,6 +112,7 @@ public final class BuiltInRules {
         FILE_TYPE.put("expired_ticket", Tags.IMAGE);
         FILE_TYPE.put("old_ticket_no_date", Tags.IMAGE);
         FILE_TYPE.put("old_greeting", Tags.IMAGE);
+        FILE_TYPE.put("old_forward", Tags.IMAGE);
         FILE_TYPE.put("accidental_shot", Tags.IMAGE);
         FILE_TYPE.put("installer_installed", Tags.APK);
         FILE_TYPE.put("installer_not_installed", Tags.APK);

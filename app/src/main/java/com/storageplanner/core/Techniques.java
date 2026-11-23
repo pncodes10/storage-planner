@@ -31,6 +31,7 @@ public final class Techniques {
     public static final String OLD_PAYMENTS = "Old payment screenshots";
     public static final String EXPIRED_TICKETS = "Tickets for past trips and shows";
     public static final String GREETINGS = "Greeting images from chats";
+    public static final String FORWARDS = "Memes and forwards";
     public static final String ACCIDENTAL = "Accidental shots";
     /** Deletions the user picked while browsing pictures (recorded as Review.CHOSEN + PICKED). */
     public static final String PICKED = "Pictures you picked to delete";
@@ -84,6 +85,8 @@ public final class Techniques {
             "Check each one (some are needed for refunds or expense claims), then delete it.");
         put(GREETINGS, "Good-morning, festival and other greeting images received in chats more than a week ago.",
             "Delete them in WhatsApp (Settings > Storage and data > Manage storage) or your gallery.");
+        put(FORWARDS, "Memes, comics, posters and other drawn or designed images received in chats or saved from the web more than a week ago (never your camera photos, screenshots or what you sent).",
+            "Look through them (some may be invitations or notices you want), then delete them in your gallery, or in WhatsApp (Settings > Storage and data > Manage storage).");
         put(ACCIDENTAL, "Very dark, covered or badly shaken shots, usually taken by accident.",
             "Look at each one; delete it in your gallery if nothing is in it.");
         put(BURSTS, "Photos taken within minutes of each other that look almost identical. The better one is kept: eyes open, faces visible, sharper, better lit.",
