@@ -595,7 +595,9 @@ algorithm (`AlgorithmV3`) that sorts with Mirage; it never changes v2 or the sca
 its decoder writes object names, scene words and a style freely (an 8,192-token vocabulary, up to 64 detections), so v3
 maps what it says onto the app's 15 categories: its text through the same text rules (one-time codes, payments, tickets,
 receipts, bills, chats, greetings, ID documents, documents), memes and forwards from its style (drawn, or a collage
-with captions, received or saved), no accidental shot where it clearly sees something, and the rest as v2 sorts it.
+with captions, received or saved), no accidental shot where it clearly sees something, a photo of people when it names
+a person with a score of 0.5 or more (the face detector misses small or dimly lit faces in group photos), and the rest
+as v2 sorts it.
 Both then go through your rules.
 
 Algorithm Lab > **v2 vs v3**:
@@ -607,8 +609,9 @@ Algorithm Lab > **v2 vs v3**:
 - A card shows the picture, and v2's category and suggestion on the left, v3's on the right, with why. Tap **v2 is
   right** or **v3 is right**, or swipe the card towards the side that is right (left: v2, right: v3); the next card
   comes. **Skip** when you cannot tell, **Undo** to take back the last mark.
-- Pictures where both suggest the same are counted, not shown (tick "Also show pictures where v2 and v3 suggest the
-  same" to mark those too). You can mark cards while the run goes on.
+- Pictures where both agree (the same category and the same suggestion) are counted, not shown (tick "Also show
+  pictures where v2 and v3 agree" to mark those too). A different category is a disagreement even when the
+  suggestion is the same. You can mark cards while the run goes on.
 - At the end the page shows the final score. **Save the score and marks to the Lab log** writes it, with every marked
   picture, to the log you can save or share; the first 150 pictures' full details are in the log too.
 - **New run** forgets the cards and marks and lets you pick a new number.

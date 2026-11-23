@@ -12,6 +12,8 @@ import java.util.List;
  *  - its text, cleaned up (Mirage.clean), goes through the same text rules as Tesseract's (TextRules): one-time codes,
  *    payments, tickets with their date, receipts, bills, chats, greetings, ID documents, documents;
  *  - a picture the pixel checks call accidental is not, when Mirage reads its text or clearly names something in it;
+ *  - a photo is a photo of people when Mirage names a person with a good score, even where the face detector found
+ *    no face (small, turned or dimly lit faces);
  *  - a picture received in a chat or saved (Download, Pictures) that Mirage calls drawn, or a collage with captions, and
  *    whose text is none of the kinds above, is Graphics & images (a meme or forward); a drawn picture or comic with many
  *    words is Graphics & images, not Documents & text;
@@ -24,6 +26,9 @@ public final class AlgorithmV3 {
 
     /** A collage is a comic strip or meme, not a photo collage, from this many words read confidently. */
     public static final int MEME_WORDS = 8;
+
+    /** A person Mirage names with at least this detection score makes a photo a photo of people. */
+    public static final double PERSON_SCORE = 0.5;
 
     /** v3's answer for one picture, with what it was decided from. */
     public static final class Result {
@@ -59,6 +64,13 @@ public final class AlgorithmV3 {
             c = PhotoCategory.classify(f, null, f.code, r.textUsed ? vm : null, f.faces);
             if (PhotoCategory.PHOTO.equals(c.category) && r.people > 0) c.category = PhotoCategory.PEOPLE;
             if (c.why == null || c.why.isEmpty()) c.why = "Mirage recognised " + r.recognised + ": not an accidental shot";
+        }
+        // people: the face detector misses small, turned or dimly lit faces (a group photo at night); Mirage naming a
+        // person with a good score is enough
+        int sure = Mirage.people(a, PERSON_SCORE);
+        if (PhotoCategory.PHOTO.equals(c.category) && sure > 0) {
+            c.category = PhotoCategory.PEOPLE;
+            c.why = "Mirage sees " + r.people + (r.people == 1 ? " person" : " people") + " (the face detector found no face)";
         }
         String cat = c.category;
         // a meme or forward: received in a chat or saved, drawn (people in it are drawings), or a collage with captions (a

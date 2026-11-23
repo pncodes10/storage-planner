@@ -157,15 +157,19 @@ public final class Mirage {
         return null;
     }
 
-    static final java.util.regex.Pattern PERSON = java.util.regex.Pattern.compile("\\b(man|woman|person|people|boy|girl|child|baby|kid|lady|men|women|face|bride|groom)\\b");
+    static final java.util.regex.Pattern PERSON = java.util.regex.Pattern.compile("\\b(man|woman|person|people|boy|girl|child|baby|kid|lady|men|women|bride|groom)\\b");
     static final java.util.regex.Pattern REFERENCE = java.util.regex.Pattern.compile(
             "\\b(price tag|label|sign|signboard|whiteboard|blackboard|menu|monitor|computer screen|screen|tv|television|notice|poster|parking|barcode|receipt|paper|document|card|meter)\\b");
 
-    /** People Mirage named (each entity once). */
-    public static int people(Answer a) {
+    /** People Mirage named (each box once). Not "face": Mirage names a pet's face "cat face" too. */
+    public static int people(Answer a) { return people(a, 0); }
+
+    /** People Mirage named with at least this detection score. */
+    public static int people(Answer a, double minScore) {
         java.util.Set<String> seen = new java.util.HashSet<String>();
         int n = 0;
-        for (Thing t : a.objects) if (PERSON.matcher(t.name.toLowerCase(Locale.ROOT)).find() && seen.add(t.name + "@" + java.util.Arrays.toString(t.box))) n++;
+        for (Thing t : a.objects)
+            if (PERSON.matcher(t.name.toLowerCase(Locale.ROOT)).find() && !(t.score < minScore) && seen.add(t.name + "@" + java.util.Arrays.toString(t.box))) n++;
         return n;
     }
 

@@ -186,7 +186,7 @@ public final class VersusScreen extends Screen {
         root.addView(more, ml);
 
         agreeBox = new CheckBox(a);
-        agreeBox.setText("Also show pictures where v2 and v3 suggest the same");
+        agreeBox.setText("Also show pictures where v2 and v3 agree (same category and suggestion)");
         agreeBox.setTextColor(Ui.text);
         agreeBox.setChecked(withAgreeing());
         agreeBox.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
@@ -341,7 +341,7 @@ public final class VersusScreen extends Screen {
         scoreBig.setText(String.format(Locale.US, "v2  %d   :   %d  v3", s.v2, s.v3));
         scoreBig.setContentDescription(String.format(Locale.US, "Score: v2 %d, v3 %d", s.v2, s.v3));
         String extra = s.problems > 0 ? String.format(Locale.US, " · could not compare %d", s.problems) : "";
-        scoreLine.setText(String.format(Locale.US, "%d compared · %d to mark · %d skipped · %d where both suggest the same%s",
+        scoreLine.setText(String.format(Locale.US, "%d compared · %d to mark · %d skipped · %d where both agree%s",
                 s.total, s.left, s.skipped, s.agree, extra));
     }
 
@@ -358,10 +358,10 @@ public final class VersusScreen extends Screen {
             Versus.Score s = Versus.score(cards, withAgreeing());
             String msg;
             if (cards.isEmpty()) msg = running ? "The first card comes when the first picture is compared…" : "No pictures compared yet.";
-            else if (running) msg = "All cards so far are marked. The next one comes when v2 and v3 disagree on a picture…";
+            else if (running) msg = "All cards so far are marked. The next one comes when v2 and v3 disagree on a picture (category or suggestion)…";
             else {
                 String winner = s.v2 == s.v3 ? "a tie" : s.v2 > s.v3 ? "v2 was right more often" : "v3 was right more often";
-                msg = String.format(Locale.US, "All marked. Final score: v2 %d, v3 %d (%s). %d pictures where both suggest the same, %d skipped.",
+                msg = String.format(Locale.US, "All marked. Final score: v2 %d, v3 %d (%s). %d pictures where both agree, %d skipped.",
                         s.v2, s.v3, winner, s.agree, s.skipped);
                 if (s.problems > 0) msg += String.format(Locale.US, " %d could not be compared (see the Lab log).", s.problems);
             }
@@ -394,7 +394,7 @@ public final class VersusScreen extends Screen {
         cols.addView(column(AlgorithmV3.NAME, c.v3), new LinearLayout.LayoutParams(0, -2, 1));
         LinearLayout.LayoutParams col = new LinearLayout.LayoutParams(-1, -2); col.topMargin = dp(10);
         card.addView(cols, col);
-        if (c.agree()) Ui.add(card, Ui.text(a, "Both suggest the same.", 12, Ui.text2, false), 6);
+        if (c.agree()) Ui.add(card, Ui.text(a, "Both agree: same category and suggestion.", 12, Ui.text2, false), 6);
         card.setContentDescription("Picture " + c.name + ". v2: " + PhotoCategory.label(c.v2.category) + ", " + c.v2.action + ". v3: "
                 + PhotoCategory.label(c.v3.category) + ", " + c.v3.action + ". Use the buttons below to mark which is right.");
 

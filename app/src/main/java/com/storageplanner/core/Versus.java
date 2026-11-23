@@ -12,7 +12,8 @@ import java.util.Set;
 /**
  * v2 against v3: runs both sorting algorithms (AlgorithmV3) on the same pictures, with the same rules, and keeps one
  * card per picture with each algorithm's category and the plan's suggestion; you mark which one is right. The score is
- * how many times each was right. Pictures where both suggest the same are counted as agreeing and need no mark.
+ * how many times each was right. Pictures where both give the same category and suggestion are counted as agreeing
+ * and need no mark.
  * Read-only on the phone: it decodes pictures and writes nothing but its own cards (see VersusStore in the app).
  */
 public final class Versus {
@@ -36,8 +37,8 @@ public final class Versus {
         public long ms, v3Ms;
         public int mark = NONE;
 
-        /** Both suggest the same: nothing to judge. */
-        public boolean agree() { return problem == null && v3Note == null && v2.action.equals(v3.action); }
+        /** Both give the same category and suggest the same: nothing to judge. */
+        public boolean agree() { return problem == null && v3Note == null && v2.action.equals(v3.action) && v2.category.equals(v3.category); }
 
         /** A card you are asked to mark (unless agreeing cards are shown too). */
         public boolean judgeable(boolean withAgreeing) { return problem == null && v3Note == null && (withAgreeing || !agree()); }
@@ -48,7 +49,7 @@ public final class Versus {
         public int v2, v3, skipped, agree, left, problems, total;
 
         public String line() {
-            return String.format(Locale.US, "v2 %d · v3 %d · skipped %d · both suggest the same %d · left to mark %d", v2, v3, skipped, agree, left);
+            return String.format(Locale.US, "v2 %d · v3 %d · skipped %d · both agree %d · left to mark %d", v2, v3, skipped, agree, left);
         }
     }
 

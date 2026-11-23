@@ -105,6 +105,34 @@ public final class VersusTest {
         check("with Mirage: the comic from WhatsApp is a meme for v3, deleted", j.problem == null && j.v3Note == null && "graphic".equals(j.v3.category)
                 && j.v3.action.equals("Delete — Memes and forwards") && j.v3.why.contains("a meme or forward") && j.v3.detail.contains("20 days"));
         check("v2's side is today's sorting", !j.v2.category.isEmpty() && !j.v2.action.equals(j.v3.action) && j.judgeable(false));
+        // a group photo at night: the face detector finds no face in this made-up picture, Mirage names people
+        File crowd = new File(dev, "elsewhere/crowd.jpg");
+        crowd.getParentFile().mkdirs();
+        BufferedImage ci = new BufferedImage(800, 600, BufferedImage.TYPE_INT_RGB);
+        java.util.Random rr = new java.util.Random(4);
+        for (int y = 0; y < 600; y++) for (int x = 0; x < 800; x++) {
+            int base = y < 250 ? 20 : 90 + (x / 40 % 5) * 25;                     // dark sky, a busy lit crowd below
+            int r = Math.min(255, base + rr.nextInt(60)), g = Math.min(255, base / 2 + rr.nextInt(60)), b = Math.min(255, base / 3 + rr.nextInt(60));
+            ci.setRGB(x, y, r << 16 | g << 8 | b);
+        }
+        ImageIO.write(ci, "jpg", crowd);
+        File crowdAnswer = new File(dev, "crowd.json");
+        Files.write(crowdAnswer.toPath(), ("{\"scene\":{\"setting\":\"outdoor festival\",\"time_of_day\":\"night\"},\"objects\":["
+                + "{\"name\":\"woman\",\"bbox\":[100,300,200,900],\"score\":0.71},{\"name\":\"woman\",\"bbox\":[220,300,320,900],\"score\":0.66},"
+                + "{\"name\":\"man\",\"bbox\":[700,300,800,900],\"score\":0.38},{\"name\":\"flag\",\"score\":0.36}],\"text\":[]}").getBytes(StandardCharsets.UTF_8));
+        FileItem cf = new FileItem("DCIM/Camera/crowd.jpg", crowd.getAbsolutePath(), crowd.length(), now - 2 * day);
+        cf.area = "camera";
+        System.setProperty("mirage", crowdAnswer.getPath());
+        lines.clear();
+        Versus.Card cc = Versus.judge(pf, cf, RuleSet.defaults(), now, out);
+        System.clearProperty("mirage");
+        if (a.length > 0) System.out.println(String.join("\n", lines) + "\n" + Versus.toLine(cc));
+        check("group photo: v2 finds no face, v3 sees people", "photo".equals(cc.v2.category) && "people".equals(cc.v3.category)
+                && cc.v3.why.equals("Mirage sees 3 people (the face detector found no face)"));
+        check("a different category is a disagreement even with the same suggestion", cc.v2.action.equals(cc.v3.action) && !cc.agree() && cc.judgeable(false));
+        Mirage.Answer pets = Mirage.read("{\"objects\":[{\"name\":\"cat face\",\"score\":0.8},{\"name\":\"man\",\"score\":0.3}]}");
+        check("a pet's face is no person; low scores count only as people seen", Mirage.people(pets) == 1 && Mirage.people(pets, AlgorithmV3.PERSON_SCORE) == 0);
+
         File txt = new File(dev, "elsewhere/notes.jpg");                                 // outside the phone folders the run lists
         txt.getParentFile().mkdirs();
         Files.write(txt.toPath(), "just text, not a picture".getBytes(StandardCharsets.UTF_8));
