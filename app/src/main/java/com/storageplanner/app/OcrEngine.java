@@ -65,6 +65,11 @@ final class OcrEngine {
             s.setGeolocationEnabled(false);
             s.setSaveFormData(false);
             s.setCacheMode(WebSettings.LOAD_NO_CACHE);
+            // Keep the renderer at high priority even though this WebView is never on screen, and keep its timers
+            // running; otherwise Chromium throttles it when the app goes to the background and the scan slows down.
+            web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+            web.onResume();
+            web.resumeTimers();
             web.addJavascriptInterface(new Bridge(), "Native");
             web.setWebViewClient(new WebViewClient() {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return serve(r.getUrl().toString()); }

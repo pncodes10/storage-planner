@@ -12,6 +12,7 @@ import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
+import android.os.Process;
 import android.os.SystemClock;
 
 import com.storageplanner.core.Report;
@@ -64,6 +65,8 @@ public final class AnalysisService extends Service {
     private void work(double gb, boolean measure) {
         PowerManager.WakeLock wl = null;
         AnalysisRunner.Outcome o = null;
+        // background threads get a small CPU share; ask for foreground-level scheduling for the scan
+        try { Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND); } catch (Throwable ignored) {}
         try {
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
