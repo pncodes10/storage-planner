@@ -18,6 +18,7 @@ import java.util.Locale;
 
 /** Start page: permissions, target, analyse, progress. */
 public final class SetupScreen extends Screen {
+    private TextView updateLine;
     private TextView storageLine, filesStatus, usageStatus, progressText;
     private Button filesBtn, usageBtn, analyzeBtn, cancelBtn, resultsBtn;
     private EditText targetInput;
@@ -36,7 +37,7 @@ public final class SetupScreen extends Screen {
         sv.addView(L);
 
         Ui.add(L, Ui.text(a, "Finds what is using your storage and builds a plan to reach a target, lowest-risk steps first. "
-                + "It only reads: nothing is deleted or changed, and it has no internet access.", 15, Ui.text2, false), 0);
+                + "It only reads: nothing is deleted or changed, and it never sends your data anywhere (the internet is used only to check for app updates).", 15, Ui.text2, false), 0);
         storageLine = Ui.add(L, Ui.text(a, "", 18, Ui.text, true), 16);
 
         LinearLayout perm = Ui.card(a);
@@ -104,6 +105,28 @@ public final class SetupScreen extends Screen {
         L.addView(row, rl);
         LinearLayout.LayoutParams labl = new LinearLayout.LayoutParams(-2, -2); labl.topMargin = dp(10);
         L.addView(lab, labl);
+        LinearLayout upd = Ui.card(a);
+        Ui.add(upd, Ui.heading(a, "Settings: app updates", 17), 0);
+        Ui.add(upd, Ui.text(a, "Version " + Updater.installedVersion(a) + ". The only thing this app ever sends over the internet is a request "
+                + "for the latest release on GitHub; nothing about your phone or files is sent. Updates are checked against a published "
+                + "checksum, and Android asks you before installing.", 14, Ui.text2, false), 6);
+        updateLine = Ui.add(upd, Ui.text(a, "", 15, Ui.text, false), 8);
+        updateLine.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        CheckBox autoBox = new CheckBox(a);
+        autoBox.setText("Check for updates every time the app starts");
+        autoBox.setTextColor(Ui.text);
+        autoBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        autoBox.setChecked(Updater.autoCheck(a));
+        autoBox.setMinHeight(dp(48));
+        autoBox.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(android.widget.CompoundButton b, boolean on) { Updater.setAutoCheck(a, on); }
+        });
+        upd.addView(autoBox, new LinearLayout.LayoutParams(-1, -2));
+        Button updBtn = Ui.button(a, "Check for updates", false);
+        updBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.checkForUpdates(true); } });
+        addButton(upd, updBtn, 8);
+        addCard(L, upd, 20);
+
         Ui.add(L, Ui.text(a, "Runs in the background. You can switch apps; you'll get a notification when your plan is ready.", 14, Ui.text2, false), 8);
 
         progressBar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
@@ -135,6 +158,8 @@ public final class SetupScreen extends Screen {
         AndroidPlatform pf = new AndroidPlatform(a);
         long total = pf.totalBytes(), free = pf.freeBytes();
         storageLine.setText("Used " + Report.gb(total - free) + " of " + Report.gb(total));
+        updateLine.setText(MainActivity.updateStatus);
+        updateLine.setVisibility(MainActivity.updateStatus.isEmpty() ? View.GONE : View.VISIBLE);
         boolean files = AndroidPlatform.hasFilesAccess(a), usage = AndroidPlatform.hasUsageAccess(a);
         filesStatus.setText((files ? "✓ Granted: " : "✗ Needed: ") + "all files access, to read photos, videos, downloads and WhatsApp media.");
         filesBtn.setVisibility(files ? View.GONE : View.VISIBLE);
