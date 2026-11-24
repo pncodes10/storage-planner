@@ -31,6 +31,12 @@ final class AnalysisRunner {
             AndroidPlatform pf = new AndroidPlatform(app);
             Scanner.Options opt = new Scanner.Options();
             opt.sortPictures = sortPictures(app);
+            if (boostBackground(app)) {                                    // feature flag (Setup screen): several threads
+                opt.threads = Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() - 1));
+                opt.workerInit = new Runnable() { public void run() {
+                    android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_FOREGROUND);
+                } };
+            }
             ResultStore.Saved prev = ResultFiles.load(app);               // unchanged pictures are not measured or read again
             if (prev != null) {
                 opt.previous = new java.util.HashMap<String, com.storageplanner.core.FileItem>();
@@ -74,6 +80,14 @@ final class AnalysisRunner {
             ResultFiles.setRunning(app, false);
             AnalysisState.finished(o.message, o.ok);
         }
+    }
+
+    /** Feature flag: use a thread pool for the scan and ask Android not to limit the app's battery use. Off by default. */
+    static boolean boostBackground(Context c) { return c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getBoolean("boost_background", false); }
+    static void setBoostBackground(Context c, boolean on) { c.getSharedPreferences("analysis", Context.MODE_PRIVATE).edit().putBoolean("boost_background", on).apply(); }
+    static boolean ignoringBatteryOptimizations(Context c) {
+        android.os.PowerManager pm = (android.os.PowerManager) c.getSystemService(Context.POWER_SERVICE);
+        return pm != null && pm.isIgnoringBatteryOptimizations(c.getPackageName());
     }
 
     static boolean sortPictures(Context c) { return c.getSharedPreferences("analysis", Context.MODE_PRIVATE).getBoolean("sort_pictures", true); }

@@ -51,32 +51,38 @@ final class Sorter {
         for (FileItem f : r.files) if (PhotoCategory.sortable(f)) pics.add(f);
         final Map<FileItem, ImageSignals.S> sig = new HashMap<FileItem, ImageSignals.S>();
         final Map<FileItem, double[]> aspect = new HashMap<FileItem, double[]>();
-        List<FileItem> toRead = new ArrayList<FileItem>();
-        int[] dims = new int[4];
-        for (int k = 0; k < pics.size(); k++) {
-            if (pr.cancelled()) return;
-            pr.update("Sorting pictures", k + 1, pics.size());
-            FileItem f = pics.get(k);
-            FileItem p = Scanner.same(f, opt.previous);
-            if (p != null && p.category != null && !p.textPending) {          // unchanged and fully sorted last time
-                f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces;
-                continue;
+        final List<FileItem> toRead = new ArrayList<FileItem>();
+        final List<FileItem> picList = pics;
+        final Platform fpf = pf; final Scanner.Options fopt = opt; final Scanner.Progress fpr = pr;
+        final Map<FileItem, Prep> fmeasured = measured;
+        final java.util.concurrent.atomic.AtomicInteger sorted = new java.util.concurrent.atomic.AtomicInteger();
+        Parallel.forEach(pics.size(), opt.threads, opt, pr, new Parallel.Body() {
+            public void run(int k) {
+                int[] dims = new int[4];
+                fpr.update("Sorting pictures", sorted.incrementAndGet(), picList.size());
+                FileItem f = picList.get(k);
+                FileItem p = Scanner.same(f, fopt.previous);
+                if (p != null && p.category != null && !p.textPending) {          // unchanged and fully sorted last time
+                    f.category = p.category; f.code = p.code; f.catDate = p.catDate; f.text = p.text; f.faces = p.faces;
+                    return;
+                }
+                Prep m = fmeasured == null ? null : fmeasured.get(f);
+                if (m == null) {
+                    int[] px;
+                    try { px = fpf.argb(f.abs, EDGE, dims); } catch (Throwable t) { px = null; }
+                    if (px == null) return;
+                    m = measure(fpf, f, px, dims);
+                }
+                ImageSignals.S s = m.s;
+                if (f.quality != null) f.faces = f.quality.faces;          // measured more carefully for near-identical shots
+                boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
+                PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, null, f.faces);
+                f.category = c.category; f.catDate = 0; f.text = null;
+                f.textPending = read;
+                if (read) synchronized (toRead) { toRead.add(f); sig.put(f, s); aspect.put(f, new double[]{m.aspect}); }
             }
-            Prep m = measured == null ? null : measured.get(f);
-            if (m == null) {
-                int[] px;
-                try { px = pf.argb(f.abs, EDGE, dims); } catch (Throwable t) { px = null; }
-                if (px == null) continue;
-                m = measure(pf, f, px, dims);
-            }
-            ImageSignals.S s = m.s;
-            if (f.quality != null) f.faces = f.quality.faces;          // measured more carefully for near-identical shots
-            boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
-            PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, null, f.faces);
-            f.category = c.category; f.catDate = 0; f.text = null;
-            f.textPending = read;
-            if (read) { toRead.add(f); sig.put(f, s); aspect.put(f, new double[]{m.aspect}); }
-        }
+        });
+        if (pr.cancelled()) return;
         // ---- pass 2: read text, screenshots first, then newest first, within the time limit
         Collections.sort(toRead, new Comparator<FileItem>() {
             public int compare(FileItem a, FileItem b) {
@@ -85,45 +91,81 @@ final class Sorter {
                 return Long.compare(b.mtime, a.mtime);
             }
         });
-        long t0 = System.currentTimeMillis();
-        int fails = 0;
-        for (int k = 0; k < toRead.size(); k++) {
-            if (pr.cancelled()) return;
-            if (System.currentTimeMillis() - t0 > opt.textBudgetMs) break;     // the rest stays "not read yet"
-            pr.update("Reading text in pictures", k + 1, toRead.size());
-            FileItem f = toRead.get(k);
-            TextRules.Words words = null;
-            try {
-                int[] px = pf.argb(f.abs, TEXT_EDGE, dims);
-                if (px != null) words = pf.readText(f.abs, px, dims[2], dims[3]);
-            } catch (Throwable t) { words = null; }
-            if (words == null) {
-                if (++fails >= 3 && k + 1 == fails) break;             // no reader on this phone: try again next scan
-                if (k + 1 > fails) words = new TextRules.Words();       // the reader works, this picture just gave nothing
-                else continue;
-            }
-            fails = 0;
-            ImageSignals.S s = sig.get(f);
-            TextRules.Verdict v = TextRules.classify(words, aspect.get(f)[0], s.colorful >= 15 && s.flat < 0.5, PhotoCategory.isScreenshot(f),
-                    f.area.startsWith("wa_") || "telegram_media".equals(f.area), r.now);
-            boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
-            boolean photoLike = s.colorful >= 15 && s.flat < 0.5;
-            if (v.kind == null && chat && photoLike) {
-                // greeting images use big decorative letters; the reader often sees them better on a small copy
+        final long t0 = System.currentTimeMillis();
+        if (opt.threads <= 1) {
+            int[] dims = new int[4];
+            int fails = 0;
+            for (int k = 0; k < toRead.size(); k++) {
+                if (pr.cancelled()) return;
+                if (System.currentTimeMillis() - t0 > opt.textBudgetMs) break;     // the rest stays "not read yet"
+                pr.update("Reading text in pictures", k + 1, toRead.size());
+                FileItem f = toRead.get(k);
+                TextRules.Words words = null;
                 try {
-                    int[] small = pf.argb(f.abs, GREETING_EDGE, dims);
-                    TextRules.Words w2 = small == null ? null : pf.readText(f.abs, small, dims[2], dims[3]);
-                    if (w2 != null) {
-                        TextRules.Verdict v2 = TextRules.classify(w2, aspect.get(f)[0], true, false, true, r.now);
-                        if (PhotoCategory.GREETING.equals(v2.kind)) { v = v2; words = w2; }
-                    }
-                } catch (Throwable ignored) {}
+                    int[] px = pf.argb(f.abs, TEXT_EDGE, dims);
+                    if (px != null) words = pf.readText(f.abs, px, dims[2], dims[3]);
+                } catch (Throwable t) { words = null; }
+                if (words == null) {
+                    if (++fails >= 3 && k + 1 == fails) break;             // no reader on this phone: try again next scan
+                    if (k + 1 > fails) words = new TextRules.Words();       // the reader works, this picture just gave nothing
+                    else continue;
+                }
+                fails = 0;
+                applyText(pf, r, f, words, sig.get(f), aspect.get(f)[0]);
             }
-            PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, v, f.faces);
-            f.category = c.category; f.catDate = c.date; f.textPending = false;
-            String t = TextRules.clean(words);
-            f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
+            return;
         }
+        // several pictures at once, so the text reader (which has its own workers) always has something to read
+        final java.util.concurrent.atomic.AtomicInteger readDone = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicInteger failed = new java.util.concurrent.atomic.AtomicInteger();
+        final java.util.concurrent.atomic.AtomicBoolean worked = new java.util.concurrent.atomic.AtomicBoolean();
+        final java.util.concurrent.atomic.AtomicBoolean stop = new java.util.concurrent.atomic.AtomicBoolean();
+        final Scanner.Result fr = r;
+        Parallel.forEach(toRead.size(), opt.threads, opt, pr, new Parallel.Body() {
+            public void run(int k) {
+                if (stop.get() || System.currentTimeMillis() - t0 > fopt.textBudgetMs) return;      // the rest stays "not read yet"
+                fpr.update("Reading text in pictures", readDone.incrementAndGet(), toRead.size());
+                FileItem f = toRead.get(k);
+                int[] dims = new int[4];
+                TextRules.Words words = null;
+                try {
+                    int[] px = fpf.argb(f.abs, TEXT_EDGE, dims);
+                    if (px != null) words = fpf.readText(f.abs, px, dims[2], dims[3]);
+                } catch (Throwable t) { words = null; }
+                if (words == null) {
+                    if (!worked.get()) {                                   // nothing read yet: maybe no reader on this phone
+                        if (failed.incrementAndGet() >= 3 && !worked.get()) stop.set(true);
+                        return;
+                    }
+                    words = new TextRules.Words();                          // the reader works, this picture just gave nothing
+                } else worked.set(true);
+                applyText(fpf, fr, f, words, sig.get(f), aspect.get(f)[0]);
+            }
+        });
+    }
+
+    /** Classifies a picture from the words read in it and stores the result. */
+    private static void applyText(Platform pf, Scanner.Result r, FileItem f, TextRules.Words words, ImageSignals.S s, double aspect0) {
+        int[] dims = new int[4];
+        TextRules.Verdict v = TextRules.classify(words, aspect0, s.colorful >= 15 && s.flat < 0.5, PhotoCategory.isScreenshot(f),
+                f.area.startsWith("wa_") || "telegram_media".equals(f.area), r.now);
+        boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
+        boolean photoLike = s.colorful >= 15 && s.flat < 0.5;
+        if (v.kind == null && chat && photoLike) {
+            // greeting images use big decorative letters; the reader often sees them better on a small copy
+            try {
+                int[] small = pf.argb(f.abs, GREETING_EDGE, dims);
+                TextRules.Words w2 = small == null ? null : pf.readText(f.abs, small, dims[2], dims[3]);
+                if (w2 != null) {
+                    TextRules.Verdict v2 = TextRules.classify(w2, aspect0, true, false, true, r.now);
+                    if (PhotoCategory.GREETING.equals(v2.kind)) { v = v2; words = w2; }
+                }
+            } catch (Throwable ignored) {}
+        }
+        PhotoCategory.Result c = PhotoCategory.classify(f, s, f.code, v, f.faces);
+        f.category = c.category; f.catDate = c.date; f.textPending = false;
+        String t = TextRules.clean(words);
+        f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
     }
 
     /** Faces, looked for on a small copy (People vs. other photos only needs to know there is a face). */

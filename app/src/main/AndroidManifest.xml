@@ -18,6 +18,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Only asked for when the user turns on "Faster in the background": lets the scan run without battery-saver limits -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Progress and "your plan is ready" notification (Android 13+ asks the user; the scan runs either way) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Android 10+ hides the GPS location inside photos from apps without this. The Motion Photo tool must read a

@@ -50,6 +50,10 @@ public final class Scanner {
         public boolean sortPictures = true;
         /** Time allowed for reading text in pictures in this scan; the rest is read next time. */
         public long textBudgetMs = 20 * 60 * 1000L;
+        /** Threads for the picture work (1 = one thread, the original behaviour). */
+        public int threads = 1;
+        /** Run at the start of each extra worker thread (the app sets its scheduling priority here). */
+        public Runnable workerInit;
     }
 
     public static Result scan(Platform pf, Progress pr) { return scan(pf, pr, new Options()); }
@@ -140,35 +144,41 @@ public final class Scanner {
                 if (info != null) { f.apkPackage = info[0]; try { f.apkVersion = Long.parseLong(info[1]); } catch (Exception ignored) {} }
             }
         }
-        int[] dims = new int[4];
-        Map<FileItem, Sorter.Prep> measured = new HashMap<FileItem, Sorter.Prep>();
-        for (int k = 0; k < imgs.size(); k++) {
-            if (pr.cancelled()) return r;
-            FileItem f = imgs.get(k);
-            pr.update("Analysing photos", k + 1, imgs.size());
-            if (reuse(f, opt.previous)) continue;           // unchanged since the last scan
-            // full features (hash + sharpness) only where they are used; dimensions for the rest
-            boolean needFeatures = f.area.equals("camera") || f.area.equals("wa_sent");
-            if (!needFeatures) {                       // dimensions only (for bits-per-pixel)
-                try { if (pf.imageSize(f.abs, dims)) { f.width = dims[0]; f.height = dims[1]; } } catch (Throwable ignored) {}
-                continue;
+        final Map<FileItem, Sorter.Prep> measured = new HashMap<FileItem, Sorter.Prep>();
+        final List<FileItem> imgList = imgs;
+        final Platform fpf = pf; final Options fopt = opt; final Progress fpr = pr;
+        final java.util.concurrent.atomic.AtomicInteger imgDone = new java.util.concurrent.atomic.AtomicInteger();
+        Parallel.forEach(imgs.size(), opt.threads, opt, pr, new Parallel.Body() {
+            public void run(int k) {
+                int[] dims = new int[4];
+                FileItem f = imgList.get(k);
+                fpr.update("Analysing photos", imgDone.incrementAndGet(), imgList.size());
+                if (reuse(f, fopt.previous)) return;           // unchanged since the last scan
+                // full features (hash + sharpness) only where they are used; dimensions for the rest
+                boolean needFeatures = f.area.equals("camera") || f.area.equals("wa_sent");
+                if (!needFeatures) {                       // dimensions only (for bits-per-pixel)
+                    try { if (fpf.imageSize(f.abs, dims)) { f.width = dims[0]; f.height = dims[1]; } } catch (Throwable ignored) {}
+                    return;
+                }
+                int[] l;
+                if (fopt.sortPictures && PhotoCategory.sortable(f) && !sortedBefore(f, fopt.previous)) {
+                    // one decode for both: photo features and picture sorting
+                    int[] px;
+                    try { px = fpf.argb(f.abs, Sorter.EDGE, dims); } catch (Throwable t) { px = null; }
+                    if (px == null) return;
+                    l = Sorter.luma(px);
+                    Sorter.Prep prep = Sorter.measure(fpf, f, px, dims);
+                    synchronized (measured) { measured.put(f, prep); }
+                } else {
+                    try { l = fpf.luma(f.abs, dims); } catch (Throwable t) { l = null; }
+                    if (l == null) return;
+                }
+                f.width = dims[0]; f.height = dims[1];
+                f.phash = ImageFeatures.phash(l, dims[2], dims[3]); f.hasPhash = true;
+                f.sharp = ImageFeatures.sharpness(l, dims[2], dims[3]);
             }
-            int[] l;
-            if (opt.sortPictures && PhotoCategory.sortable(f) && !sortedBefore(f, opt.previous)) {
-                // one decode for both: photo features and picture sorting
-                int[] px;
-                try { px = pf.argb(f.abs, Sorter.EDGE, dims); } catch (Throwable t) { px = null; }
-                if (px == null) continue;
-                l = Sorter.luma(px);
-                measured.put(f, Sorter.measure(pf, f, px, dims));
-            } else {
-                try { l = pf.luma(f.abs, dims); } catch (Throwable t) { l = null; }
-                if (l == null) continue;
-            }
-            f.width = dims[0]; f.height = dims[1];
-            f.phash = ImageFeatures.phash(l, dims[2], dims[3]); f.hasPhash = true;
-            f.sharp = ImageFeatures.sharpness(l, dims[2], dims[3]);
-        }
+        });
+        if (pr.cancelled()) return r;
         // ---- near-identical shots: measure which one is better (eyes open, faces, sharpness, light)
         List<FileItem> group = new ArrayList<FileItem>();
         for (List<FileItem> c : UnitBuilder.burstClusters(r.files)) group.addAll(c);

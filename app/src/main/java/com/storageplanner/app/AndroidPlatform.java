@@ -321,13 +321,21 @@ public final class AndroidPlatform implements Platform {
     private OcrEngine ocr;
     private boolean ocrFailed;
 
-    /** Reads the words in a picture with the bundled Tesseract (offline). */
-    public com.storageplanner.core.TextRules.Words readText(String path, int[] argb, int w, int h) {
+    /** Starts the reader on first use; safe to call from several threads. Null if this phone cannot run it. */
+    private synchronized OcrEngine ocrEngine() {
         if (ocrFailed) return null;
         if (ocr == null) {
-            ocr = new OcrEngine(ctx);
-            if (!ocr.start(90000)) { ocrFailed = true; android.util.Log.w("StoragePlanner", "text reader unavailable: " + ocr.error()); ocr.close(); return null; }
+            OcrEngine e = new OcrEngine(ctx);
+            if (!e.start(90000)) { ocrFailed = true; android.util.Log.w("StoragePlanner", "text reader unavailable: " + e.error()); e.close(); return null; }
+            ocr = e;
         }
+        return ocr;
+    }
+
+    /** Reads the words in a picture with the bundled Tesseract (offline). */
+    public com.storageplanner.core.TextRules.Words readText(String path, int[] argb, int w, int h) {
+        OcrEngine ocr = ocrEngine();
+        if (ocr == null) return null;
         Bitmap b = null;
         try {
             b = Bitmap.createBitmap(argb, w, h, Bitmap.Config.ARGB_8888);
@@ -342,7 +350,7 @@ public final class AndroidPlatform implements Platform {
     }
 
     /** Stops the text reader, if it was started. */
-    public void close() { if (ocr != null) { ocr.close(); ocr = null; } }
+    public synchronized void close() { if (ocr != null) { ocr.close(); ocr = null; } }
 
     public boolean video(FileItem f) {
         MediaMetadataRetriever mmr = new MediaMetadataRetriever();

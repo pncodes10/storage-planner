@@ -344,6 +344,8 @@ The Lab calls the same code as a scan (`core/Lab.java`), so its numbers are the 
 - **Back where you were.** The screen you were on (plan, a recommendation, a category, an item's details) is restored. Items that no longer exist are skipped.
 - **Interrupted scans.** If Android stops the app in the middle of a scan anyway (rare, e.g. "force stop" or a very aggressive battery saver), the start screen says: *"The last analysis was interrupted. Tap Analyse to run it again."* Earlier results stay available under **Open last results**.
 
+- **"Faster in the background" (off by default).** A checkbox on the start page. When it is on, the next scan uses several worker threads (cores minus one, 2 to 4) at foreground priority for the picture work and the text reading, and the app asks Android (system dialog, the user confirms) to stop limiting its battery use. When it is off, the scan uses one thread and never asks. The setting is stored in `analysis` preferences as `boost_background`. Android cannot remove the exemption from the app: turn it off in Settings > Battery if you want it back.
+
 ## Permissions
 
 The app also contains one private, read-only file provider. It isn't exported, and it only hands one file at a time to an app you pick under Open with or Share, through a temporary read grant.

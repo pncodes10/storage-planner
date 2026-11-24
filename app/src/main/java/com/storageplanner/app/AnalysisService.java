@@ -132,7 +132,7 @@ public final class AnalysisService extends Service {
     }
 
     /** Worker thread; at most every 500 ms. */
-    private void notifyProgress(String stage, int done, int total, boolean force) {
+    private synchronized void notifyProgress(String stage, int done, int total, boolean force) {
         long now = SystemClock.uptimeMillis();
         if (!force && now - lastNotify < 500) return;
         lastNotify = now;

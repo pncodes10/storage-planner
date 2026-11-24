@@ -83,6 +83,19 @@ public final class SetupScreen extends Screen {
             public void onCheckedChanged(android.widget.CompoundButton b, boolean on) { AnalysisRunner.setSortPictures(a, on); }
         });
         tgt.addView(sortBox, new LinearLayout.LayoutParams(-1, -2));
+        final CheckBox boostBox = new CheckBox(a);
+        boostBox.setText("Faster in the background: scan with several threads and ask Android not to limit battery use (uses more battery; applies to the next scan)");
+        boostBox.setTextColor(Ui.text);
+        boostBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        boostBox.setChecked(AnalysisRunner.boostBackground(a));
+        boostBox.setMinHeight(dp(48));
+        boostBox.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(android.widget.CompoundButton b, boolean on) {
+                AnalysisRunner.setBoostBackground(a, on);
+                if (on) a.requestBatteryExemption();
+            }
+        });
+        tgt.addView(boostBox, new LinearLayout.LayoutParams(-1, -2));
         addCard(L, tgt, 16);
 
         LinearLayout row = Ui.row(a);

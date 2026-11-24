@@ -294,6 +294,16 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** Asks Android (the user confirms in a system dialog) to stop limiting this app's background work. */
+    void requestBatteryExemption() {
+        if (AnalysisRunner.ignoringBatteryOptimizations(this)) return;
+        try {
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + getPackageName())));
+        } catch (Throwable t) {
+            openSettings(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS, false);
+        }
+    }
+
     void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
 
     // ------------------------------------------------------------------ analysis (runs in AnalysisService)
