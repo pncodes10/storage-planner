@@ -443,10 +443,15 @@ public final class AndroidPlatform implements Platform {
 
     /** Reads the words in a picture with the bundled Tesseract (offline). */
     public com.storageplanner.core.TextRules.Words readText(String path, int[] argb, int w, int h) {
-        if (ocrFailed) return null;
-        if (ocr == null) {
-            ocr = new OcrEngine(ctx);
-            if (!ocr.start(90000)) { ocrFailed = true; android.util.Log.w("StoragePlanner", "text reader unavailable: " + ocr.error()); ocr.close(); return null; }
+        OcrEngine ocr;
+        synchronized (this) {                                       // several pictures may be sent at once
+            if (ocrFailed) return null;
+            if (this.ocr == null) {
+                OcrEngine e = new OcrEngine(ctx);
+                if (!e.start(90000)) { ocrFailed = true; android.util.Log.w("StoragePlanner", "text reader unavailable: " + e.error()); e.close(); return null; }
+                this.ocr = e;
+            }
+            ocr = this.ocr;
         }
         Bitmap b = null;
         try {

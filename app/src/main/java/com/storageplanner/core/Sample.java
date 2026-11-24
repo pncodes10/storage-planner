@@ -127,11 +127,14 @@ public final class Sample {
         public final Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
         public long seed;
         public boolean newest;
+        /** When above 0: this many pictures in all, picked from every place together; the per-place counts are then ignored. */
+        public int totalCap;
 
-        public int total() { int n = 0; for (Integer v : counts.values()) n += v == null ? 0 : v; return n; }
+        public int total() { if (totalCap > 0) return totalCap; int n = 0; for (Integer v : counts.values()) n += v == null ? 0 : v; return n; }
 
         /** "100 camera photos, 20 screenshots (random)". */
         public String describe() {
+            if (totalCap > 0) return totalCap + " pictures" + (newest ? " (newest)" : " (random)");
             StringBuilder b = new StringBuilder();
             for (Map.Entry<String, Integer> e : counts.entrySet()) {
                 if (e.getValue() == null || e.getValue() <= 0) continue;
@@ -147,6 +150,17 @@ public final class Sample {
      * everything else is left out. Same files and seed give the same pictures. Keeps the order of files.
      */
     public static List<FileItem> restrict(List<FileItem> files, Limit lim) {
+        if (lim.totalCap > 0) {                                     // one number for everything: pick from all places together
+            List<FileItem> all = new ArrayList<FileItem>();
+            Set<String> places = new HashSet<String>(java.util.Arrays.asList(SOURCES));
+            for (FileItem f : files) if (places.contains(f.area) && pictureName(f.name())) all.add(f);
+            Collections.sort(all, new java.util.Comparator<FileItem>() { public int compare(FileItem x, FileItem y) { return x.rel.compareTo(y.rel); } });
+            int n = Math.min(lim.totalCap, all.size());
+            Set<FileItem> chosen = new HashSet<FileItem>(lim.newest ? newest(all, n) : pick(all, n, new Random(lim.seed)));
+            List<FileItem> out = new ArrayList<FileItem>();
+            for (FileItem f : files) if (chosen.contains(f)) out.add(f);
+            return out;
+        }
         Map<String, List<FileItem>> by = new LinkedHashMap<String, List<FileItem>>();
         for (FileItem f : files) {
             Integer n = lim.counts.get(f.area);

@@ -57,6 +57,9 @@ final class OcrEngine {
     private void create() {
         try {
             web = new WebView(ctx);
+            // the page is never on screen: without this Android drops its renderer process to background priority as soon as
+            // the app leaves the front, and text reading then crawls (this was the "slow in the background" problem)
+            if (Perf.boost(ctx) && android.os.Build.VERSION.SDK_INT >= 26) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
             WebSettings s = web.getSettings();
             s.setJavaScriptEnabled(true);                 // the reader is JavaScript + WebAssembly
             s.setAllowFileAccess(false);

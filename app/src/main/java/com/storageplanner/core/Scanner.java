@@ -58,6 +58,10 @@ public final class Scanner {
         public long mirageBudgetMs = 20 * 60 * 1000L;
         /** Analyse only some pictures (Try on my pictures); null = everything. */
         public Sample.Limit limit;
+        /** Reading text in pictures: how many pictures are sent to the reader at once (1 = one after the other). */
+        public int textThreads = 1;
+        /** Run the worker threads at the highest priority (the analysis then keeps its speed when the app is in the background). */
+        public boolean highPriority;
     }
 
     public static Result scan(Platform pf, Progress pr) { return scan(pf, pr, new Options()); }

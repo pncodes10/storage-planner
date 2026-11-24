@@ -136,16 +136,29 @@ final class Sorter {
         });
         long t0 = System.currentTimeMillis();
         int fails = 0;
+        // with opt.textThreads > 1 the next few pictures are decoded and sent to the reader ahead of time, so its workers never
+        // wait for this loop (and a slow main thread in the background no longer stalls it); the results are used in order
+        final java.util.concurrent.ExecutorService ex = opt.textThreads > 1 ? textPool(opt) : null;
+        final List<java.util.concurrent.Future<TextRules.Words>> ahead = new ArrayList<java.util.concurrent.Future<TextRules.Words>>();
+        try {
         for (int k = 0; k < toRead.size(); k++) {
             if (pr.cancelled()) return;
             if (System.currentTimeMillis() - t0 > opt.textBudgetMs) break;     // the rest stays "not read yet"
             pr.update("Reading text in pictures", k + 1, toRead.size());
             FileItem f = toRead.get(k);
             TextRules.Words words = null;
-            try {
-                int[] px = pf.argb(f.abs, TEXT_EDGE, dims);
-                if (px != null) words = pf.readText(f.abs, px, dims[2], dims[3]);
-            } catch (Throwable t) { words = null; }
+            if (ex != null) {
+                while (ahead.size() < toRead.size() && ahead.size() < k + opt.textThreads) {
+                    final FileItem g = toRead.get(ahead.size());
+                    ahead.add(ex.submit(new java.util.concurrent.Callable<TextRules.Words>() {
+                        public TextRules.Words call() { return readFirst(pf, g); }
+                    }));
+                }
+                try { words = ahead.get(k).get(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                catch (Exception e) { words = null; }
+            } else {
+                words = readFirst(pf, f);
+            }
             if (words == null) {
                 if (++fails >= 3 && k + 1 == fails) break;             // no reader on this phone: try again next scan
                 if (k + 1 > fails) words = new TextRules.Words();       // the reader works, this picture just gave nothing
@@ -173,8 +186,29 @@ final class Sorter {
             String t = TextRules.clean(words);
             f.text = PhotoCategory.ID.equals(c.category) || t.isEmpty() ? null : t.length() > MAX_TEXT ? t.substring(0, MAX_TEXT) : t;
         }
+        } finally { if (ex != null) ex.shutdownNow(); }
         scenes(pf, pr, pics, opt);
         mirage(pf, pr, pics, opt, r.now);
+    }
+
+    /** Decodes one picture and reads its text; null when it cannot be decoded or there is no reader. */
+    private static TextRules.Words readFirst(Platform pf, FileItem f) {
+        try {
+            int[] d = new int[4];
+            int[] px = pf.argb(f.abs, TEXT_EDGE, d);
+            return px == null ? null : pf.readText(f.abs, px, d[2], d[3]);
+        } catch (Throwable t) { return null; }
+    }
+
+    private static java.util.concurrent.ExecutorService textPool(final Scanner.Options opt) {
+        return java.util.concurrent.Executors.newFixedThreadPool(opt.textThreads, new java.util.concurrent.ThreadFactory() {
+            int n;
+            public Thread newThread(Runnable r) {
+                Thread t = new Thread(r, "text-" + (n++));
+                if (opt.highPriority) t.setPriority(Thread.MAX_PRIORITY);
+                return t;
+            }
+        });
     }
 
     /** Whether Mirage looks at this picture in a scan: every sorted picture (photos, screenshots, chats, downloads...). */
@@ -271,6 +305,7 @@ final class Sorter {
                     }
                 }
             }, "scene-" + k);
+            if (opt.highPriority) ts[k].setPriority(Thread.MAX_PRIORITY);
             ts[k].start();
         }
         for (Thread t : ts) try { t.join(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }

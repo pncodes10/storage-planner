@@ -27,15 +27,24 @@ final class AnalysisRunner {
     static Outcome run(final Context app, double targetGb, boolean measure, Scanner.Progress pr) { return run(app, targetGb, measure, false, pr); }
 
     /** sample: analyse only the pictures picked on Try on my pictures (SampleScreen.limit), not the whole phone. */
-    static Outcome run(final Context app, double targetGb, boolean measure, boolean sample, Scanner.Progress pr) {
+    static Outcome run(final Context app, double targetGb, boolean measure, boolean sample, Scanner.Progress pr0) {
+        Scanner.Progress pr = pr0;
         Outcome o = new Outcome();
         ResultFiles.setRunning(app, true);
         try {
             AndroidPlatform pf = new AndroidPlatform(app);
             Scanner.Options opt = new Scanner.Options();
             opt.sortPictures = sortPictures(app);
+            Perf.apply(app, opt);
+            final Perf.Timer timer = new Perf.Timer();
+            final Scanner.Progress inner = pr;
+            pr = new Scanner.Progress() {
+                public void update(String stage, int done, int total) { timer.tick(stage, done, total); inner.update(stage, done, total); }
+                public boolean cancelled() { return inner.cancelled(); }
+            };
             if (sample) { opt.limit = SampleScreen.limit(app); opt.sortPictures = true; }
-            ResultStore.Saved prev = ResultFiles.load(app);               // unchanged pictures are not measured or read again
+            // a limited run on Try on my pictures starts from scratch: timing it against saved results would measure nothing
+            ResultStore.Saved prev = sample ? null : ResultFiles.load(app);               // unchanged pictures are not measured or read again
             if (prev != null) {
                 opt.previous = new java.util.HashMap<String, com.storageplanner.core.FileItem>();
                 for (com.storageplanner.core.FileItem f : prev.result.files) opt.previous.put(f.rel, f);
@@ -74,6 +83,10 @@ final class AnalysisRunner {
             o.saved = saved[0];
             o.message = r.sample != null ? "Done: " + r.files.size() + " pictures analysed (" + r.sample + ")."
                     : "Done: " + r.files.size() + " files and " + r.apps.size() + " apps analysed.";
+            String timing = timer.finish(opt.highPriority);
+            o.message += "\n" + timing;
+            app.getSharedPreferences("perf", Context.MODE_PRIVATE).edit().putString("last_timing", timing).apply();
+            LabLog.line(app, "\n--- " + LabLog.now() + "  Analysis timing (" + r.files.size() + " pictures)\n" + timing);
             return o;
         } catch (Throwable t) {
             o.message = "Analysis failed: " + t;
