@@ -26,3 +26,19 @@ Finding: every stage is slower in the background, including plain-Java ones, so 
 app far less CPU (Samsung power management), not only the WebView. Speed-ups (renderer priority, thread priority, 4 pictures
 to the text reader at once) cut the background run by 40%, but it is still ~4x slower than the foreground.
 Run 3 is not a clean foreground run; a clean foreground run with speed-ups ON is still to do.
+
+## Round 2: version 1.9.2 (parallel stages, more text-reader workers, battery exemption)
+Installed through the app's own updater (1.9.1 -> 1.9.2). Same 100 pictures.
+
+| Run | What | App | Total | Out of sight |
+|---|---|---|---|---|
+| 5b | parallel, speed-ups ON | foreground | **173.5 s** | 0% |
+| 6 | parallel, speed-ups ON, battery exemption not confirmed (found granted afterwards) | background | **976 s** | 96% |
+| 7 | parallel, speed-ups ON, battery exemption confirmed ON | background | **1,050 s** | 100% |
+
+Stage seconds (fg OFF 1.9.1 -> fg parallel 1.9.2): analysing photos 26 -> 9, comparing similar 10 -> 3, sorting 11 -> 3,
+text reading 92 -> 43, Mirage 98 -> 98 (single-threaded engine).
+In the background the parallel stages still run 5-10x slower than in the foreground; Mirage (414-590 s) and text reading
+(178-418 s) are most of the time. The battery exemption made no measurable difference (run 7 vs run 6).
+Caveats: one run each; the phone's battery fell from 70% to about 23% across the session (power saving or heat could add
+throttling); run 6 had short foreground touches (4%).
