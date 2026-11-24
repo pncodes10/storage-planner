@@ -41,6 +41,9 @@ public final class SampleScreen extends Screen {
     private static final int SHOW_MAX = 400;           // pictures listed on screen; the log has all of them
 
     private final EditText[] boxes = new EditText[Sample.SOURCES.length];
+    private EditText totalBox;
+    private CheckBox boostBox;
+    private TextView timing;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler ui = new Handler(Looper.getMainLooper());
     private volatile boolean busy, stop;
@@ -72,6 +75,35 @@ public final class SampleScreen extends Screen {
                 + "to keep bursts together. Reading text takes a few seconds per picture, so 1,000 pictures can take over half an hour.", 13, Ui.text2, false), 6);
 
         SharedPreferences p = prefs();
+        LinearLayout trow = Ui.row(a);
+        trow.addView(Ui.text(a, "Total pictures to analyse (all places together; 0 = use the numbers below)", 15, Ui.text, true), new LinearLayout.LayoutParams(0, -2, 1));
+        totalBox = new EditText(a);
+        totalBox.setInputType(InputType.TYPE_CLASS_NUMBER);
+        totalBox.setText(String.valueOf(p.getInt("total", 0)));
+        totalBox.setSelectAllOnFocus(true);
+        totalBox.setTextColor(Ui.text);
+        totalBox.setGravity(android.view.Gravity.END);
+        totalBox.setContentDescription("Total number of pictures to analyse");
+        trow.addView(totalBox, new LinearLayout.LayoutParams(dp(110), -2));
+        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(-1, -2); tl.topMargin = dp(8); tl.bottomMargin = dp(8);
+        root.addView(trow, tl);
+        boostBox = new CheckBox(a);
+        boostBox.setText("Speed-ups on (keeps the speed when the app is in the background). Switch off to compare with the old behaviour.");
+        boostBox.setTextColor(Ui.text);
+        boostBox.setChecked(Perf.boost(a));
+        boostBox.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(android.widget.CompoundButton b, boolean on) { Perf.setBoost(a, on); }
+        });
+        root.addView(boostBox, new LinearLayout.LayoutParams(-1, -2));
+        final Button battery = Ui.button(a, Perf.batteryExempt(a) ? "Battery: no limits for this app (on)" : "Allow background speed (battery limits off)", false);
+        battery.setContentDescription("Ask Android to stop limiting this app's speed in the background");
+        battery.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { Perf.askBatteryExemption(a); } });
+        LinearLayout.LayoutParams bt = new LinearLayout.LayoutParams(-1, -2); bt.topMargin = dp(6);
+        root.addView(battery, bt);
+        timing = Ui.text(a, Perf.lastTiming(a).isEmpty() ? "" : "Last run: " + Perf.lastTiming(a), 12, Ui.text2, false);
+        timing.setTypeface(Typeface.MONOSPACE);
+        timing.setTextIsSelectable(true);
+        Ui.add(root, timing, 4);
         for (int i = 0; i < Sample.SOURCES.length; i++) {
             String area = Sample.SOURCES[i];
             LinearLayout row = Ui.row(a);
@@ -179,7 +211,12 @@ public final class SampleScreen extends Screen {
             ed.putInt(Sample.SOURCES[i], n);
             total += n;
         }
-        if (total == 0) { a.toast("Type a number for at least one place."); return null; }
+        int cap;
+        try { cap = Integer.parseInt(totalBox.getText().toString().replace(",", "").trim()); } catch (NumberFormatException e) { cap = 0; }
+        cap = Math.max(0, Math.min(Sample.MAX_EACH, cap));
+        totalBox.setText(String.valueOf(cap));
+        ed.putInt("total", cap);
+        if (total == 0 && cap == 0) { a.toast("Type how many pictures to analyse."); return null; }
         long seed = sameBox.isChecked() ? prefs().getLong("seed", System.currentTimeMillis()) : System.currentTimeMillis();
         ed.putLong("seed", seed).putBoolean("newest", newestBox.isChecked()).commit();       // the analysis reads them right away
         sameBox.setEnabled(true);
@@ -191,6 +228,7 @@ public final class SampleScreen extends Screen {
         SharedPreferences p = c.getSharedPreferences(PREFS, 0);
         Sample.Limit l = new Sample.Limit();
         for (String area : Sample.SOURCES) l.counts.put(area, p.getInt(area, 0));
+        l.totalCap = p.getInt("total", 0);
         l.seed = p.getLong("seed", 1);
         l.newest = p.getBoolean("newest", false);
         return l;
@@ -213,6 +251,8 @@ public final class SampleScreen extends Screen {
         if (busy) return;
         final Map<String, Integer> want = readCounts();
         if (want == null) return;
+        int perPlace = 0; for (Integer n : want.values()) perPlace += n;
+        if (perPlace == 0) { a.toast("Lab check uses the per-place numbers: type one for at least one place."); return; }
         final long seed = prefs().getLong("seed", System.currentTimeMillis());
         busy = true; stop = false;
         runBtn.setEnabled(false); labBtn.setEnabled(false); stopBtn.setEnabled(true);

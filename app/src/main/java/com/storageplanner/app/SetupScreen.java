@@ -3,7 +3,9 @@ package com.storageplanner.app;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.View;
+import android.util.TypedValue;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
@@ -17,6 +19,7 @@ import com.storageplanner.core.Report;
  * while missing. Settings hold the target and the other options; developer mode adds the Algorithm Lab here.
  */
 public final class SetupScreen extends Screen {
+    private TextView updateLine;
     private LinearLayout L, permCard, planCard, devBox;
     private TextView usedLine, freeLine, filesStatus, usageStatus, progressText;
     private Button filesBtn, usageBtn, analyzeBtn, cancelBtn;
@@ -85,6 +88,30 @@ public final class SetupScreen extends Screen {
         row.addView(cancelBtn, cl);
         LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(-1, -2); rl.topMargin = dp(22);
         L.addView(row, rl);
+        LinearLayout upd = Ui.card(a);
+        Ui.add(upd, Ui.heading(a, "Settings: app updates", 17), 0);
+        Ui.add(upd, Ui.text(a, "Version " + Updater.installedVersion(a) + ". The only thing this app ever sends over the internet is a request "
+                + "for the latest release on GitHub; nothing about your phone or files is sent. Updates are checked against a published "
+                + "checksum, and Android asks you before installing.", 14, Ui.text2, false), 6);
+        updateLine = Ui.add(upd, Ui.text(a, "", 15, Ui.text, false), 8);
+        updateLine.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        CheckBox autoBox = new CheckBox(a);
+        autoBox.setText("Check for updates every time the app starts");
+        autoBox.setTextColor(Ui.text);
+        autoBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        autoBox.setChecked(Updater.autoCheck(a));
+        autoBox.setMinHeight(dp(48));
+        autoBox.setOnCheckedChangeListener(new android.widget.CompoundButton.OnCheckedChangeListener() {
+            public void onCheckedChanged(android.widget.CompoundButton b, boolean on) { Updater.setAutoCheck(a, on); }
+        });
+        upd.addView(autoBox, new LinearLayout.LayoutParams(-1, -2));
+        Button updBtn = Ui.button(a, "Check for updates", false);
+        updBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.checkForUpdates(true); } });
+        LinearLayout.LayoutParams ub = new LinearLayout.LayoutParams(-1, dp(48)); ub.topMargin = dp(8);
+        upd.addView(updBtn, ub);
+        LinearLayout.LayoutParams uc = new LinearLayout.LayoutParams(-1, -2); uc.topMargin = dp(20);
+        L.addView(upd, uc);
+
         progressBar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
         progressBar.setVisibility(View.GONE);
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(-1, -2); pl.topMargin = dp(12);
@@ -118,6 +145,8 @@ public final class SetupScreen extends Screen {
         long total = pf.totalBytes(), free = pf.freeBytes(), used = total - free;
         usedLine.setText(Report.gb(used) + " used");
         freeLine.setText("of " + Report.gb(total) + " · " + Report.gb(free) + " free");
+        updateLine.setText(MainActivity.updateStatus);
+        updateLine.setVisibility(MainActivity.updateStatus.isEmpty() ? View.GONE : View.VISIBLE);
         boolean running = AnalysisState.running, loading = ResultFiles.loading;
         boolean results = Session.hasResults() && !running && !loading;
         FinalPlan.Totals t = results ? FinalPlan.totals(PlanStore.entries(a), null) : null;

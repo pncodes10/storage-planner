@@ -20,12 +20,18 @@ import java.io.IOException;
  * the user picked, through a temporary per-URI read grant. Only regular files inside shared storage
  * are served; there is no write, insert, update or delete.
  * URI form: content://com.storageplanner.files/f/<path relative to shared storage>
+ * Plus the one verified update installer the Updater has just downloaded: content://com.storageplanner.files/u/update.apk
  */
 public final class FileAccessProvider extends ContentProvider {
     public static final String AUTHORITY = "com.storageplanner.files";
 
     public static Uri uriFor(FileItem f) {
         return new Uri.Builder().scheme("content").authority(AUTHORITY).appendPath("f").appendEncodedPath(encode(f.rel)).build();
+    }
+
+    /** The downloaded update installer (app-private cache), served so the system installer can read it. */
+    public static Uri updateUri(String name) {
+        return new Uri.Builder().scheme("content").authority(AUTHORITY).appendPath("u").appendPath(name).build();
     }
 
     private static String encode(String rel) {
@@ -38,6 +44,11 @@ public final class FileAccessProvider extends ContentProvider {
 
     private File resolve(Uri uri) throws FileNotFoundException {
         java.util.List<String> seg = uri.getPathSegments();
+        if (seg.size() == 2 && "u".equals(seg.get(0)) && "update.apk".equals(seg.get(1))) {
+            File f = new File(Updater.dir(getContext()), "update.apk");
+            if (!f.isFile()) throw new FileNotFoundException("no update");
+            return f;
+        }
         if (seg.size() < 2 || !"f".equals(seg.get(0))) throw new FileNotFoundException("bad uri");
         StringBuilder rel = new StringBuilder();
         for (int i = 1; i < seg.size(); i++) { if (i > 1) rel.append('/'); rel.append(seg.get(i)); }

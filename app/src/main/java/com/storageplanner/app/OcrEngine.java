@@ -29,7 +29,6 @@ import java.util.concurrent.TimeUnit;
  */
 final class OcrEngine {
     static final String ORIGIN = "https://appassets.androidplatform.net";
-    private static final int WORKERS = Math.max(1, Math.min(3, Runtime.getRuntime().availableProcessors() / 3));
 
     private final Context ctx;
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -57,6 +56,9 @@ final class OcrEngine {
     private void create() {
         try {
             web = new WebView(ctx);
+            // the page is never on screen: without this Android drops its renderer process to background priority as soon as
+            // the app leaves the front, and text reading then crawls (this was the "slow in the background" problem)
+            if (Perf.boost(ctx) && android.os.Build.VERSION.SDK_INT >= 26) web.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
             WebSettings s = web.getSettings();
             s.setJavaScriptEnabled(true);                 // the reader is JavaScript + WebAssembly
             s.setAllowFileAccess(false);
@@ -69,7 +71,7 @@ final class OcrEngine {
             web.setWebViewClient(new WebViewClient() {
                 @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return serve(r.getUrl().toString()); }
                 @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return true; }   // never navigate
-                @Override public void onPageFinished(WebView v, String url) { v.evaluateJavascript("start(" + WORKERS + ")", null); }
+                @Override public void onPageFinished(WebView v, String url) { v.evaluateJavascript("start(" + Perf.ocrWorkers(ctx) + ")", null); }
             });
             web.loadUrl(ORIGIN + "/ocr/ocr.html");
         } catch (Throwable t) {

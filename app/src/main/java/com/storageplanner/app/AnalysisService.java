@@ -66,6 +66,7 @@ public final class AnalysisService extends Service {
         PowerManager.WakeLock wl = null;
         AnalysisRunner.Outcome o = null;
         try {
+            Perf.raiseThread(getApplicationContext());
             PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
                 wl = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "StoragePlanner:analysis");

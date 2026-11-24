@@ -173,6 +173,30 @@ public final class SampleTest {
         java.util.Set<String> got = new java.util.HashSet<String>();
         for (FileItem f : nw.files) if (f.area.equals("camera")) got.add(f.rel);
         check("limited analyse: newest takes the 5 newest camera photos", got.equals(want) && nw.sample.endsWith("(newest)"));
+        // one total for all places together
+        Sample.Limit tot = new Sample.Limit();
+        tot.totalCap = 6; tot.seed = 3;
+        Scanner.Options topt = new Scanner.Options();
+        topt.limit = tot;
+        Scanner.Result t1 = Scanner.scan(pf, quiet, topt), t2 = Scanner.scan(pf, quiet, topt);
+        boolean tsame = t1.files.size() == t2.files.size();
+        for (int i = 0; tsame && i < t1.files.size(); i++) tsame = t1.files.get(i).rel.equals(t2.files.get(i).rel);
+        check("total of 6: exactly 6 pictures, the same ones every time, described as such", t1.files.size() == 6 && tsame && "6 pictures (random)".equals(t1.sample));
+        tot.totalCap = 1000;
+        check("a total above what exists gives all the pictures", Scanner.scan(pf, quiet, topt).files.size() > 6);
+        // reading text several pictures at a time must give the same categories and text as one at a time
+        tot.totalCap = 12;
+        Scanner.Options seq = new Scanner.Options(); seq.limit = tot;
+        Scanner.Options par = new Scanner.Options(); par.limit = tot; par.textThreads = 4; par.highPriority = true; par.workers = 4;
+        Scanner.Result rs = Scanner.scan(pf, quiet, seq), rp = Scanner.scan(pf, quiet, par);
+        boolean eq = rs.files.size() == rp.files.size();
+        for (int i = 0; eq && i < rs.files.size(); i++) {
+            FileItem x = rs.files.get(i), y = rp.files.get(i);
+            eq = x.rel.equals(y.rel) && java.util.Objects.equals(x.category, y.category) && java.util.Objects.equals(x.text, y.text)
+                    && x.phash == y.phash && x.sharp == y.sharp && x.faces == y.faces && x.width == y.width && java.util.Objects.equals(x.code, y.code)
+                    && (x.signals == null) == (y.signals == null) && (x.quality == null) == (y.quality == null);
+        }
+        check("several workers give the same measurements, categories and text as one at a time", eq);
         Scanner.Result full = Scanner.scan(pf, quiet, new Scanner.Options());
         check("a full analysis is not limited", full.sample == null && full.files.size() > r.files.size());
     }

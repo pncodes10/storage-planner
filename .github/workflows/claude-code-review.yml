@@ -41,8 +41,9 @@ jobs:
             Skip style preferences and anything the diff does not touch.
 
             This project's rules (see README.md, "Layout" and "Permissions"):
-            - The app only reads. It must never delete, rename or move user files, and must never get the
-              INTERNET permission or any code that talks to the network (scripts/audit_apk.py checks this).
+            - The app only reads. It must never delete, rename or move user files. The only network code is
+              app/Updater.java (the update check against this repository's GitHub releases); nothing else may
+              use the network or send anything about the phone or its files (tools/audit_apk.py checks this).
             - Tools (app/src/main/java/com/storageplanner/tools/) only measure and decide nothing.
               Algorithms (algorithms/) read only facts/PictureFacts: never pixels, files or Android.
               core/ is pure Java with no Android imports.
