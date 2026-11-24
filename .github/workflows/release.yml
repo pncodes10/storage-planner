@@ -11,9 +11,6 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
-    # TEMPORARY (1.9.1 update test): tags cannot be pushed from the cloud session, so a push to this branch
-    # releases the version in app/build.gradle and lets GitHub create the tag. Remove after the test.
-    branches: ["ccr-18ad5068-c5r5s4"]
 
 permissions:
   contents: write
