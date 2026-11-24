@@ -11,6 +11,9 @@ name: Release
 on:
   push:
     tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    # TEMPORARY (1.9.1 update test): tags cannot be pushed from the cloud session, so a push to this branch
+    # releases the version in app/build.gradle and lets GitHub create the tag. Remove after the test.
+    branches: ["ccr-18ad5068-c5r5s4"]
 
 permissions:
   contents: write
@@ -26,7 +29,7 @@ jobs:
         run: |
           VN=$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" app/build.gradle)
           VC=$(sed -n "s/.*versionCode \([0-9]*\).*/\1/p" app/build.gradle)
-          if [ "$GITHUB_REF_NAME" != "v$VN" ]; then echo "::error::Tag $GITHUB_REF_NAME does not match versionName $VN in app/build.gradle"; exit 1; fi
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$VN" ]; then echo "::error::Tag $GITHUB_REF_NAME does not match versionName $VN in app/build.gradle"; exit 1; fi
           echo "VN=$VN" >> "$GITHUB_ENV"; echo "VC=$VC" >> "$GITHUB_ENV"
 
       - uses: actions/setup-java@v4
@@ -102,6 +105,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "v$VN" --target "$GITHUB_SHA" \
             "build/offline/$APK_NAME" "build/offline/$APK_NAME.sha256" "build/offline/${APK_NAME%.apk}.audit.json" \
-            --title "Storage Planner $VN" --generate-notes --verify-tag
+            --title "Storage Planner $VN" --generate-notes
