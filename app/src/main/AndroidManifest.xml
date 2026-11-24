@@ -26,7 +26,11 @@
     <!-- Android 10+ hides the GPS location inside photos from apps without this. The Motion Photo tool must read a
          photo's exact bytes, or its copy would silently lose the location (asked for when the Motion Photo Lab opens) -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
-    <!-- Deliberately NO internet permission: the app cannot send anything off the phone. -->
+    <!-- Only for the update check (Updater): one GET to GitHub's releases of this project, and the download of the
+         release's APK. Nothing about the phone or its files is ever sent. Can be turned off in the app. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Lets the app hand a downloaded, verified update to Android's installer (the user still confirms) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
         android:label="Storage Planner"

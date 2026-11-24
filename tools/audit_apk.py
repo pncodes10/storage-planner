@@ -33,11 +33,13 @@ expected = sorted(["android.permission.MANAGE_EXTERNAL_STORAGE", "android.permis
                    "android.permission.POST_NOTIFICATIONS", "android.permission.WAKE_LOCK",
                    # background speed: asks the user to lift Android's battery limits for the analysis (system dialog)
                    "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
-                   "android.permission.ACCESS_MEDIA_LOCATION"])
+                   "android.permission.ACCESS_MEDIA_LOCATION",
+                   # 1.9: the update check and handing the downloaded update to Android's installer (Updater only; see below)
+                   "android.permission.INTERNET", "android.permission.REQUEST_INSTALL_PACKAGES"])
 check("package / SDK", a.get_package() == "com.storageplanner" and a.get_min_sdk_version() == "26" and a.get_target_sdk_version() == "34",
       f"{a.get_package()} min {a.get_min_sdk_version()} target {a.get_target_sdk_version()} v{a.get_androidversion_name()}")
 check("permissions exactly as declared", perms == expected, ", ".join(p.split(".")[-1] for p in perms))
-check("no INTERNET permission", "android.permission.INTERNET" not in perms)
+# 1.9: INTERNET exists for one class only, checked against the dex below ("network code only in Updater")
 ANDROID = "{http://schemas.android.com/apk/res/android}"
 mx = a.get_android_manifest_xml()
 app_el = mx.find("application")
@@ -199,20 +201,34 @@ check("WebView used only by OcrEngine", all(n.startswith("Lcom/storageplanner/ap
 # Download/StoragePlanner/compressed. Originals are never deleted. Anywhere else is a failure.
 COMPRESSORS = {"Lcom/storageplanner/tools/ImageCompressor;", "Lcom/storageplanner/tools/VideoCompressor;",
                "Lcom/storageplanner/tools/ZipCompressor;", "Lcom/storageplanner/tools/MotionPhoto;"}
+# 1.9: the Updater (update check + download) is the only network code, and it manages its own downloaded file
+# (removes old ones, renames the checked download into place) in the app's private cache.
+UPDATER = {"Lcom/storageplanner/app/Updater;"}
 ALLOWED = {"deletes / renames files": {
-    "Ljava/io/File;->delete()Z": COMPRESSORS,
-    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": COMPRESSORS,
+    "Ljava/io/File;->delete()Z": COMPRESSORS | UPDATER,
+    "Ljava/io/File;->renameTo(Ljava/io/File;)Z": COMPRESSORS | UPDATER,
 }, "loads code / reflection": {
     # 1.11: the Mirage bridge (lib/arm64-v8a/libmirage.so, checked above), loaded by name from the APK only
     "Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V": {"Lcom/storageplanner/app/MirageEngine;"},
 }}
-EXCEPT = {"deletes / renames files": " (except image compression)", "loads code / reflection": " (except the Mirage bridge library)"}
+ALLOWED_ANY = {"network": UPDATER}        # any matching reference, from these classes only
+EXCEPT = {"deletes / renames files": " (except image compression and the Updater's own download)", "loads code / reflection": " (except the Mirage bridge library)", "network": " (except the Updater)"}
 for k, pat in BAD.items():
     allowed = ALLOWED.get(k, {})
+    anyok = ALLOWED_ANY.get(k, set())
     hits = [r for r in ext if re.search(pat, r)
-            and not (r in allowed and callers.get(r, set()) <= allowed[r])]
+            and not (r in allowed and callers.get(r, set()) <= allowed[r])
+            and not (anyok and callers.get(r, set()) <= anyok)]
     check(f"no code that {k}" + EXCEPT.get(k, ""), not hits,
           "; ".join(r + " from " + ", ".join(sorted(callers.get(r, ()))) for r in hits[:5]))
+net_users = sorted(set(c for r in ext if re.search(BAD["network"], r) for c in callers.get(r, ())))
+check("network code exists only in Updater (the update check)", set(net_users) <= UPDATER and net_users, ", ".join(net_users))
+# the Updater may only talk to this project's GitHub releases (the strings are in the dex)
+dex_bytes = zipfile.ZipFile(apk_path).read("classes.dex")
+urls = sorted(set(m.decode() for m in re.findall(rb"https?://[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+", dex_bytes)))
+mine = [u for u in urls if u.startswith("https://api.github.com/repos/pncodes10/storage-planner/") or u.startswith("https://github.com/pncodes10/storage-planner/")]
+others = [u for u in urls if u not in mine and not re.match(r"https?://(schemas\.android\.com|www\.w3\.org|localhost|appassets|127\.0\.0\.1)", u)]
+report["web addresses in the code"] = {"pass": True, "detail": "; ".join(mine) + (" | other (not fetched by the app): " + "; ".join(others[:8]) if others else "")}
 trash = sorted(r for r in ext if re.search(r"MediaStore;->create(Trash|Delete|Write)Request", r))
 check("no MediaStore trash / delete / write requests (the app never removes originals)", not trash, "; ".join(trash))
 writes = [r for r in ext if re.search(r"FileOutputStream;-><init>|RandomAccessFile;-><init>", r)]

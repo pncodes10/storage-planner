@@ -77,6 +77,8 @@ public final class MainActivity extends Activity {
             loadSavedResults();
         }
         setup.refresh();
+        Updater.cleanUp(this);
+        if (b == null && Updater.autoCheck(this)) checkForUpdates(false);       // on every start (not on a rotation or restore)
     }
 
     @Override protected void onResume() {
@@ -332,6 +334,65 @@ public final class MainActivity extends Activity {
             catch (Throwable t2) { toast("Open Settings and grant the permission to Storage Planner manually."); }
         }
     }
+
+    // ------------------------------------------------------------------ updates (see Updater)
+    /** Shown on the start screen's "App updates" card. */
+    static String updateStatus = "";
+
+    static void setUpdateStatus(String s) {
+        updateStatus = s;
+        MainActivity m = current;
+        if (m != null) m.setup.refresh();
+    }
+
+    /** manual = the user tapped the button: say the result even when there is nothing new or the check failed. */
+    void checkForUpdates(final boolean manual) {
+        if (Updater.busy()) { if (manual) toast("Already working on an update."); return; }
+        setUpdateStatus("Checking for updates…");
+        Updater.check(this, new Updater.CheckListener() {
+            public void done(final Updater.Release r, String error) {
+                MainActivity m = current;
+                if (m == null) return;
+                if (error != null) { setUpdateStatus(manual ? error : ""); return; }
+                if (r == null) { setUpdateStatus("You have the latest version (" + Updater.installedVersion(m) + ")."); return; }
+                setUpdateStatus("Version " + r.version + " is available.");
+                m.offerUpdate(r);
+            }
+        });
+    }
+
+    private void offerUpdate(final Updater.Release r) {
+        String msg = "Version " + r.version + " is available (you have " + Updater.installedVersion(this) + ")."
+                + (r.size > 0 ? " Download size: " + mb(r.size) + "." : "")
+                + (r.notes.isEmpty() ? "" : "\n\n" + (r.notes.length() > 600 ? r.notes.substring(0, 600) + "…" : r.notes));
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Update available")
+                .setMessage(msg)
+                .setPositiveButton("Update now", new android.content.DialogInterface.OnClickListener() {
+                    public void onClick(android.content.DialogInterface d, int w) { downloadUpdate(r); }
+                })
+                .setNegativeButton("Later", null)
+                .show();
+    }
+
+    private void downloadUpdate(final Updater.Release r) {
+        setUpdateStatus("Downloading version " + r.version + "…");
+        Updater.download(this, r, new Updater.DownloadListener() {
+            public void progress(long done, long total) {
+                setUpdateStatus("Downloading version " + r.version + ": " + (total > 0 ? (int) (done * 100 / total) + "%" : mb(done)));
+            }
+            public void done(File apk, String error) {
+                MainActivity m = current;
+                if (error != null) { setUpdateStatus(error); return; }
+                setUpdateStatus("Version " + r.version + " downloaded and verified.");
+                if (m == null) return;
+                String msg = Updater.install(m, apk);
+                if (msg != null) setUpdateStatus(msg);
+            }
+        });
+    }
+
+    private static String mb(long b) { return String.format(Locale.US, "%.1f MB", b / 1e6); }
 
     void toast(String s) { Toast.makeText(this, s, Toast.LENGTH_LONG).show(); }
 

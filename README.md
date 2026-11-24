@@ -1,10 +1,10 @@
 # Storage Planner
 
-An Android app that scans your phone and builds a plan to reach a storage target (by default 70 GB on a 128 GB phone), using the lowest-risk steps first. It runs the same algorithm as the 128 → 70 GB study. It only **reads**: nothing is deleted or changed, and it has no internet permission. The only files it writes are the report, the Lab log and the Lab's test copies, all in `Download/StoragePlanner/`.
+An Android app that scans your phone and builds a plan to reach a storage target (by default 70 GB on a 128 GB phone), using the lowest-risk steps first. It runs the same algorithm as the 128 → 70 GB study. It only **reads**: nothing is deleted or changed, and it never sends your data anywhere: its only internet use is the update check (see **App updates**). The only files it writes are the report, the Lab log and the Lab's test copies, all in `Download/StoragePlanner/`.
 
 ## Install
 
-1. Copy `StoragePlanner-1.8.1.apk` to the phone and open it. Allow "Install unknown apps" for your file manager or browser if asked. Play Protect may warn about an unknown developer; choose **Install anyway**. It installs over 1.0–1.8 as an update (same signing key); your Keep decisions are kept.
+1. Copy `StoragePlanner-1.9.0.apk` to the phone and open it. Allow "Install unknown apps" for your file manager or browser if asked. Play Protect may warn about an unknown developer; choose **Install anyway**. It installs over 1.0–1.8 as an update (same signing key); your Keep decisions are kept.
 2. Open **Storage Planner**. Then:
    - **Grant all files access.** This is needed to read photos, videos, downloads and WhatsApp media.
    - **Grant usage access** (optional). This adds app sizes, caches, and apps you haven't opened in months. If the toggle is greyed out, go to Settings → Apps → Storage Planner → ⋮ → **Allow restricted settings**, then try again.
@@ -362,7 +362,7 @@ The start screen has a switch to turn sorting off.
 with the English model from tessdata_fast. It runs in an invisible WebView that can only load files
 packed inside the app:
 - every other address gets an empty answer;
-- the app still has **no internet permission**;
+- the text reader's WebView answers every request itself and fetches nothing (the app's only network code is the update check, see **App updates**);
 - the audit checks that the reader's files are the published releases, byte for byte (pinned SHA-256 hashes);
 - only the text-reader class uses the WebView, and it loads only the bundled page.
 
@@ -718,6 +718,20 @@ scan now (v2's category with Mirage's tags) and with Mirage (v3's category and t
 - **Back where you were.** The screen you were on (plan, a recommendation, a category, an item's details) is restored. Items that no longer exist are skipped.
 - **Interrupted scans.** If Android stops the app in the middle of a scan anyway (rare, e.g. "force stop" or a very aggressive battery saver), the start screen says: *"The last analysis was interrupted. Tap Analyse to run it again."* Earlier results stay available under **Open last results**.
 
+## App updates (new in 1.9)
+
+- **On every start** the app asks GitHub for this project's latest release (`GET https://api.github.com/repos/pncodes10/storage-planner/releases/latest`). Nothing about your phone or files is sent. If the release is newer than the installed version, a dialog offers **Update now** or **Later**.
+- **Settings: app updates** on the start screen shows the installed version, a **Check for updates** button, and a switch to stop the check at start-up.
+- **Update now** downloads the release's APK (only from this project's release address), compares its SHA-256 with the `.apk.sha256` file published beside it, confirms it is this app and a higher version code, and opens Android's installer. Android itself requires the same signing key as the installed app and asks you to confirm; an app cannot install silently. The first time, Android asks you to allow Storage Planner to install apps.
+- Pre-releases and drafts are ignored. A build from CI (`1.9.0-abc1234`) is not offered the release of the same version.
+- Only `app/.../Updater.java` touches the network; `tools/audit_apk.py` fails the build if any other class does, or if it can delete or rename files outside its known places.
+
+### Making a release
+
+1. Run `tools/release.sh 1.9.1` on the main branch. It raises `versionName`/`versionCode` in `app/build.gradle` and `tools/build_offline.sh`, commits, tags `v1.9.1` and pushes the tag. (`--no-push` only commits and tags.)
+2. The **Release** workflow (`.github/workflows/release.yml`) runs on the tag: it checks the tag matches `versionName`, runs the tests, builds, signs with the repository secrets `SIGNING_KEY_PEM` / `SIGNING_CERT_DER_B64` (it fails without them: a release signed with a one-off key cannot update an installed app), audits the APK, and publishes `StoragePlanner-1.9.1.apk`, `StoragePlanner-1.9.1.apk.sha256` and the audit report as a GitHub release.
+3. Phones that have 1.9.0 or later find it at their next start. 1.8.1 and older have no update check: install 1.9.0 by hand once.
+
 ## Permissions
 
 The app also contains one private, read-only file provider. It isn't exported, and it only hands one file at a time to an app you pick under Open with or Share, through a temporary read grant.
@@ -729,7 +743,8 @@ The app also contains one private, read-only file provider. It isn't exported, a
 - **`POST_NOTIFICATIONS`** (new in 1.2, asked on Android 13+): show the progress and "plan is ready" notifications. Optional.
 - **`WAKE_LOCK`** (new in 1.2): keep the processor awake during the scan when the screen turns off (released when done, at most 60 minutes).
 - **`ACCESS_MEDIA_LOCATION`** (new with the Motion Photo Lab, asked on Android 10+ when the Lab opens): without it Android hides the GPS location inside photos from the app, so a Motion Photo copy would silently lose it. It only lets the app read the location already stored in your photos; nothing is sent anywhere. Optional: without it the Lab warns that copies may lack the location.
-- **No `INTERNET`.** The app cannot send anything off the phone.
+- **`INTERNET`** (new in 1.9): only for the update check and download (see **App updates**). The audit fails if any class other than `Updater` uses the network.
+- **`REQUEST_INSTALL_PACKAGES`** (new in 1.9): lets the app open Android's installer for a downloaded update. Android still asks you to confirm, and the first time asks you to allow Storage Planner to install apps.
 
 ## What the plan contains
 
@@ -845,6 +860,7 @@ includes them.
   - **Calibrator:** on-device measurement.
   - **Ssim:** matches scikit-image to 1e-14.
   - **MainActivity:** the UI, back stack and its restore after process death.
+  - **Updater:** the update check, checked download and hand-off to the installer (the only network code); `core/Version` compares versions (UpdateTest).
   - **AnalysisService / AnalysisRunner / AnalysisState:** the foreground service, the pipeline and the live progress the screen observes.
   - **CompressCompareScreen:** the Lab's original vs compressed view: side by side, flip, and amplified difference.
 - `app/src/main/java/com/storageplanner/tools/`: **tools** for the future action taker, never called by the planner. Today: image compression (ImageCompressor, HeifEncoder, Guard, Ssim, Exif, WebpMeta, CopyPaths). See its [README](app/src/main/java/com/storageplanner/tools/README.md).
@@ -855,6 +871,7 @@ includes them.
 - `tools/ocr_assets.sha256`, `tools/face_assets.sha256`: pinned hashes of the text-reader and face-detector files (checked by the audit).
 - `tools/facemodel/`: converts YuNet for the app, and records OpenCV's answers for FaceNetTest.
 - `tools/`:
+  - **release.sh:** bumps the version, tags `vX.Y.Z` and pushes it (starts the Release workflow).
   - **apkbuild.py:** packager and v2 signer.
   - **strip_methodparams.py:** strips an attribute old D8 can't read.
   - **audit_apk.py:** independent APK audit.
