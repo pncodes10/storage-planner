@@ -95,6 +95,11 @@ public final class SampleScreen extends Screen {
             public void onCheckedChanged(android.widget.CompoundButton b, boolean on) { Perf.setBoost(a, on); }
         });
         root.addView(boostBox, new LinearLayout.LayoutParams(-1, -2));
+        final Button battery = Ui.button(a, Perf.batteryExempt(a) ? "Battery: no limits for this app (on)" : "Allow background speed (battery limits off)", false);
+        battery.setContentDescription("Ask Android to stop limiting this app's speed in the background");
+        battery.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { Perf.askBatteryExemption(a); } });
+        LinearLayout.LayoutParams bt = new LinearLayout.LayoutParams(-1, -2); bt.topMargin = dp(6);
+        root.addView(battery, bt);
         timing = Ui.text(a, Perf.lastTiming(a).isEmpty() ? "" : "Last run: " + Perf.lastTiming(a), 12, Ui.text2, false);
         timing.setTypeface(Typeface.MONOSPACE);
         timing.setTextIsSelectable(true);

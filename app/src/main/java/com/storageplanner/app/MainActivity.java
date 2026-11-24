@@ -338,6 +338,14 @@ public final class MainActivity extends Activity {
     // ------------------------------------------------------------------ analysis (runs in AnalysisService)
     void startAnalysis(final double targetGb, final boolean measure) { startAnalysis(targetGb, measure, false); }
 
+    /** Once: Android's dialog to lift battery limits. In the background a limited app gets a fraction of the CPU. */
+    private void askBatteryOnce() {
+        android.content.SharedPreferences p = getSharedPreferences("perf", MODE_PRIVATE);
+        if (p.getBoolean("asked_battery", false) || Perf.batteryExempt(this)) return;
+        p.edit().putBoolean("asked_battery", true).apply();
+        Perf.askBatteryExemption(this);
+    }
+
     /** sample: only the pictures picked on Try on my pictures; the start screen shows the progress, the overview the plan. */
     void startAnalysis(final double targetGb, final boolean measure, final boolean sample) {
         if (!AnalysisState.begin()) return;
@@ -349,6 +357,7 @@ public final class MainActivity extends Activity {
                 .putExtra(AnalysisService.EXTRA_TARGET_GB, targetGb)
                 .putExtra(AnalysisService.EXTRA_MEASURE, measure)
                 .putExtra(AnalysisService.EXTRA_SAMPLE, sample);
+        askBatteryOnce();
         try {
             startForegroundService(i);
         } catch (Throwable t) {

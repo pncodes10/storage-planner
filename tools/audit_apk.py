@@ -31,6 +31,8 @@ expected = sorted(["android.permission.MANAGE_EXTERNAL_STORAGE", "android.permis
                    # 1.2: background analysis (foreground service) + its notification
                    "android.permission.FOREGROUND_SERVICE", "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
                    "android.permission.POST_NOTIFICATIONS", "android.permission.WAKE_LOCK",
+                   # background speed: asks the user to lift Android's battery limits for the analysis (system dialog)
+                   "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
                    "android.permission.ACCESS_MEDIA_LOCATION"])
 check("package / SDK", a.get_package() == "com.storageplanner" and a.get_min_sdk_version() == "26" and a.get_target_sdk_version() == "34",
       f"{a.get_package()} min {a.get_min_sdk_version()} target {a.get_target_sdk_version()} v{a.get_androidversion_name()}")

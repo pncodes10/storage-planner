@@ -187,14 +187,16 @@ public final class SampleTest {
         // reading text several pictures at a time must give the same categories and text as one at a time
         tot.totalCap = 12;
         Scanner.Options seq = new Scanner.Options(); seq.limit = tot;
-        Scanner.Options par = new Scanner.Options(); par.limit = tot; par.textThreads = 4; par.highPriority = true;
+        Scanner.Options par = new Scanner.Options(); par.limit = tot; par.textThreads = 4; par.highPriority = true; par.workers = 4;
         Scanner.Result rs = Scanner.scan(pf, quiet, seq), rp = Scanner.scan(pf, quiet, par);
         boolean eq = rs.files.size() == rp.files.size();
         for (int i = 0; eq && i < rs.files.size(); i++) {
             FileItem x = rs.files.get(i), y = rp.files.get(i);
-            eq = x.rel.equals(y.rel) && java.util.Objects.equals(x.category, y.category) && java.util.Objects.equals(x.text, y.text);
+            eq = x.rel.equals(y.rel) && java.util.Objects.equals(x.category, y.category) && java.util.Objects.equals(x.text, y.text)
+                    && x.phash == y.phash && x.sharp == y.sharp && x.faces == y.faces && x.width == y.width && java.util.Objects.equals(x.code, y.code)
+                    && (x.signals == null) == (y.signals == null) && (x.quality == null) == (y.quality == null);
         }
-        check("parallel text reading gives the same categories and text as one at a time", eq);
+        check("several workers give the same measurements, categories and text as one at a time", eq);
         Scanner.Result full = Scanner.scan(pf, quiet, new Scanner.Options());
         check("a full analysis is not limited", full.sample == null && full.files.size() > r.files.size());
     }

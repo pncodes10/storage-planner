@@ -28,7 +28,30 @@ final class Perf {
     static void apply(Context c, Scanner.Options opt) {
         boolean on = boost(c);
         opt.highPriority = on;
-        opt.textThreads = on ? 4 : 1;
+        opt.textThreads = on ? 6 : 1;
+        opt.workers = on ? Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors())) : 1;
+    }
+
+    /** Tesseract workers in the text reader: one per two cores, 1 to 3 (the old value is one per three cores, 1 to 3). */
+    static int ocrWorkers(Context c) {
+        int cores = Runtime.getRuntime().availableProcessors();
+        return boost(c) ? Math.max(1, Math.min(3, cores / 2)) : Math.max(1, Math.min(3, cores / 3));
+    }
+
+    // ---- battery optimisation: while the app is in the background Samsung and Android give a restricted app little CPU
+    static boolean batteryExempt(Context c) {
+        try { return ((android.os.PowerManager) c.getSystemService(Context.POWER_SERVICE)).isIgnoringBatteryOptimizations(c.getPackageName()); }
+        catch (Throwable t) { return true; }
+    }
+
+    /** Opens Android's own "Allow Storage Planner to run in the background without limits?" dialog (the user decides). */
+    static void askBatteryExemption(android.app.Activity a) {
+        try {
+            a.startActivity(new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:" + a.getPackageName())));
+        } catch (Throwable t) {
+            try { a.startActivity(new android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)); } catch (Throwable ignored) {}
+        }
     }
 
     /** Raises the calling thread's priority when the boost is on (worker threads started from it inherit it). */

@@ -82,20 +82,18 @@ final class Sorter {
     static void sort(Platform pf, Scanner.Progress pr, Scanner.Result r, Scanner.Options opt, Map<FileItem, Prep> measured) {
         List<FileItem> pics = new ArrayList<FileItem>();
         for (FileItem f : r.files) if (PhotoCategory.sortable(f)) pics.add(f);
-        final Map<FileItem, ImageSignals.S> sig = new HashMap<FileItem, ImageSignals.S>();
-        final Map<FileItem, double[]> aspect = new HashMap<FileItem, double[]>();
-        List<FileItem> toRead = new ArrayList<FileItem>();
-        int[] dims = new int[4];
-        for (int k = 0; k < pics.size(); k++) {
-            if (pr.cancelled()) return;
-            pr.update("Sorting pictures", k + 1, pics.size());
-            FileItem f = pics.get(k);
+        final Map<FileItem, ImageSignals.S> sig = java.util.Collections.synchronizedMap(new HashMap<FileItem, ImageSignals.S>());
+        final Map<FileItem, double[]> aspect = java.util.Collections.synchronizedMap(new HashMap<FileItem, double[]>());
+        final List<FileItem> toRead = java.util.Collections.synchronizedList(new ArrayList<FileItem>());
+        final List<FileItem> picList = pics;
+        if (!Par.forEach(picList.size(), opt.workers, opt.highPriority, pr, "Sorting pictures", new Par.Body() { public void run(int k, int[] dims) {
+            FileItem f = picList.get(k);
             FileItem p = Scanner.same(f, opt.previous);
             if (p != null && p.sceneVersion == SCENE_VERSION) { f.scene = p.scene; f.aesthetic = p.aesthetic; f.sceneVersion = p.sceneVersion; }
             if (p != null && p.mirageVersion == AlgorithmV3.VERSION && p.sortVersion >= VERSION) copyMirage(p, f);   // v3 builds on this sorting
             if (current(p)) {                                                  // unchanged and fully sorted last time, by the current rules
                 copyOver(p, f);
-                continue;
+                return;
             }
             Prep m = measured == null ? null : measured.get(f);
             if (m == null) {
@@ -103,7 +101,7 @@ final class Sorter {
                 try { px = pf.argb(f.abs, EDGE, dims); } catch (Throwable t) { px = null; }
                 if (px == null) {                                          // cannot be decoded now: keep what the older sort found
                     if (p != null && p.category != null) copyOver(p, f);
-                    continue;
+                    return;
                 }
                 m = measure(pf, f, px, dims);
             }
@@ -117,7 +115,7 @@ final class Sorter {
                 float fs = f.faceSize;
                 copyOver(p, f);
                 f.signals = s; f.sortVersion = VERSION; f.eyeFaces = ef; f.eyesOpen = eo; f.smiling = sm; f.looking = lk; f.faceSize = fs;
-                continue;
+                return;
             }
             boolean read = PhotoCategory.worthReading(f, s);           // a receipt or ticket can carry a code too
             if (again && !((s.page() || PhotoCategory.cardLike(f, s)) && p.text == null)) read = false;   // read only what the newer checks newly send
@@ -125,7 +123,8 @@ final class Sorter {
             f.category = c.category; f.catDate = again && !read ? p.catDate : 0; f.text = again && !read ? p.text : null;
             f.textPending = read; f.sortVersion = VERSION;
             if (read) { toRead.add(f); sig.put(f, s); aspect.put(f, new double[]{m.aspect}); }
-        }
+        } })) return;
+        int[] dims = new int[4];
         // ---- pass 2: read text, screenshots first, then newest first, within the time limit
         Collections.sort(toRead, new Comparator<FileItem>() {
             public int compare(FileItem a, FileItem b) {
@@ -220,7 +219,7 @@ final class Sorter {
      * the rest is looked at in the next scan. One picture at a time (the engine is not shared between threads). Stops at
      * once on a phone where Mirage cannot run (not 64-bit ARM, or not in this build): those tags then stay unknown.
      */
-    static void mirage(Platform pf, Scanner.Progress pr, List<FileItem> pics, Scanner.Options opt, long now) {
+    static void mirage(final Platform pf, Scanner.Progress pr, List<FileItem> pics, final Scanner.Options opt, long now) {
         if (opt.mirageBudgetMs <= 0) return;
         List<FileItem> todo = new ArrayList<FileItem>();
         for (FileItem f : pics) if (mirageWorthy(f)) todo.add(f);
@@ -233,14 +232,38 @@ final class Sorter {
             }
         });
         long end = System.currentTimeMillis() + opt.mirageBudgetMs;
-        int[] dims = new int[4];
         boolean worked = false;
+        // the engine takes one picture at a time, so with workers the next pictures are decoded ahead of it on other threads
+        final java.util.concurrent.ExecutorService ex = opt.workers > 1 ? java.util.concurrent.Executors.newFixedThreadPool(2, new java.util.concurrent.ThreadFactory() {
+            int n;
+            public Thread newThread(Runnable r) { Thread t = new Thread(r, "mirage-decode-" + (n++)); if (opt.highPriority) t.setPriority(Thread.MAX_PRIORITY); return t; }
+        }) : null;
+        final List<java.util.concurrent.Future<int[][]>> ahead = new ArrayList<java.util.concurrent.Future<int[][]>>();
+        try {
         for (int k = 0; k < todo.size(); k++) {
             if (pr.cancelled() || System.currentTimeMillis() > end) return;
             pr.update("Looking at pictures with Mirage", k + 1, todo.size());
             FileItem f = todo.get(k);
+            int[] dims = new int[4];
             int[] px;
-            try { px = pf.argb(f.abs, TEXT_EDGE, dims); } catch (Throwable t) { px = null; }
+            if (ex != null) {
+                while (ahead.size() < todo.size() && ahead.size() < k + 3) {
+                    final FileItem g = todo.get(ahead.size());
+                    ahead.add(ex.submit(new java.util.concurrent.Callable<int[][]>() {
+                        public int[][] call() {
+                            int[] d = new int[4];
+                            try { int[] p = pf.argb(g.abs, TEXT_EDGE, d); return p == null ? null : new int[][]{p, d}; } catch (Throwable t) { return null; }
+                        }
+                    }));
+                }
+                int[][] got;
+                try { got = ahead.get(k).get(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; } catch (Exception e) { got = null; }
+                if (got == null) continue;
+                px = got[0]; dims = got[1];
+                ahead.set(k, null);
+            } else {
+                try { px = pf.argb(f.abs, TEXT_EDGE, dims); } catch (Throwable t) { px = null; }
+            }
             if (px == null) continue;
             String json;
             try { json = pf.mirage(px, dims[2], dims[3], Mirage.OPTIONS); } catch (Throwable t) { json = null; }
@@ -254,6 +277,7 @@ final class Sorter {
                 AlgorithmV3.record(f, v3, a);
             } catch (RuntimeException ignored) {}
         }
+        } finally { if (ex != null) ex.shutdownNow(); }
     }
 
     private static void copyMirage(FileItem p, FileItem f) {
