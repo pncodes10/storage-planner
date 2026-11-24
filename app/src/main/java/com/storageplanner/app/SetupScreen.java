@@ -110,7 +110,6 @@ public final class SetupScreen extends Screen {
         Ui.add(upd, Ui.text(a, "Version " + Updater.installedVersion(a) + ". The only thing this app ever sends over the internet is a request "
                 + "for the latest release on GitHub; nothing about your phone or files is sent. Updates are checked against a published "
                 + "checksum, and Android asks you before installing.", 14, Ui.text2, false), 6);
-        Ui.add(upd, Ui.text(a, "Test build 1.9.1: this line proves the update installed.", 14, Ui.text2, true), 6);
         updateLine = Ui.add(upd, Ui.text(a, "", 15, Ui.text, false), 8);
         updateLine.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         CheckBox autoBox = new CheckBox(a);
