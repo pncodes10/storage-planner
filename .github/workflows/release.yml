@@ -42,7 +42,8 @@ jobs:
           python-version: "3.12"
 
       - name: Python packages (signer, audit)
-        run: pip install --require-hashes --only-binary=:all: -r tools/ci-requirements.txt
+        run: |
+          pip install --require-hashes --only-binary=:all: -r tools/ci-requirements.txt
 
       - name: Core tests
         run: |
