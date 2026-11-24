@@ -38,14 +38,37 @@ final class PlanStore {
         return choices;
     }
 
+    private static Map<String, FinalPlan.Entry> byRel;
+
     /** The plan of the last analysis (empty without one). */
     static List<FinalPlan.Entry> entries(Context c) {
         if (!Session.hasResults()) return new ArrayList<FinalPlan.Entry>();
         if (entries == null || builtFor != Session.ub) {
             entries = FinalPlan.build(Session.result.files, Session.unitById, choices(c), Session.kept, Session.accepted);
             builtFor = Session.ub;
+            byRel = null;
         }
         return entries;
+    }
+
+    /** The plan entry of a file (null if it has none). */
+    static FinalPlan.Entry entry(Context c, String rel) {
+        List<FinalPlan.Entry> l = entries(c);
+        if (byRel == null) { byRel = new java.util.HashMap<String, FinalPlan.Entry>(); for (FinalPlan.Entry e : l) byRel.put(e.file.rel, e); }
+        return byRel.get(rel);
+    }
+
+    /**
+     * The key of the copies a file belongs to (exact duplicates, shots of the same moment, WhatsApp copies): the path of
+     * the copy the suggestion keeps; null when the file has no copies.
+     */
+    static String groupKey(FileItem f) {
+        if (Session.ub == null) return null;
+        String k = Session.ub.det.duplicateOf.get(f.rel);
+        if (k == null) k = Session.ub.det.burstExtraOf.get(f.rel);
+        if (k == null) k = Session.ub.det.sentCopyOf.get(f.rel);
+        if (k == null && Session.copiesOf.containsKey(f.rel)) k = f.rel;
+        return k;
     }
 
     /** Sets the final action of these entries (your choice) and saves. */
@@ -64,7 +87,7 @@ final class PlanStore {
     static void forget(Context c, Collection<String> rels) {
         Map<String, String> m = choices(c);
         for (String r : rels) m.remove(r);
-        entries = null;
+        entries = null; byRel = null;
         save(c);
     }
 
@@ -76,7 +99,7 @@ final class PlanStore {
         save(c);
     }
 
-    static void invalidate() { entries = null; }
+    static void invalidate() { entries = null; byRel = null; }
 
     // ---- finalized
     private static SharedPreferences prefs(Context c) { return c.getSharedPreferences(PREFS, 0); }

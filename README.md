@@ -55,8 +55,15 @@ analysis, **Your plan** opens:
     Re-encode chat images...). Files to delete or compress are **ticked**; tap a file to untick it (it is then kept),
     tap again to tick it. **All** / **None**, and **Tick all** / **Untick all** per group. Long-press to look at a file.
     On Keep, tap **Select** to pick files and delete or compress them instead.
-  - **Cards**: one file at a time, large; swipe right (or tap the button) to confirm the tab's action, left to keep it;
-    undo with ↶. On Keep, right keeps and left deletes.
+  - **Cards**: one file at a time, large. **Swipe right** for the tab's action (Delete or Compress; on Keep: Delete),
+    **swipe left** to keep; a DELETE / KEEP stamp shows as you drag, and ↶ undoes. **Swipe up** (scroll the card) for the
+    full analysis: the verdict and why, every option the rules offered, the rules that match (in words), why the ★ best
+    shot of a burst is kept instead, everything the app found about the file (its tags) and the file itself.
+  - **Bursts and copies together**: shots of the same moment, exact duplicates and WhatsApp copies of a photo get their
+    own sub-heading in the gallery (★ best shot first, then the others), and their cards come one after another, each
+    with a strip of the whole set. **Compare side by side** opens two of them full size (zoom together, pick which go);
+    **View similar** shows them all in a grid with what the photo check found, ★ best marked, a tick to delete each one,
+    **Keep best only** and **Keep all**. Both write to your plan.
 - Every file starts with what the rules suggest (delete before compress before keep); your choices win and are kept
   between sessions (`files/finalplan.tsv`). Earlier decisions from the classic review count as choices.
 - **Finalize plan** shows the totals and locks the plan (read-only screens with an **Edit plan** button). **Start
@@ -72,8 +79,8 @@ analysis, **Your plan** opens:
 holds every developer tool (model tests, Mirage, v2 vs v3, Try on my pictures, Video/Zip/Motion Photo labs, and the
 **classic plan view** with recommendations, swipe review and the report).
 
-`FinalPlanTest` checks the suggestions, choices, earlier decisions, compress only where possible, tabs, groups, totals
-and saving the choices.
+`FinalPlanTest` checks the suggestions, choices, earlier decisions, compress only where possible, tabs, groups, totals,
+saving the choices and the card's analysis (`core/Explain`).
 
 ## View files in the app
 

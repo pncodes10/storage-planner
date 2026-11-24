@@ -185,6 +185,18 @@ Decision: **option (a)**: the plan keeps v2's category; Mirage's findings become
   `tools/audit_apk.py` for `Lcom/storageplanner/app/TrashAction;` only, keep delete/write requests forbidden, and
   call `MediaStore.createTrashRequest(cr, uris, true)` in `request()`.
 
+### 3.10 Review cards: bursts together, analysis, swipes (24 Nov)
+- Cards: a scrolling card inside a `SwipeFrame` (sideways drags are swipes, vertical drags scroll): page 1 is the
+  picture, verdict and, for copies, a strip of the set with Compare side by side / View similar (N); swiping up shows
+  the analysis. Right = the tab's action (Delete on Keep), left = Keep, with DELETE / KEEP stamps while dragging.
+- `core/Explain`: verdict (final action, suggestion, why, risk, saving, your change), options the rules offered,
+  rules that match (`RuleText`), all known tags, file facts; plus "why the ★ best shot is kept" from `Group.whyBest`.
+- Gallery: copies of one photo or moment (duplicates, burst shots, WhatsApp copies) under their own sub-heading,
+  ★ best first, with Compare and Similar; cards in the same order (`copiesTogether`).
+- `SimilarScreen`: the set in two columns with notes, why ★ is better, ticks, Keep best only, Keep all, Compare;
+  `SimilarScreen.compare` opens `CompareScreen` with the ticks from the final plan and writes them back.
+- CompareScreen's "Debug in the Algorithm Lab" only in developer mode. FinalPlanTest 24 checks.
+
 ---
 
 ## 4. Decisions and reasons

@@ -124,7 +124,7 @@ public final class CompareScreen extends Screen {
         debug.setContentDescription("Open all " + g.members.size() + " copies in the Algorithm Lab to see every number behind the suggestion");
         debug.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(LabScreen.with(a, g.members)); } });
         LinearLayout.LayoutParams dl = new LinearLayout.LayoutParams(-1, -2); dl.topMargin = dp(6);
-        root.addView(debug, dl);
+        if (PlanStore.developer(a)) root.addView(debug, dl);             // a developer tool
         apply = Ui.button(a, "", true);
         apply.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {

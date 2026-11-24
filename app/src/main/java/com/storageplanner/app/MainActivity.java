@@ -173,6 +173,10 @@ public final class MainActivity extends Activity {
         if (d.equals("overview")) return new OverviewScreen(this);
         if (d.equals("plan")) return new PlanScreen(this);
         if (d.equals("settings")) return new SettingsScreen(this);
+        if (d.startsWith("similar:")) {
+            com.storageplanner.core.FileItem f = Session.fileByRel.get(d.substring(8));
+            return f != null ? new SimilarScreen(this, f) : null;
+        }
         if (d.startsWith("plantype:")) {
             String[] p = d.split(":", -1);
             return p.length >= 3 ? new PlanTypeScreen(this, p[1], p[2].isEmpty() ? null : p[2]) : null;

@@ -106,6 +106,22 @@ public final class FinalPlanTest {
         List<FinalPlan.Entry> l3 = FinalPlan.build(r.files, units, new HashMap<String, String>(), kept, approved);
         check("earlier review decisions: kept is keep, approved is that action", FinalPlan.KEEP.equals(find(l3, meme).action) && find(l3, meme).chosen
                 && FinalPlan.COMPRESS.equals(find(l3, cam).action) && find(l3, cam).chosen);
+        // ---- the card's analysis
+        Tags.Context ctx = Tags.context(r, ub.det);
+        List<Explain.Section> ex = Explain.of(find(l3, meme), ctx, RuleSet.defaults(), NOW);
+        String all3 = "";
+        for (Explain.Section sct : ex) { all3 += "#" + sct.title + "\n"; for (String[] ln : sct.lines) all3 += ln[0] + ": " + ln[1] + "\n"; }
+        if (a.length > 0) System.out.println(all3);
+        check("analysis sections: verdict, options, rules, what was found, file", ex.size() == 5 && ex.get(0).title.equals("Verdict")
+                && ex.get(1).title.startsWith("Options") && ex.get(2).title.equals("Rules that match") && ex.get(3).title.equals("What the app found")
+                && ex.get(4).title.equals("File"));
+        check("analysis: your choice against the suggestion, the rule that matched, the tags", all3.contains("Final action: Keep (your choice)")
+                && all3.contains("Suggested: Delete: " + Techniques.FORWARDS) && all3.contains("Note: You changed the suggestion")
+                && all3.contains("Old meme or forward: Delete") && all3.contains("Picture category: Graphics & images") && all3.contains("Name: IMG-20261101-WA0001.jpg"));
+        List<Explain.Section> exDoc = Explain.of(find(l, doc), ctx, RuleSet.defaults(), NOW);
+        String d3 = ""; for (Explain.Section sct : exDoc) for (String[] ln : sct.lines) d3 += ln[0] + ": " + ln[1] + "\n";
+        check("analysis of a file with no suggestion", d3.contains("Suggested: Keep: no rule has anything for this file") && exDoc.size() == 4);
+
         check("words", FinalPlan.typeLabel(Tags.APK).contains("APK") && FinalPlan.actionLabel(FinalPlan.COMPRESS).equals("Compress") && FinalPlan.TYPES.length == 6);
 
         System.out.println("FinalPlanTest: " + (checks - fails) + "/" + checks + " checks passed");
