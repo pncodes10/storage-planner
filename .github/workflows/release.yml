@@ -71,6 +71,16 @@ jobs:
           ln -s "$JAVA_HOME" "$TC/java17"
           echo "TOOLCHAIN=$TC" >> "$GITHUB_ENV"
 
+      # Mirage (Algorithm Lab): the model and the Cactus engine for 64-bit ARM, pinned and checked (same step as build-apk.yml);
+      # the APK audit fails a build without them.
+      - name: Mirage (model, engine, native bridge)
+        run: |
+          bash tools/mirage/fetch.sh
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          NDK_VERSION=28.2.13676358
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$NDK_VERSION" > /dev/null
+          ANDROID_NDK="$SDK/ndk/$NDK_VERSION" bash tools/mirage/build_native.sh
+
       - name: Signing key (required)
         env:
           KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
