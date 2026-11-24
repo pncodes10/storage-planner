@@ -1,0 +1,107 @@
+name: Release
+
+# Publishes a GitHub release with the signed APK when a version tag is pushed (tools/release.sh makes and pushes
+# the tag: v1.9.0 for versionName '1.9.0' in app/build.gradle). Installed copies of the app read this release
+# (releases/latest), compare its tag with their own version, download StoragePlanner-<version>.apk and check it
+# against StoragePlanner-<version>.apk.sha256 before handing it to Android's installer.
+#
+# Releases MUST be signed with the same key as the installed app, or Android refuses the update, so this job fails
+# without the secrets SIGNING_KEY_PEM and SIGNING_CERT_DER_B64 (see build-apk.yml) instead of using a one-off key.
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag must match app/build.gradle
+        run: |
+          VN=$(sed -n "s/.*versionName '\([^']*\)'.*/\1/p" app/build.gradle)
+          VC=$(sed -n "s/.*versionCode \([0-9]*\).*/\1/p" app/build.gradle)
+          if [ "$GITHUB_REF_NAME" != "v$VN" ]; then echo "::error::Tag $GITHUB_REF_NAME does not match versionName $VN in app/build.gradle"; exit 1; fi
+          echo "VN=$VN" >> "$GITHUB_ENV"; echo "VC=$VC" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Python packages (signer, audit)
+        run: pip install --require-hashes --only-binary=:all: -r tools/ci-requirements.txt
+
+      - name: Core tests
+        run: |
+          mkdir -p "$RUNNER_TEMP/jvm"
+          T=app/src/main/java/com/storageplanner/tools
+          javac -encoding UTF-8 -nowarn -d "$RUNNER_TEMP/jvm" \
+            $(find app/src/main/java/com/storageplanner/core app/src/main/java/com/google -name "*.java") \
+            $T/Exif.java $T/Extras.java $T/WebpMeta.java $T/CopyPaths.java $T/Ssim.java app/src/main/java/com/storageplanner/app/Ssim.java \
+            $T/Mp4.java $T/FrameScore.java $T/VideoLevel.java $T/VideoSearch.java $T/ZipCompressor.java $T/MotionPhoto.java \
+            jvmtest/com/storageplanner/test/CompressionTest.java jvmtest/com/storageplanner/test/VideoTest.java \
+            jvmtest/com/storageplanner/test/ZipTest.java jvmtest/com/storageplanner/test/MotionPhotoTest.java \
+            jvmtest/com/storageplanner/test/UpdateTest.java
+          for t in CompressionTest VideoTest ZipTest MotionPhotoTest UpdateTest; do
+            java -cp "$RUNNER_TEMP/jvm" com.storageplanner.test.$t
+          done
+
+      - name: Android SDK parts
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install "platforms;android-34" "platforms;android-29" "build-tools;34.0.0" > /dev/null
+          TC="$RUNNER_TEMP/toolchain"; mkdir -p "$TC"
+          ln -s "$SDK/platforms/android-34/android.jar" "$TC/android-34.jar"
+          ln -s "$SDK/platforms/android-29/android.jar" "$TC/android-29.jar"
+          ln -s "$SDK/build-tools/34.0.0/lib/d8.jar" "$TC/r8.jar"
+          ln -s "$SDK/build-tools/34.0.0/aapt2" "$TC/aapt2"
+          ln -s "$JAVA_HOME" "$TC/java17"
+          echo "TOOLCHAIN=$TC" >> "$GITHUB_ENV"
+
+      - name: Signing key (required)
+        env:
+          KEY_PEM: ${{ secrets.SIGNING_KEY_PEM }}
+          CERT_B64: ${{ secrets.SIGNING_CERT_DER_B64 }}
+        run: |
+          if [ -z "$KEY_PEM" ] || [ -z "$CERT_B64" ]; then
+            echo "::error::Add the repository secrets SIGNING_KEY_PEM and SIGNING_CERT_DER_B64: a release signed with a one-off key could not be installed over the installed app."
+            exit 1
+          fi
+          KS="$RUNNER_TEMP/keystore"; mkdir -p "$KS"; chmod 700 "$KS"
+          printf '%s\n' "$KEY_PEM" > "$KS/key.pem"
+          printf '%s' "$CERT_B64" | base64 -d > "$KS/cert.der"
+          echo "KEYSTORE_DIR=$KS" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: |
+          export VERSION_CODE="$VC" VERSION_NAME="$VN"
+          bash tools/build_offline.sh
+          NAME="StoragePlanner-$VN.apk"
+          cp build/offline/StoragePlanner.apk "build/offline/$NAME"
+          (cd build/offline && sha256sum "$NAME" > "$NAME.sha256")
+          echo "APK_NAME=$NAME" >> "$GITHUB_ENV"
+
+      - name: Audit the APK
+        run: python3 tools/audit_apk.py "build/offline/$APK_NAME" build/offline/classes
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/keystore"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/offline/$APK_NAME" "build/offline/$APK_NAME.sha256" "build/offline/${APK_NAME%.apk}.audit.json" \
+            --title "Storage Planner $VN" --generate-notes --verify-tag
