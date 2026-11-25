@@ -161,7 +161,7 @@ public final class MainActivity extends Activity {
 
     /** Rebuilds the stack above the setup screen; null = fresh start (open the Overview). Stale entries are skipped. */
     private void restoreStack(List<String> descriptors) {
-        if (descriptors == null) { push(new PlanScreen(this)); return; }
+        if (descriptors == null) { push(new CleanupScreen(this)); return; }
         for (String d : descriptors) {
             Screen s = null;
             try { s = fromDescriptor(d); } catch (Throwable ignored) {}
@@ -174,6 +174,14 @@ public final class MainActivity extends Activity {
         if (d == null) return null;
         if (d.equals("overview")) return new OverviewScreen(this);
         if (d.equals("plan")) return new PlanScreen(this);
+        if (d.equals("cleanup")) return new CleanupScreen(this);
+        if (d.equals("confirm")) return new ConfirmScreen(this);
+        if (d.startsWith("pile:")) return new PileScreen(this, d.substring(5));
+        if (d.startsWith("item:") || d.startsWith("why:")) {
+            boolean item = d.startsWith("item:");
+            com.storageplanner.core.FileItem f = Session.fileByRel.get(d.substring(item ? 5 : 4));
+            return f == null ? null : item ? new ItemScreen(this, f) : new WhyScreen(this, f);
+        }
         if (d.equals("settings")) return new SettingsScreen(this);
         if (d.startsWith("similar:")) {
             com.storageplanner.core.FileItem f = Session.fileByRel.get(d.substring(8));
@@ -235,7 +243,7 @@ public final class MainActivity extends Activity {
         if (!stack.isEmpty()) top().onHide();
         while (stack.size() > 1) stack.remove(stack.size() - 1);
         PlanStore.invalidate();
-        push(new PlanScreen(this));
+        push(new CleanupScreen(this));
     }
 
     private Screen top() { return stack.get(stack.size() - 1); }
@@ -281,7 +289,7 @@ public final class MainActivity extends Activity {
 
     @Override public boolean onCreateOptionsMenu(android.view.Menu menu) {
         Screen t = stack.isEmpty() ? null : top();
-        if (t instanceof SetupScreen || t instanceof PlanScreen) {
+        if (t instanceof SetupScreen || t instanceof PlanScreen || t instanceof CleanupScreen) {
             MenuItem m = menu.add(0, MENU_SETTINGS, 0, "Settings");
             m.setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         }

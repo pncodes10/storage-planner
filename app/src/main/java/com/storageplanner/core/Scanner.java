@@ -64,6 +64,47 @@ public final class Scanner {
         public boolean highPriority;
         /** Threads for the per-picture stages (measuring, comparing similar photos, sorting); 1 = one after the other. */
         public int workers = 1;
+        /** Analyse at most this many pictures, the newest (Settings, to try the flow quickly); 0 = all. Other files stay. */
+        public int maxPictures;
+        /** Leave out pictures smaller than this many bytes (Settings: too small to be worth the time); 0 = none. */
+        public long minPictureBytes;
+    }
+
+    /**
+     * The Settings limits on pictures: pictures under minBytes are left out, then only the newest max are kept (0 = no
+     * limit). Only pictures in photo folders count; thumbnails, temp files, trash and other files are never touched. Returns how many pictures were left out by each limit:
+     * {too small, over the count}.
+     */
+    public static int[] trimPictures(List<FileItem> files, int max, long minBytes) {
+        int small = 0, over = 0;
+        List<FileItem> pics = new ArrayList<FileItem>();
+        for (java.util.Iterator<FileItem> it = files.iterator(); it.hasNext(); ) {
+            FileItem f = it.next();
+            if (!photo(f)) continue;
+            if (minBytes > 0 && f.size < minBytes) { it.remove(); small++; continue; }
+            pics.add(f);
+        }
+        if (max > 0 && pics.size() > max) {
+            Set<FileItem> keep = new HashSet<FileItem>(Sample.newest(pics, max));
+            for (java.util.Iterator<FileItem> it = files.iterator(); it.hasNext(); ) {
+                FileItem f = it.next();
+                if (photo(f) && !keep.contains(f)) { it.remove(); over++; }
+            }
+        }
+        return new int[]{small, over};
+    }
+
+    /** A picture in a photo folder (camera, screenshots, chats, downloads ...): not a thumbnail, temp file or trash. */
+    static boolean photo(FileItem f) {
+        return f.area != null && (MEDIA_AREAS.contains(f.area) || f.area.startsWith("wa_")) && Sample.pictureName(f.name());
+    }
+
+    /** "newest 500 pictures, pictures under 100 KB left out" for the limits that left something out; null if none did. */
+    public static String trimmed(int[] n, int max, long minBytes) {
+        String s = null;
+        if (n[1] > 0) s = "newest " + max + " pictures";
+        if (n[0] > 0) s = (s == null ? "" : s + ", ") + String.format(java.util.Locale.US, "%,d", n[0]) + " pictures under " + Report.size(minBytes) + " left out";
+        return s;
     }
 
     public static Result scan(Platform pf, Progress pr) { return scan(pf, pr, new Options()); }
@@ -115,6 +156,13 @@ public final class Scanner {
             for (FileItem f : r.files) r.scannedBytes += f.size;
             r.apps = new ArrayList<AppItem>();
             r.sample = opt.limit.describe();
+        }
+        // ---- the Settings limits: skip small pictures, analyse only the newest so many
+        if (opt.limit == null && (opt.maxPictures > 0 || opt.minPictureBytes > 0)) {
+            int[] n = trimPictures(r.files, opt.maxPictures, opt.minPictureBytes);
+            r.scannedBytes = 0;
+            for (FileItem f : r.files) r.scannedBytes += f.size;
+            r.sample = trimmed(n, opt.maxPictures, opt.minPictureBytes);
         }
         // ---- types from magic bytes (only where it matters)
         int i = 0;

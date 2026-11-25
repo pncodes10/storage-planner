@@ -36,6 +36,32 @@ public final class SettingsScreen extends Screen {
         return sv;
     }
 
+    private interface Num { void set(int v); }
+
+    /** A labelled whole-number field that saves as you type (empty = 0). */
+    private void number(LinearLayout parent, String label, String help, String none, int value, final Num save) {
+        TextView l = Ui.add(parent, Ui.text(a, label, 15, Ui.text, false), 16);
+        Ui.add(parent, Ui.text(a, help, 13, Ui.text2, false), 2);
+        final EditText e = new EditText(a);
+        e.setInputType(InputType.TYPE_CLASS_NUMBER);
+        e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        e.setTextColor(Ui.text);
+        e.setHint(none);
+        e.setText(value > 0 ? String.valueOf(value) : "");
+        e.setId(View.generateViewId());
+        l.setLabelFor(e.getId());
+        e.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence s, int st, int c, int af) {}
+            public void onTextChanged(CharSequence s, int st, int b, int c) {}
+            public void afterTextChanged(Editable s) {
+                String t = s.toString().trim();
+                if (t.isEmpty()) { save.set(0); return; }
+                try { save.set(Integer.parseInt(t)); } catch (NumberFormatException ignored) {}
+            }
+        });
+        parent.addView(e, new LinearLayout.LayoutParams(-1, -2));
+    }
+
     @Override public void refresh() {
         if (content == null) return;
         content.removeAllViews();
@@ -59,6 +85,15 @@ public final class SettingsScreen extends Screen {
             }
         });
         an.addView(target, new LinearLayout.LayoutParams(-1, -2));
+        number(an, "Pictures to analyse", "Only the newest this many pictures are analysed, so a run is quick when you want to try the "
+                + "screens. Leave empty or 0 for all of them. Other files and apps are still checked.", "All", PlanStore.maxPictures(a), new Num() {
+            public void set(int v) { PlanStore.setMaxPictures(a, v); }
+        });
+        number(an, "Skip pictures smaller than (KB)", "Pictures under this size are left out of the analysis: they free little space and "
+                + "take time to check. For example 100 skips everything under 100 KB. Leave empty or 0 to check all.", "None skipped", PlanStore.minPictureKb(a), new Num() {
+            public void set(int v) { PlanStore.setMinPictureKb(a, v); }
+        });
+        Ui.add(an, Ui.text(a, "These apply the next time you tap Analyse my storage.", 13, Ui.text2, false), 6);
         an.addView(check("Measure compression on a few of your photos (about a minute more, more accurate)", PlanStore.measure(a),
                 new CompoundButton.OnCheckedChangeListener() { public void onCheckedChanged(CompoundButton b, boolean on) { PlanStore.setMeasure(a, on); } }));
         an.addView(check("Sort pictures into categories and read the text in them (the first time takes longer)", AnalysisRunner.sortPictures(a),

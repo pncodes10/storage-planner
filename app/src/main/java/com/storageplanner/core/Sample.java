@@ -46,7 +46,7 @@ public final class Sample {
     static final String[] ROOTS = {"DCIM", "Pictures", "Download", "WhatsApp", "WhatsApp Business",
             "Android/media/com.whatsapp", "Android/media/com.whatsapp.w4b"};
 
-    static boolean pictureName(String name) {
+    public static boolean pictureName(String name) {
         String n = name.toLowerCase(Locale.ROOT);
         return n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") || n.endsWith(".webp") || n.endsWith(".heic") || n.endsWith(".heif");
     }

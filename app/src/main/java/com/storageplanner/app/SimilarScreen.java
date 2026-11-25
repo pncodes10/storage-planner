@@ -45,8 +45,7 @@ public final class SimilarScreen extends Screen {
         return sv;
     }
 
-    private boolean locked() { return PlanStore.finalized(a) != 0; }
-
+    
     @Override public void refresh() {
         if (content == null) return;
         content.removeAllViews();
@@ -55,8 +54,8 @@ public final class SimilarScreen extends Screen {
         Ui.add(content, Ui.text(a, g.relation(), 20, Ui.text, true), 0);
         int del = 0; long bytes = 0;
         for (FileItem m : g.members) { FinalPlan.Entry e = PlanStore.entry(a, m.rel); if (e != null && FinalPlan.DELETE.equals(e.action)) { del++; bytes += m.size; } }
-        Ui.add(content, Ui.text(a, "★ marks the best shot, which the suggestion keeps. " + del + " of " + g.members.size() + " ticked to delete · frees "
-                + Report.size(bytes) + ". Tap a photo to tick or untick it, long-press to look at it.", 13, Ui.text2, false), 4);
+        Ui.add(content, Ui.text(a, "★ marks the best shot, which stays. " + del + " of " + g.members.size() + " to remove · frees "
+                + Report.size(bytes) + ". Tap a photo to keep or remove it, press and hold to look at it.", 13, Ui.text2, false), 4);
 
         LinearLayout actions = Ui.row(a);
         Button best = Ui.button(a, "Keep best only", true);
@@ -74,7 +73,6 @@ public final class SimilarScreen extends Screen {
         cmp.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { compare(a, g, focus); } });
         LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2); cl.topMargin = dp(8);
         content.addView(cmp, cl);
-        if (locked()) Ui.add(content, Ui.text(a, "✓ The plan is final. Tap Edit plan on Your plan to make changes.", 13, Ui.text, false), 8);
 
         // two columns of large photos
         int w = (a.getResources().getDisplayMetrics().widthPixels - dp(24) - dp(8)) / 2;
@@ -105,12 +103,10 @@ public final class SimilarScreen extends Screen {
         box.addView(iv, new FrameLayout.LayoutParams(-1, -1));
         Thumbs.load(iv, m, w);
         Tick t = new Tick(a);
-        t.style(PlanScreen.DELETE_COLOR, "ticked, will be deleted", "not ticked, will be kept");
+        t.style(Ui.REMOVE, "ticked, will be deleted", "not ticked, will be kept");
         t.setChecked(del);
         box.addView(t, new FrameLayout.LayoutParams(dp(44), dp(44), Gravity.TOP | Gravity.END));
-        TextView badge = Ui.text(a, (m == g.best ? "★ " : "") + (del ? "DELETE" : "KEEP"), 12, 0xFFFFFFFF, true);
-        badge.setBackground(Ui.round(del ? PlanScreen.DELETE_COLOR : PlanScreen.KEEP_COLOR, dp(6)));
-        badge.setPadding(dp(8), dp(3), dp(8), dp(3));
+        View badge = PileScreen.badges(a, e != null ? e.action : FinalPlan.KEEP, m == g.best);
         FrameLayout.LayoutParams bl = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.START); bl.setMargins(dp(6), 0, 0, dp(6));
         box.addView(badge, bl);
         col.addView(box, new LinearLayout.LayoutParams(w, w * 4 / 3));
@@ -127,13 +123,12 @@ public final class SimilarScreen extends Screen {
                 col.addView(wb);
             }
         }
-        box.setContentDescription((m == g.best ? "Best shot. " : "") + g.note(m) + ", " + Group.facts(m) + (del ? ", will be deleted" : ", will be kept")
+        box.setContentDescription((m == g.best ? "Best shot. " : "") + g.note(m) + ", " + Group.facts(m) + ", " + PileScreen.spoken(e != null ? e.action : FinalPlan.KEEP)
                 + ". Double tap to " + (del ? "keep" : "delete") + " it, long press to look at it.");
         box.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                if (locked()) { a.toast("The plan is final. Tap Edit plan on Your plan to change it."); return; }
                 if (e == null) return;
-                PlanStore.set(a, Collections.singletonList(e), FinalPlan.DELETE.equals(e.action) ? FinalPlan.KEEP : FinalPlan.DELETE);
+                PileScreen.choose(a, Collections.singletonList(e), FinalPlan.DELETE.equals(e.action) ? FinalPlan.KEEP : FinalPlan.DELETE);
                 refresh();
             }
         });
@@ -143,15 +138,14 @@ public final class SimilarScreen extends Screen {
 
     /** Keeps these members and deletes the others, in your plan. */
     private void keepOnly(Set<String> keep) {
-        if (locked()) { a.toast("The plan is final. Tap Edit plan on Your plan to change it."); return; }
         List<FinalPlan.Entry> k = new ArrayList<FinalPlan.Entry>(), d = new ArrayList<FinalPlan.Entry>();
         for (FileItem m : g.members) {
             FinalPlan.Entry e = PlanStore.entry(a, m.rel);
             if (e == null) continue;
             (keep.contains(m.rel) ? k : d).add(e);
         }
-        PlanStore.set(a, k, FinalPlan.KEEP);
-        PlanStore.set(a, d, FinalPlan.DELETE);
+        PileScreen.choose(a, k, FinalPlan.KEEP);
+        PileScreen.choose(a, d, FinalPlan.DELETE);
         refresh();
     }
 
@@ -164,14 +158,13 @@ public final class SimilarScreen extends Screen {
         for (FileItem m : g.members) { FinalPlan.Entry e = PlanStore.entry(a, m.rel); if (e != null && FinalPlan.DELETE.equals(e.action)) sel.add(m.rel); }
         Runnable apply = new Runnable() {
             public void run() {
-                if (PlanStore.finalized(a) != 0) { a.toast("The plan is final. Tap Edit plan on Your plan to change it."); return; }
                 List<FinalPlan.Entry> k = new ArrayList<FinalPlan.Entry>(), d = new ArrayList<FinalPlan.Entry>();
                 for (FileItem m : g.members) {
                     FinalPlan.Entry e = PlanStore.entry(a, m.rel);
                     if (e != null) (sel.contains(m.rel) ? d : k).add(e);
                 }
-                PlanStore.set(a, k, FinalPlan.KEEP);
-                PlanStore.set(a, d, FinalPlan.DELETE);
+                PileScreen.choose(a, k, FinalPlan.KEEP);
+                PileScreen.choose(a, d, FinalPlan.DELETE);
                 a.toast(g.summary(sel) + ", in your plan.");
                 a.onBackPressed();
             }

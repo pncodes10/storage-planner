@@ -26,6 +26,13 @@ public final class Ui {
 
     public static boolean night;
     public static int bg, surface, surface2, text, text2, divider, accent, onAccent, meterUsed;
+    /**
+     * The clean-up screens: removed is orange, kept is blue, made smaller is purple (told apart by lightness and by the
+     * words and icons next to them, not by hue alone). The solid colours carry white text; the "ink" ones are for text
+     * on the background, and the "tint" ones are light backgrounds for a banner.
+     */
+    public static final int REMOVE = 0xFFC2410C, KEEP = 0xFF1D4ED8, SMALLER = 0xFF6D28D9;
+    public static int removeInk, keepInk, smallerInk, removeTint, keepTint, smallerTint;
     public static final int[] tier = new int[5], tierBg = new int[5];
     public static final String[] TIER_WORD = {"Safe", "No loss", "Looks identical", "Small quality loss", "Your call"};
     public static final String[] TIER_SPOKEN = {
@@ -40,11 +47,15 @@ public final class Ui {
             divider = 0xFFD5D1DC; accent = 0xFF1A56C4; onAccent = 0xFFFFFFFF; meterUsed = 0xFF6E6A78;
             int[] t = {0xFF1E6B2E, 0xFF1A56C4, 0xFF6B2FA8, 0xFF9A4A00, 0xFFB3261E};
             for (int i = 0; i < 5; i++) { tier[i] = t[i]; tierBg[i] = (t[i] & 0x00FFFFFF) | 0x1F000000; }
+            removeInk = 0xFF9A3412; keepInk = 0xFF1D4ED8; smallerInk = 0xFF6D28D9;
+            removeTint = 0xFFFDEBDD; keepTint = 0xFFE3EBFD; smallerTint = 0xFFEEE7FC;
         } else {
             bg = 0xFF121316; surface = 0xFF1E1F24; surface2 = 0xFF2C2D33; text = 0xFFE6E1E5; text2 = 0xFFC9C5D0;
             divider = 0xFF3A3B42; accent = 0xFF8AB4F8; onAccent = 0xFF0B1A33; meterUsed = 0xFF8E8A98;
             int[] t = {0xFF7DD88F, 0xFF8AB4F8, 0xFFCDA5F5, 0xFFFFB86B, 0xFFF2B8B5};
             for (int i = 0; i < 5; i++) { tier[i] = t[i]; tierBg[i] = (t[i] & 0x00FFFFFF) | 0x33000000; }
+            removeInk = 0xFFFFB68A; keepInk = 0xFF9DBBFF; smallerInk = 0xFFCDA5F5;
+            removeTint = 0xFF3A2418; keepTint = 0xFF1A2540; smallerTint = 0xFF2A1F3D;
         }
     }
 

@@ -43,6 +43,10 @@ final class AnalysisRunner {
                 public boolean cancelled() { return inner.cancelled(); }
             };
             if (sample) { opt.limit = SampleScreen.limit(app); opt.sortPictures = true; }
+            else {                                                                       // the Settings limits on pictures
+                opt.maxPictures = PlanStore.maxPictures(app);
+                opt.minPictureBytes = PlanStore.minPictureKb(app) * 1000L;
+            }
             // a limited run on Try on my pictures starts from scratch: timing it against saved results would measure nothing
             ResultStore.Saved prev = sample ? null : ResultFiles.load(app);               // unchanged pictures are not measured or read again
             if (prev != null) {

@@ -127,6 +127,16 @@ final class PlanStore {
 
     static void setTargetGb(Context c, double gb) { prefs(c).edit().putFloat("target_gb", (float) gb).apply(); }
 
+    /** Analyse at most this many pictures, the newest (0 = all). */
+    static int maxPictures(Context c) { return prefs(c).getInt("max_pictures", 0); }
+
+    static void setMaxPictures(Context c, int n) { prefs(c).edit().putInt("max_pictures", Math.max(0, n)).apply(); }
+
+    /** Leave out pictures smaller than this, in KB (0 = none). */
+    static int minPictureKb(Context c) { return prefs(c).getInt("min_picture_kb", 0); }
+
+    static void setMinPictureKb(Context c, int kb) { prefs(c).edit().putInt("min_picture_kb", Math.max(0, kb)).apply(); }
+
     static boolean measure(Context c) { return prefs(c).getBoolean("measure", true); }
 
     static void setMeasure(Context c, boolean on) { prefs(c).edit().putBoolean("measure", on).apply(); }

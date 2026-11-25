@@ -170,8 +170,8 @@ public final class SetupScreen extends Screen {
             Ui.add(planCard, Ui.text(a, "Free up " + Report.size(t.freed()), 26, Ui.accent, true), 6);
             Ui.add(planCard, Ui.text(a, PlanScreen.count(t.count(FinalPlan.DELETE), "file") + " to delete · " + PlanScreen.count(t.count(FinalPlan.COMPRESS), "file")
                     + " to compress", 14, Ui.text2, false), 2);
-            Button open = Ui.button(a, fin == 0 ? "Review your plan" : "Open your plan", true);
-            open.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new PlanScreen(a)); } });
+            Button open = Ui.button(a, fin == 0 ? "See what gets cleaned" : "Open your clean-up", true);
+            open.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new CleanupScreen(a)); } });
             LinearLayout.LayoutParams ol = new LinearLayout.LayoutParams(-1, dp(50)); ol.topMargin = dp(14);
             planCard.addView(open, ol);
             planCard.setContentDescription("Your plan: free up " + Report.size(t.freed()));

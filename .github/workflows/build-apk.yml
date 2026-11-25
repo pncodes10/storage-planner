@@ -73,12 +73,14 @@ jobs:
             $T/MotionPhoto.java $T/CopyPaths.java \
             jvmtest/com/storageplanner/test/JvmPlatform.java jvmtest/com/storageplanner/test/CategoryTest.java \
             jvmtest/com/storageplanner/test/SceneTest.java jvmtest/com/storageplanner/test/MirageTest.java jvmtest/com/storageplanner/test/VersusTest.java \
-            jvmtest/com/storageplanner/test/MirageTagsTest.java jvmtest/com/storageplanner/test/FinalPlanTest.java
+            jvmtest/com/storageplanner/test/MirageTagsTest.java jvmtest/com/storageplanner/test/FinalPlanTest.java \
+            jvmtest/com/storageplanner/test/PilesTest.java
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.SceneTest
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.MirageTest
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.VersusTest
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.MirageTagsTest
           java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.FinalPlanTest
+          java -cp "$RUNNER_TEMP/scene" com.storageplanner.test.PilesTest
 
       - name: Android SDK parts
         run: |
