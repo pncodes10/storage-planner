@@ -92,8 +92,8 @@ OCR_ASSETS = {"assets/ocr/ocr.html", "assets/ocr/tesseract.min.js", "assets/ocr/
 FACE_ASSETS = {"assets/faces/yunet.bin", "assets/faces/LICENSE-yunet.txt"}
 # 1.10: the scene network's weights (MobileNetV3-Small, written by tools/scenemodel/export_mnv3.py) and its licence
 SCENE_ASSETS = {"assets/scene/scene.bin", "assets/scene/LICENSE-keras-applications.txt"}
-# 1.11: Mirage (Algorithm Lab only): the model, its licence, and the native bridge to the Cactus engine (64-bit ARM)
-MIRAGE_ASSETS = {"assets/mirage/mirage.cact", "assets/mirage/LICENSE-cactus.txt"}
+# 1.11: Mirage (Algorithm Lab only): its licence, and the native bridge to the Cactus engine (64-bit ARM)
+MIRAGE_ASSETS = {"assets/mirage/LICENSE-cactus.txt"}      # the 22 MB model itself is not packed: the app downloads it (MirageModel)
 NATIVE = {"lib/arm64-v8a/libmirage.so"}
 other = [n for n in names if n not in ("AndroidManifest.xml", "classes.dex", "resources.arsc")]
 check("zip entries", set(names) >= {"AndroidManifest.xml", "classes.dex", "resources.arsc"}
@@ -129,7 +129,15 @@ for line in open(os.path.join(os.path.dirname(__file__), "mirage", "files.sha256
     if "assets/mirage/" + n in MIRAGE_ASSETS: mpinned["assets/mirage/" + n] = h
 with zipfile.ZipFile(apk_path) as z:
     mbad = [n for n in MIRAGE_ASSETS if n not in mpinned or hashlib.sha256(z.read(n)).hexdigest() != mpinned[n]]
-check("Mirage files are the pinned release (Cactus-Compute/mirage mirage.cact, engine licence)", not mbad, "; ".join(mbad))
+check("Mirage files are the pinned release (engine licence)", not mbad, "; ".join(mbad))
+check("the Mirage model is not packed in the APK (the app downloads it once and keeps it across updates)",
+      "assets/mirage/mirage.cact" not in names, "assets/mirage/mirage.cact is in the APK")
+# the hash and revision the app downloads against must be the pinned ones
+src = open(os.path.join(os.path.dirname(__file__), "..", "app", "src", "main", "java", "com", "storageplanner", "app", "MirageModel.java")).read()
+model_pin = [h for h, n in (l.split() for l in open(os.path.join(os.path.dirname(__file__), "mirage", "files.sha256"))) if n == "mirage.cact"]
+fetch_rev = re.search(r"MODEL_REV=(\w+)", open(os.path.join(os.path.dirname(__file__), "mirage", "fetch.sh")).read())
+check("the app downloads the pinned Mirage model (hash and revision in MirageModel.java match tools/mirage)",
+      model_pin and ('MODEL_SHA256 = "' + model_pin[0] + '"') in src and fetch_rev and ('MODEL_REV = "' + fetch_rev.group(1) + '"') in src, "")
 
 # The native bridge: what it can call is fixed by its dynamic imports (the engine is linked in statically). It must
 # import nothing that reaches the network, removes or renames files, starts processes or loads more code, and export
@@ -203,7 +211,8 @@ COMPRESSORS = {"Lcom/storageplanner/tools/ImageCompressor;", "Lcom/storageplanne
                "Lcom/storageplanner/tools/ZipCompressor;", "Lcom/storageplanner/tools/MotionPhoto;"}
 # 1.9: the Updater (update check + download) is the only network code, and it manages its own downloaded file
 # (removes old ones, renames the checked download into place) in the app's private cache.
-UPDATER = {"Lcom/storageplanner/app/Updater;"}
+# 1.12: MirageModel is the second and last: one GET of the pinned Mirage model, hash-checked, kept in the app's private files folder.
+UPDATER = {"Lcom/storageplanner/app/Updater;", "Lcom/storageplanner/app/MirageModel;"}
 ALLOWED = {"deletes / renames files": {
     "Ljava/io/File;->delete()Z": COMPRESSORS | UPDATER,
     "Ljava/io/File;->renameTo(Ljava/io/File;)Z": COMPRESSORS | UPDATER,
@@ -212,7 +221,7 @@ ALLOWED = {"deletes / renames files": {
     "Ljava/lang/System;->loadLibrary(Ljava/lang/String;)V": {"Lcom/storageplanner/app/MirageEngine;"},
 }}
 ALLOWED_ANY = {"network": UPDATER}        # any matching reference, from these classes only
-EXCEPT = {"deletes / renames files": " (except image compression and the Updater's own download)", "loads code / reflection": " (except the Mirage bridge library)", "network": " (except the Updater)"}
+EXCEPT = {"deletes / renames files": " (except image compression and the Updater's and Mirage model's own downloads)", "loads code / reflection": " (except the Mirage bridge library)", "network": " (except the Updater and the Mirage model download)"}
 for k, pat in BAD.items():
     allowed = ALLOWED.get(k, {})
     anyok = ALLOWED_ANY.get(k, set())
@@ -222,11 +231,12 @@ for k, pat in BAD.items():
     check(f"no code that {k}" + EXCEPT.get(k, ""), not hits,
           "; ".join(r + " from " + ", ".join(sorted(callers.get(r, ()))) for r in hits[:5]))
 net_users = sorted(set(c for r in ext if re.search(BAD["network"], r) for c in callers.get(r, ())))
-check("network code exists only in Updater (the update check)", set(net_users) <= UPDATER and net_users, ", ".join(net_users))
-# the Updater may only talk to this project's GitHub releases (the strings are in the dex)
+check("network code exists only in Updater (the update check) and MirageModel (the model download)", set(net_users) <= UPDATER and net_users, ", ".join(net_users))
+# the Updater may only talk to this project's GitHub releases, and MirageModel only to the pinned Mirage file (the strings are in the dex)
 dex_bytes = zipfile.ZipFile(apk_path).read("classes.dex")
 urls = sorted(set(m.decode() for m in re.findall(rb"https?://[A-Za-z0-9._~:/?#@!$&'()*+,;=%-]+", dex_bytes)))
-mine = [u for u in urls if u.startswith("https://api.github.com/repos/pncodes10/storage-planner/") or u.startswith("https://github.com/pncodes10/storage-planner/")]
+mine = [u for u in urls if u.startswith("https://api.github.com/repos/pncodes10/storage-planner/") or u.startswith("https://github.com/pncodes10/storage-planner/")
+        or u.startswith("https://huggingface.co/Cactus-Compute/mirage/resolve/")]
 others = [u for u in urls if u not in mine and not re.match(r"https?://(schemas\.android\.com|www\.w3\.org|localhost|appassets|127\.0\.0\.1)", u)]
 report["web addresses in the code"] = {"pass": True, "detail": "; ".join(mine) + (" | other (not fetched by the app): " + "; ".join(others[:8]) if others else "")}
 trash = sorted(r for r in ext if re.search(r"MediaStore;->create(Trash|Delete|Write)Request", r))

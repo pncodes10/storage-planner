@@ -107,7 +107,7 @@ scan (Scanner)
 - Native bridge `app/src/main/cpp/mirage_jni.cpp` linked with `libcactus.a` (engine 4.1.4, android-arm64) into
   `lib/arm64-v8a/libmirage.so`; uses only `cactus_load` (the engine copies the model) and `cactus_describe` (RGB in,
   JSON out, retried with a bigger buffer when needed). Defines its own `remove()` that always refuses.
-- `app/MirageEngine.java` loads the library and `assets/mirage/mirage.cact`; one picture at a time.
+- `app/MirageEngine.java` loads the library and the model downloaded by `MirageModel` (files/mirage/mirage.cact, kept across updates); one picture at a time.
 - `tools/mirage/fetch.sh` downloads model and engine at pinned revisions with sha256 checks (`files.sha256`); the
   model is not in git. `tools/mirage/build_native.sh` needs NDK r28+ (the engine uses LLVM 19's libc++).
 - APK audit (`tools/audit_apk.py`): Mirage files pinned; the library must be AArch64, need only libc/libm/libdl,

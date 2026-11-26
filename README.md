@@ -586,8 +586,11 @@ it also checks that Java gives Python's smile probabilities and aesthetic scores
 [Mirage](https://cactuscompute.com/blog/mirage) is a 22 MB vision model from Cactus Compute (weights and engine Apache
 2.0). In one pass it names the kind of scene, the objects in a picture and reads its text (Latin script only). It runs on
 the phone through the Cactus engine, linked into a small native library (`lib/arm64-v8a/libmirage.so`), so it works on
-64-bit ARM phones only; on others the Lab says it is not available. Nothing leaves the phone, and the app still has no
-`INTERNET` permission.
+64-bit ARM phones only; on others the Lab says it is not available. Nothing leaves the phone. The 22 MB model is **not
+packed in the APK** (an update is a few MB): the Lab and v2 vs v3 show a box with a *Download Mirage model* button. It
+fetches the one pinned file from Hugging Face (fixed revision, SHA-256 checked, only that request) into the app's private
+files folder, which an app update keeps, so a new version reuses it. Until it is downloaded, the Mirage buttons say so, and
+a scan simply skips Mirage.
 
 In the Lab you can try it on any picture (below). Since 1.11 the analysis also runs it and turns what it sees into tags
 for the rules ("Mirage in the decision engine", below); the picture category the plan uses stays the app's own (v2).
@@ -620,9 +623,9 @@ for the rules ("Mirage in the decision engine", below); the picture category the
 What it did in a test on a desktop processor (4 cores), see `tools/mirage/README.md`: about 2 s per picture; text on
 clean receipts, tickets, bills and screenshots read exactly, and on photos of them a few letters wrong; its scenes were
 no better than the scene network's (90% against 91% on the same 240 labelled pictures; better on flowers, worse on
-ordinary objects). The APK is about 23 MB bigger with it.
+ordinary objects). The APK is only about 1 MB bigger with it (the engine); the model is downloaded once.
 
-The APK audit checks the model is the pinned release, and that the native library is 64-bit ARM, needs only the C
+The APK audit checks the model is not packed but downloaded at the pinned revision and hash (MirageModel is the second network user besides the Updater), and that the native library is 64-bit ARM, needs only the C
 library, exports only the bridge's three methods and imports nothing that can reach the network, remove or rename a
 file, start a process or load more code. Only `MirageEngine` may load it. `MirageTest` checks reading Mirage's answers
 and the Lab output with invented data, and the verdict on drawn pictures with saved answers (a greeting forward and a

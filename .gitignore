@@ -17,5 +17,4 @@ __pycache__/
 *.p12
 keystore/
 
-# Mirage model: downloaded at build time by tools/mirage/fetch.sh (pinned hash), not kept in git
-app/src/main/assets/mirage/mirage.cact
+# Mirage model: downloaded by the app on the phone (MirageModel.java); WITH_MODEL=1 tools/mirage/fetch.sh puts a copy in build/

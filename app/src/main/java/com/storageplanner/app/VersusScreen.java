@@ -203,10 +203,11 @@ public final class VersusScreen extends Screen {
         });
         LinearLayout.LayoutParams svl = new LinearLayout.LayoutParams(-1, -2); svl.topMargin = dp(6);
         root.addView(save, svl);
+        MirageCard.addTo(a, root);
         Ui.add(root, Ui.text(a, "v2 is the app's sorting today (its own text reader, Tesseract). v3 sorts with Mirage, Cactus Compute's vision model: "
                 + "its text through the same text rules, memes and forwards from what it says the picture looks like, and no accidental shot where it "
                 + "clearly sees something. Both use your rules. Each picture is judged on its own, so duplicates, bursts and blur against your other "
-                + "photos are not part of it. About 2-5 seconds per picture: 1,000 pictures take about an hour. Keep the screen on this page; "
+                + "photos are not part of it. Needs the Mirage model (download it in the box above). About 2-5 seconds per picture: 1,000 pictures take about an hour. Keep the screen on this page; "
                 + "Stop and Start continue where it stopped. Nothing on the phone is changed.", 12, Ui.text2, false), 14);
 
         shown = this;
