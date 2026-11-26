@@ -222,12 +222,18 @@ public final class VideoCheck {
     }
 
     /** Decodes the frames of one video and records what they show; false when no frame could be decoded. */
-    public static boolean look(Platform pf, FileItem f) {
+    public static boolean look(Platform pf, FileItem f) { return look(pf, f, null); }
+
+    /** The same, writing each frame's measurements to o (the Algorithm Lab); o may be null. */
+    public static boolean look(Platform pf, FileItem f, Lab.Out o) {
         long[] at = new long[AT.length];
         for (int i = 0; i < at.length; i++) at[i] = (long) (f.durationMs * 1000L * AT[i]);
         int[] dims = new int[2];
+        long t0 = System.nanoTime();
         int[][] fr = pf.videoFrames(f.abs, at, EDGE, dims);
-        if (fr == null || dims[0] <= 0 || dims[1] <= 0) return false;
+        if (fr == null || dims[0] <= 0 || dims[1] <= 0) { if (o != null) o.line("  ! no frame could be decoded from this video"); return false; }
+        if (o != null) o.line(String.format(java.util.Locale.US, "  %d frames decoded at %d x %d in %d ms", fr.length, dims[0], dims[1], (System.nanoTime() - t0) / 1000000));
+        long prevHash = 0; boolean havePrev = false;
         List<int[]> frames = new ArrayList<int[]>();
         int[] faces = new int[fr.length];
         for (int i = 0; i < fr.length; i++) {
@@ -237,7 +243,18 @@ public final class VideoCheck {
             float[] fc;
             try { fc = pf.faces(f.abs + "#" + i, fr[i], dims[0], dims[1]); } catch (Throwable t) { fc = null; }
             faces[i] = fc == null ? -1 : Faces.count(fc);
+            if (o != null) {
+                int[] l = luma(fr[i]);
+                double[] ms = meanSpread(l);
+                long hs = ImageFeatures.phash(l, dims[0], dims[1]);
+                o.line(String.format(java.util.Locale.US, "  frame %d at %4.1f s: brightness %3.0f, spread %4.1f%s, sharpness %6.1f, faces %s%s",
+                        i + 1, at[i] / 1e6, ms[0], ms[1], ms[0] < DARK_MEAN ? " DARK" : ms[1] < FLAT_SPREAD ? " FLAT" : "",
+                        ImageFeatures.sharpness(l, dims[0], dims[1]), faces[i] < 0 ? "?" : String.valueOf(faces[i]),
+                        havePrev ? ", changed " + ImageFeatures.hamming(prevHash, hs) + " of 64 bits" : ""));
+                prevHash = hs; havePrev = true;
+            }
         }
+        if (o != null) for (int i = 0; i < fr.length; i++) if (fr[i] == null) o.line("  frame " + (i + 1) + ": could not be decoded");
         Result r = measure(frames, dims[0], dims[1], faces);
         if (r.frames == 0) return false;
         int mid = fr.length / 2;
@@ -248,7 +265,12 @@ public final class VideoCheck {
                 int n = 0;
                 for (int i = 0; i < w.text.size(); i++) if (w.conf.get(i) >= 60 && w.text.get(i).trim().length() >= 2) n++;
                 r.words = n;
-            }
+                if (o != null) {
+                    StringBuilder b = new StringBuilder();
+                    for (int i = 0; i < w.text.size() && b.length() < 160; i++) if (w.conf.get(i) >= 60) b.append(w.text.get(i)).append(' ');
+                    o.line("  middle frame text: " + n + " words read confidently" + (b.length() > 0 ? ": " + b.toString().trim() : ""));
+                }
+            } else if (o != null) o.line("  middle frame text: the text reader is not available");
         }
         record(f, r);
         return true;

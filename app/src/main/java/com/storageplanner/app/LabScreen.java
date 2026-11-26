@@ -105,8 +105,8 @@ public final class LabScreen extends Screen {
                 + "everything is written to a log you can save and send.", 14, Ui.text2, false), 0);
 
         // videos, zips and Motion Photos have their own screens: no pictures need to be picked for them
-        Button videoLab = Ui.button(a, "Video compression: pick a video (test copies at 5 levels)", true);
-        videoLab.setContentDescription("Open the Video Lab: compress test copies of a video at each of the five levels");
+        Button videoLab = Ui.button(a, "Videos: pick one for the video verdict, or test copies at 5 levels", true);
+        videoLab.setContentDescription("Open the Video Lab: see what the analysis finds in a video and whether the plan would delete it, or compress test copies at each of the five levels");
         videoLab.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new VideoLabScreen(a)); } });
         add(root, videoLab, 10);
         Button zipLab = Ui.button(a, "Zip compression: pick files (test archives at 4 levels)", true);

@@ -870,6 +870,71 @@ public final class Lab {
     }
 
     /** Your rules on the picture with this category: the rules that match and the plan's options, on one or two lines. */
+    /** A video picked in the Lab: its path, its name (for the file type) and how to treat it (camera, wa_video, ...). */
+    public static FileItem videoItem(String path, String name, long size, long mtime, String area) {
+        String n = name.toLowerCase(Locale.ROOT);
+        String rel = "camera".equals(area) ? "DCIM/Camera/" + name : "wa_video".equals(area) ? "WhatsApp/Media/WhatsApp Video/" + name
+                : "wa_sent_video".equals(area) ? "WhatsApp/Media/WhatsApp Video/Sent/" + name : "download".equals(area) ? "Download/" + name
+                : "movies".equals(area) ? "Movies/" + name : "Lab/" + name;
+        FileItem f = new FileItem(rel, path, size, mtime);
+        f.area = area; f.type = n.endsWith(".mkv") ? "mkv" : "mp4";
+        return f;
+    }
+
+    /**
+     * VIDEO VERDICT: one video through everything a scan does to videos: what the file says (codec, size, frame rate,
+     * length), the five frames (VideoCheck), the video tags, which rules match and what the plan would do. phone: the
+     * files of the last analysis, or null; they give the camera photos that blur is judged against and the camera
+     * videos a sent copy is matched with.
+     */
+    public static FileItem videoVerdict(Platform pf, FileItem f, List<FileItem> phone, RuleSet rules, long now, Out o) {
+        o.line("VIDEO VERDICT — " + f.name() + " (treated as " + f.area + ", " + dur(Math.max(0, now - f.mtime)) + " old)");
+        boolean read;
+        try { read = pf.video(f); } catch (Throwable t) { read = false; }
+        if (!read && f.durationMs <= 0) { o.line("  ! Android could not read this video"); return f; }
+        o.line(f("  file: %s, %d x %d as shown, %s fps, %.1f s, %.1f Mbps, %s",
+                f.vcodec == null ? "codec unknown" : f.vcodec, f.width, f.height, f.fps > 0 ? String.format(Locale.US, "%.1f", f.fps) : "?",
+                f.durationMs / 1000.0, f.bitrate / 1e6, Report.size(f.size)));
+        VideoCheck.look(pf, f, o);
+
+        Scanner.Result one = new Scanner.Result();
+        one.now = now;
+        one.files.add(f);
+        int cams = 0, vids = 0;
+        if (phone != null)
+            for (FileItem p : phone) {
+                if (!"camera".equals(p.area) || p.rel.equals(f.rel)) continue;
+                if (p.sharp >= 0) { one.files.add(p); cams++; }
+                else if (VideoCheck.looked(p) && Tags.VIDEO.equals(Tags.kind(p))) { one.files.add(p); vids++; }
+            }
+        o.line(phone == null ? "  (no analysis yet: blur cannot be judged against your photos, and sent copies cannot be matched)"
+                : f("  compared with %d camera photos (for blur) and %d looked-at camera videos (for sent copies)", cams, vids));
+        UnitBuilder.Detections det = new UnitBuilder.Detections();
+        VideoCheck.sentCopies(one.files, det.sentCopyOf);
+        Tags.Context ctx = Tags.context(one, det);
+        Tags.T t = Tags.of(f, ctx, now);
+        o.line("  means: " + yes("dark or covered", t.videoDark) + ", " + yes("blurred all through", t.videoBlurry) + ", " + yes("nothing moves", t.videoStill)
+                + ", " + yes("upright", t.videoVertical) + ", " + yes("taken by mistake", t.accidentalClip) + ", " + yes("looks forwarded", t.forwardVideo)
+                + (det.sentCopyOf.containsKey(f.rel) ? ", WhatsApp copy of " + det.sentCopyOf.get(f.rel) : ""));
+        StringBuilder b = new StringBuilder();
+        for (Tags.Entry e : t.shown()) if (e.id.startsWith("video") || e.id.endsWith("_video") || e.id.equals(Tags.ACCIDENTAL_CLIP) || e.id.equals(Tags.SENT_COPY)
+                || e.id.equals(Tags.AGE_DAYS) || e.id.equals(Tags.AREA)) b.append(b.length() == 0 ? "" : "; ").append(e.label).append(' ').append(e.value);
+        o.line("  tags: " + b);
+        StringBuilder hit = new StringBuilder();
+        for (Rule x : rules.rules) if (x.enabled && x.problem() == null && x.matches(t)) hit.append(hit.length() == 0 ? "" : ", ").append('"').append(x.name).append('"');
+        Unit u = Unit.forFile(f);
+        rules.compile().apply(u, f, t, ctx, new Estimates(), now);
+        StringBuilder ops = new StringBuilder();
+        for (Option op : u.options) ops.append(ops.length() == 0 ? "" : "; ").append(op.action).append(" by \"").append(op.technique).append('"')
+                .append(op.why == null || op.why.isEmpty() ? "" : " — " + op.why);
+        o.line("  rules: " + (hit.length() == 0 ? "none match" : hit + " match"));
+        o.line("  plan: " + (ops.length() == 0 ? "no option" : ops));
+        o.line("  VERDICT: " + verdict(u.options, new PhotoCategory.Result()));
+        return f;
+    }
+
+    private static String yes(String what, Boolean b) { return what + (b == null ? " ?" : b ? " YES" : " no"); }
+
     static List<Option> planFor(FileItem f, PhotoCategory.Result r, RuleSet rules, long now, Out o, String which) {
         f.category = r.category; f.catDate = r.date; f.textPending = false;
         Scanner.Result one = new Scanner.Result();

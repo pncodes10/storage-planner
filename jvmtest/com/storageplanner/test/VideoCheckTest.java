@@ -171,6 +171,26 @@ public final class VideoCheckTest {
         check("video measurements survive a save", p2 != null && p2.videoVersion == VideoCheck.VERSION && p2.vDark == 5 && p2.vMotion == 0.5
                 && p2.vPeople == 0 && p2.vHash == 10 && Math.abs(p2.fps - 29.97f) < 1e-4);
 
+        // ---- the Algorithm Lab's video verdict on one video (a platform that serves dark, still frames and no faces)
+        Platform fake = (Platform) java.lang.reflect.Proxy.newProxyInstance(Platform.class.getClassLoader(), new Class<?>[]{Platform.class},
+                new java.lang.reflect.InvocationHandler() {
+                    public Object invoke(Object proxy, java.lang.reflect.Method m, Object[] args) {
+                        String n = m.getName();
+                        if (n.equals("videoFrames")) { int[] d = (int[]) args[3]; d[0] = W; d[1] = H; int[][] fr = new int[5][]; for (int i = 0; i < 5; i++) fr[i] = flat(10); return fr; }
+                        if (n.equals("video")) { FileItem f = (FileItem) args[0]; f.vcodec = "video/avc"; f.width = 1920; f.height = 1080; f.durationMs = 15000; f.fps = 30; f.bitrate = 9000000; return true; }
+                        if (n.equals("faces")) return new float[0];
+                        Class<?> r = m.getReturnType();
+                        return r == boolean.class ? Boolean.FALSE : r == int.class ? 0 : r == long.class ? 0L : null;
+                    }
+                });
+        final StringBuilder log = new StringBuilder();
+        FileItem lv = Lab.videoItem("/sd/x.mp4", "VID_20261101.mp4", 25000000, NOW - 3 * DAY, "camera");
+        Lab.videoVerdict(fake, lv, r.files, RuleSet.defaults(), NOW, new Lab.Out() { public void line(String x) { log.append(x).append('\n'); } });
+        if (a.length > 0) System.out.println(log);
+        check("Lab video verdict: frames, tags, the matching rule and the verdict", log.indexOf("frame 5 at") > 0 && log.indexOf("DARK") > 0
+                && log.indexOf("taken by mistake YES") > 0 && log.indexOf("rules: \"Video clip taken by mistake\"") > 0 && log.indexOf("VERDICT: SUGGEST DELETING") > 0
+                && lv.type.equals("mp4") && lv.rel.startsWith("DCIM/Camera/"));
+
         System.out.println("VideoCheckTest: " + (checks - fails) + "/" + checks + " checks passed");
         if (fails > 0) System.exit(1);
     }

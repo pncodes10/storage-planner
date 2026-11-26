@@ -50,9 +50,23 @@ matches a rule. A clip with a face in any frame is never called accidental and n
 
 The rules can be switched off or edited in Settings › Cleaning rules, like the other rules.
 
+## Trying one video in the Algorithm Lab
+
+Open Algorithm Lab › Videos, pick a video, choose **Treat as** (camera, WhatsApp received, WhatsApp sent, download,
+Movies) and tap **Video verdict: would the plan delete it?** The log shows:
+- what the file says: codec, size as shown, frame rate, length and bitrate;
+- each of the five frames: brightness, spread (DARK or FLAT marked), sharpness, faces and how much changed since the
+  previous frame;
+- the text read in the middle frame;
+- what that means: dark, blurred, still, upright, taken by mistake, looks forwarded, WhatsApp copy of a camera video;
+- the video tags, the rules that match, the plan's options and the verdict.
+
+Blur is judged against the camera photos of your last analysis, and a sent copy is matched against its looked-at
+camera videos. Without an analysis the log says those two can't be judged.
+
 ## Tests
 
-- `VideoCheckTest` (29 checks, in CI) uses frames drawn in the test, not real videos. It covers:
+- `VideoCheckTest` (30 checks, in CI, including the Lab video verdict on a stand-in platform) uses frames drawn in the test, not real videos. It covers:
   - measuring the frames;
   - what the measurements mean;
   - matching sent copies;

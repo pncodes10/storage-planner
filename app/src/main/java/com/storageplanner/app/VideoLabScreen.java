@@ -72,7 +72,7 @@ final class VideoLabScreen extends Screen {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(14), dp(10), dp(14), dp(24));
         sv.addView(root);
-        Ui.add(root, Ui.text(a, "Debug tool. Pick a video and make test copies at each compression level, with the same code and checks a "
+        Ui.add(root, Ui.text(a, "Debug tool. Pick a video, see what the analysis finds in it and what the plan would do, or make test copies at each compression level, with the same code and checks a "
                 + "real run will use. The original is never changed. Copies go to Download/StoragePlanner/compressed/. Keep the app open "
                 + "while it runs: a minute of 1080p video takes about a minute per level.", 14, Ui.text2, false), 0);
         Button pick = Ui.button(a, "Pick a video", true);
@@ -83,6 +83,20 @@ final class VideoLabScreen extends Screen {
         spinner = new ProgressBar(a);
         spinner.setVisibility(View.GONE);
         add(root, spinner, 6);
+
+        Ui.add(root, Ui.heading(a, "Checks and verdict", 17), 14);
+        Ui.add(root, Ui.text(a, "Runs what an analysis does to a video: the five frames (dark, covered, blurred, still, faces, caption), "
+                + "the video tags, the rules that match and what the plan would do with it.", 13, Ui.text2, false), 4);
+        final Button as = Ui.button(a, "Treat as: " + AREA_LABEL[area], false);
+        as.setContentDescription("Where the video counts as coming from. Tap to change.");
+        as.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) { area = (area + 1) % AREAS.length; as.setText("Treat as: " + AREA_LABEL[area]); }
+        });
+        add(root, as, 8);
+        Button verdict = Ui.button(a, "Video verdict: would the plan delete it?", true);
+        verdict.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { verdict(); } });
+        add(root, verdict, 6);
+        runButtons.add(verdict);
 
         Ui.add(root, Ui.heading(a, "Compress (test copies)", 17), 14);
         addRun(root, "All five levels", true, null);
@@ -190,6 +204,49 @@ final class VideoLabScreen extends Screen {
     private void showInfo() {
         if (info == null) return;
         info.setText(video == null ? "No video picked yet." : name + " · " + Report.size(video.length()));
+    }
+
+    // ------------------------------------------------------------------ the verdict
+    private static final String[] AREAS = {"camera", "wa_video", "wa_sent_video", "download", "movies"};
+    private static final String[] AREA_LABEL = {"camera video", "WhatsApp video (received)", "WhatsApp video (sent)", "download", "Movies folder"};
+    private int area;
+
+    private void verdict() {
+        if (busy) return;
+        if (video == null) { a.toast("Pick a video first."); return; }
+        busy = true;
+        for (Button b : runButtons) b.setEnabled(false);
+        spinner.setVisibility(View.VISIBLE);
+        shown.setLength(0);
+        out.setText("Looking at the video…");
+        final File src = video; final String srcName = name; final String ar = AREAS[area];
+        final java.util.List<FileItem> phone = Session.hasResults() ? new ArrayList<FileItem>(Session.result.files) : null;
+        final com.storageplanner.core.RuleSet rules = RulesStore.get(a).copy();
+        worker.execute(new Runnable() {
+            public void run() {
+                LabLog.header(a);
+                LabLog.line(a, "\n--- " + LabLog.now() + "  video verdict: " + srcName);
+                AndroidPlatform pf = new AndroidPlatform(a.getApplicationContext());
+                try {
+                    FileItem f = com.storageplanner.core.Lab.videoItem(src.getPath(), srcName, src.length(), src.lastModified(), ar);
+                    com.storageplanner.core.Lab.videoVerdict(pf, f, phone, rules, System.currentTimeMillis(), new com.storageplanner.core.Lab.Out() {
+                        public void line(String s) { VideoLabScreen.this.line(s); }
+                    });
+                } catch (Throwable t) {
+                    line("  failed: " + t);
+                    LabLog.error(a, "video verdict", t);
+                } finally {
+                    try { pf.close(); } catch (Throwable ignored) {}
+                    ui.post(new Runnable() {
+                        public void run() {
+                            busy = false;
+                            for (Button b : runButtons) b.setEnabled(true);
+                            spinner.setVisibility(View.GONE);
+                        }
+                    });
+                }
+            }
+        });
     }
 
     // ------------------------------------------------------------------ running
