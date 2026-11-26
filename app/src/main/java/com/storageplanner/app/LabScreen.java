@@ -104,6 +104,8 @@ public final class LabScreen extends Screen {
         Ui.add(root, Ui.text(a, "Developer tools. Pick one or more pictures, then run any algorithm the app uses. Results are the same as in a scan; "
                 + "everything is written to a log you can save and send.", 14, Ui.text2, false), 0);
 
+        MirageCard.addTo(a, root);
+
         // videos, zips and Motion Photos have their own screens: no pictures need to be picked for them
         Button videoLab = Ui.button(a, "Videos: pick one for the video verdict, or test copies at 5 levels", true);
         videoLab.setContentDescription("Open the Video Lab: see what the analysis finds in a video and whether the plan would delete it, or compress test copies at each of the five levels");
@@ -194,7 +196,7 @@ public final class LabScreen extends Screen {
         addRun("Rules: which ones match", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.rules(pf(), pic(), RulesStore.get(a).copy(), System.currentTimeMillis(), o); } });
         addRun("QR code / barcode", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.codes(pf(), pic(), o); } });
         addRun("Read text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.text(pf(), pic(), System.currentTimeMillis(), o); } });
-        addRun("Mirage: scene, objects, text (22 MB model)", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.mirage(pf(), pic(), o); } });
+        addRun("Mirage: scene, objects, text", false, new Job() { public void run(Lab.Out o) throws Exception { Lab.mirage(pf(), pic(), o); } });
         addRun("Mirage verdict: would the plan delete it?", false, new Job() {
             public void run(Lab.Out o) throws Exception { show(Lab.mirageVerdict(pf(), pic(), RulesStore.get(a).copy(), System.currentTimeMillis(), o)); }
         });

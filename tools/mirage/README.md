@@ -8,7 +8,7 @@ included). The revisions and hashes are the ones the `cactus-compute` 4.2.6 Pyth
 
 | File | Where | |
 |---|---|---|
-| `fetch.sh` | `app/src/main/assets/mirage/mirage.cact`, `build/mirage/libcactus.a`, `build/mirage/cactus.h` | downloads at pinned revisions, checks `files.sha256` |
+| `fetch.sh` | `build/mirage/libcactus.a`, `build/mirage/cactus.h` (and `build/mirage/mirage.cact` with `WITH_MODEL=1`) | downloads at pinned revisions, checks `files.sha256`. The model is not packed in the APK: the app downloads it itself (`MirageModel.java`, same revision and hash) |
 | `build_native.sh` | `build/mirage/lib/arm64-v8a/libmirage.so` | links `app/src/main/cpp/mirage_jni.cpp` with the engine (NDK r28+: the engine uses LLVM 19's libc++) |
 | `files.sha256` | | the model, the engine, its header, the licence |
 

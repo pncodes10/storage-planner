@@ -71,9 +71,9 @@ jobs:
           ln -s "$JAVA_HOME" "$TC/java17"
           echo "TOOLCHAIN=$TC" >> "$GITHUB_ENV"
 
-      # Mirage (Algorithm Lab): the model and the Cactus engine for 64-bit ARM, pinned and checked (same step as build-apk.yml);
+      # Mirage (Algorithm Lab): the Cactus engine for 64-bit ARM (the model is downloaded by the app, not packed), pinned and checked (same step as build-apk.yml);
       # the APK audit fails a build without them.
-      - name: Mirage (model, engine, native bridge)
+      - name: Mirage (engine, native bridge)
         run: |
           bash tools/mirage/fetch.sh
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
