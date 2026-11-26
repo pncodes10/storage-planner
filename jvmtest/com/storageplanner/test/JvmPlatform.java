@@ -209,6 +209,8 @@ public final class JvmPlatform implements Platform {
         } catch (Exception e) { return false; }
     }
 
+    public int[][] videoFrames(String path, long[] timesUs, int longEdge, int[] dims) { return null; }   // no video decoder on the desktop
+
     public boolean video(FileItem f) {
         String out = run("ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                 "stream=codec_name,width,height,bit_rate:format=duration,bit_rate", "-of", "default=nw=1", f.abs);

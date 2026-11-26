@@ -34,7 +34,8 @@ public final class Piles {
         switch (technique) {
             case Techniques.DUPLICATES: case Techniques.SENT: case Techniques.BURSTS: return COPIES;
             case Techniques.FORWARDS: case Techniques.GREETINGS: case Techniques.TELEGRAM: return FORWARDS;
-            case Techniques.BLURRY: case Techniques.ACCIDENTAL: return BLURRY;
+            case Techniques.BLURRY: case Techniques.ACCIDENTAL: case Techniques.ACCIDENTAL_CLIPS: return BLURRY;
+            case Techniques.FORWARD_VIDEOS: return FORWARDS;
             case Techniques.OTP_SHOTS: case Techniques.OLD_PAYMENTS: case Techniques.EXPIRED_TICKETS: case Techniques.REFERENCE: return SCREENSHOTS;
             case Techniques.OLD_DOWNLOADS: case Techniques.INSTALLED_APK: return DOWNLOADS;
             case Techniques.JUNK: case Techniques.TRASH: case Techniques.WA_BACKUP: case Techniques.CACHE: return JUNK;
@@ -104,6 +105,8 @@ public final class Piles {
             case Techniques.BURSTS: return "One of several shots of the same moment. The best one stays.";
             case Techniques.BLURRY: return "It looks blurry.";
             case Techniques.ACCIDENTAL: return "It looks like it was taken by accident.";
+            case Techniques.ACCIDENTAL_CLIPS: return "A clip that looks filmed by mistake: very short, dark, blurred or with nothing happening, and nobody in it.";
+            case Techniques.FORWARD_VIDEOS: return "A forwarded-looking video from a chat, over a month old, with nobody in it.";
             case Techniques.FORWARDS: return "A meme or forward from a chat, more than a week old.";
             case Techniques.GREETINGS: return "A greeting image from a chat.";
             case Techniques.TELEGRAM: return "Telegram media you can download again from the chat.";

@@ -35,6 +35,8 @@ public final class Techniques {
     public static final String REFERENCE = "Photos taken to remember something";
     public static final String PEOPLE_PROTECTED = "Photos of people (never deleted)";
     public static final String ACCIDENTAL = "Accidental shots";
+    public static final String ACCIDENTAL_CLIPS = "Video clips taken by mistake";
+    public static final String FORWARD_VIDEOS = "Old forwarded videos";
     /** Deletions the user picked while browsing pictures (recorded as Review.CHOSEN + PICKED). */
     public static final String PICKED = "Pictures you picked to delete";
 

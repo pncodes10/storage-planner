@@ -475,6 +475,39 @@ public final class AndroidPlatform implements Platform {
     /** Stops the text reader, if it was started. */
     public void close() { if (ocr != null) { ocr.close(); ocr = null; } }
 
+    public int[][] videoFrames(String path, long[] timesUs, int longEdge, int[] dims) {
+        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+        try {
+            mmr.setDataSource(path);
+            int[][] out = new int[timesUs.length][];
+            int w = 0, h = 0;
+            for (int i = 0; i < timesUs.length; i++) {
+                android.graphics.Bitmap b = null;
+                try {
+                    b = mmr.getFrameAtTime(timesUs[i], MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+                    if (b == null) continue;
+                    if (w == 0) {                                   // every frame gets the first frame's size
+                        double s = Math.min(1.0, longEdge / (double) Math.max(b.getWidth(), b.getHeight()));
+                        w = Math.max(1, (int) Math.round(b.getWidth() * s)); h = Math.max(1, (int) Math.round(b.getHeight() * s));
+                    }
+                    android.graphics.Bitmap sc = b.getWidth() == w && b.getHeight() == h ? b : android.graphics.Bitmap.createScaledBitmap(b, w, h, true);
+                    int[] px = new int[w * h];
+                    sc.getPixels(px, 0, w, 0, 0, w, h);
+                    out[i] = px;
+                    if (sc != b) sc.recycle();
+                } catch (Throwable ignored) {
+                } finally { if (b != null) b.recycle(); }
+            }
+            if (w == 0) return null;
+            dims[0] = w; dims[1] = h;
+            return out;
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            try { mmr.release(); } catch (Throwable ignored) {}
+        }
+    }
+
     public boolean video(FileItem f) {
         MediaMetadataRetriever mmr = new MediaMetadataRetriever();
         try {
@@ -483,6 +516,8 @@ public final class AndroidPlatform implements Platform {
             f.width = (int) parse(mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH));
             f.height = (int) parse(mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT));
             f.durationMs = parse(mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION));
+            long rot = parse(mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION));
+            if (rot == 90 || rot == 270) { int w = f.width; f.width = f.height; f.height = w; }    // as shown on screen
         } catch (Throwable t) {
             return false;
         } finally {
@@ -493,7 +528,15 @@ public final class AndroidPlatform implements Platform {
             ex.setDataSource(f.abs);
             for (int i = 0; i < ex.getTrackCount(); i++) {
                 String mime = ex.getTrackFormat(i).getString(MediaFormat.KEY_MIME);
-                if (mime != null && mime.startsWith("video/")) { f.vcodec = mime; break; }
+                if (mime != null && mime.startsWith("video/")) {
+                    f.vcodec = mime;
+                    MediaFormat fm = ex.getTrackFormat(i);
+                    if (fm.containsKey(MediaFormat.KEY_FRAME_RATE)) {
+                        try { f.fps = fm.getInteger(MediaFormat.KEY_FRAME_RATE); }
+                        catch (ClassCastException e) { try { f.fps = fm.getFloat(MediaFormat.KEY_FRAME_RATE); } catch (Throwable ignored) {} }
+                    }
+                    break;
+                }
             }
         } catch (Throwable ignored) {
         } finally {

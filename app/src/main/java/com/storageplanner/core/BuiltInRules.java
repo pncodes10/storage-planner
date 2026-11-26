@@ -53,6 +53,15 @@ public final class BuiltInRules {
         l.add(burst);
         l.add(del("blurry_photo", "Much blurrier than your other photos", Techniques.BLURRY, Option.R4, "Much softer than your other photos")
                 .when(Tags.BLURRY, Op.IS_YES, ""));
+        // ---- videos (VideoCheck looked at a few frames; never when a face is in one of them)
+        l.add(del("video_sent_copy", "Sent copy of a camera video", Techniques.SENT, Option.R1, "Compressed copy of {sent_of}, which is kept")
+                .when(Tags.SENT_COPY, Op.IS_YES, ""));
+        l.add(del("accidental_clip", "Video clip taken by mistake", Techniques.ACCIDENTAL_CLIPS, Option.R4,
+                "Very short, dark, blurred or still clip with nobody in it")
+                .when(Tags.ACCIDENTAL_CLIP, Op.IS_YES, "").when(Tags.AREA, Op.EQ, "camera"));
+        l.add(del("old_forward_video", "Old forwarded video", Techniques.FORWARD_VIDEOS, Option.R4, "Forwarded-looking video received {age} days ago, nobody in it")
+                .when(Tags.FORWARD_VIDEO, Op.IS_YES, "").when(Tags.AREA, Op.IN, "wa_video,download").when(Tags.AGE_DAYS, Op.GT, "30")
+                .when(Tags.VIDEO_PEOPLE, Op.LT, "1"));
         // ---- picture categories (a picture has one category, so these exclude each other)
         l.add(del("otp_screenshot", "Screenshot of a one-time code", Techniques.OTP_SHOTS, Option.R4, "Screenshot of a one-time code, {age} days old")
                 .when(Tags.CATEGORY, Op.EQ, PhotoCategory.OTP).when(Tags.AGE_DAYS, Op.GT, "1"));
@@ -131,6 +140,9 @@ public final class BuiltInRules {
         FILE_TYPE.put("reencode_chat_image", "jpeg");
         FILE_TYPE.put("lossless_screenshot", "png");
         FILE_TYPE.put("reencode_video", Tags.VIDEO);
+        FILE_TYPE.put("video_sent_copy", Tags.VIDEO);
+        FILE_TYPE.put("accidental_clip", Tags.VIDEO);
+        FILE_TYPE.put("old_forward_video", Tags.VIDEO);
         FILE_TYPE.put("reencode_music", Tags.AUDIO);
     }
 

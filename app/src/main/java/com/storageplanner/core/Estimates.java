@@ -19,7 +19,8 @@ public final class Estimates {
         if (f.vcodec == null || f.bitrate <= 0 || f.width <= 0 || f.height <= 0) return 0;
         String c = f.vcodec.toLowerCase();
         if (!(c.contains("avc") || c.contains("h264") || c.contains("mp4v") || c.contains("3gpp"))) return 0;
-        double bppf = f.bitrate / ((double) f.width * f.height * 30.0);   // bits per pixel per frame @30 fps
+        double fps = f.fps > 1 && f.fps < 241 ? f.fps : 30.0;           // the real frame rate when the video says, else 30
+        double bppf = f.bitrate / ((double) f.width * f.height * fps);  // bits per pixel per frame
         if (bppf >= 0.12) return 0.45;   // phone camera H.264 (~17 Mbps @1080p = 0.27)
         if (bppf >= 0.06) return 0.25;
         return 0;                        // already low bitrate (chat video, streaming downloads)

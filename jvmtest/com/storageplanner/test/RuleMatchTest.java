@@ -235,11 +235,11 @@ public final class RuleMatchTest {
             Rule u1 = cp.addUser("One", Action.DELETE); u1.when.add(Condition.parse("age_days > 3"));
             Rule edit = u1.copy(); edit.name = "Renamed"; edit.technique = Rule.USER_PREFIX + "Renamed"; edit.when.add(Condition.parse("NOT faces > 0"));
             cp.put(edit);
-            check("put() replaces by id, in place", cp.rules.size() == 31 && cp.find(u1.id).name.equals("Renamed") && cp.find(u1.id).when.size() == 2 && cp.rules.get(30).id.equals(u1.id));
+            check("put() replaces by id, in place", cp.rules.size() == 34 && cp.find(u1.id).name.equals("Renamed") && cp.find(u1.id).when.size() == 2 && cp.rules.get(33).id.equals(u1.id));
             Rule fresh = Rule.user("Two", Action.KEEP); fresh.when.add(Condition.parse("faces > 0"));
             cp.put(fresh);
-            check("put() gives a new user rule an id that is free", fresh.id != null && fresh.id.startsWith("user_") && !fresh.id.equals(u1.id) && cp.rules.size() == 32);
-            check("remove() removes a user rule and never a built-in", cp.remove(u1.id) && cp.find(u1.id) == null && !cp.remove("trash") && cp.find("trash") != null && cp.rules.size() == 31);
+            check("put() gives a new user rule an id that is free", fresh.id != null && fresh.id.startsWith("user_") && !fresh.id.equals(u1.id) && cp.rules.size() == 35);
+            check("remove() removes a user rule and never a built-in", cp.remove(u1.id) && cp.find(u1.id) == null && !cp.remove("trash") && cp.find("trash") != null && cp.rules.size() == 34);
             check("reset() of an unknown or user rule does nothing", !cp.reset("nope") && !cp.reset(fresh.id));
             RuleSet back = RuleSet.fromText(cp.toText());
             check("the edited set survives saving and loading", back.toText().equals(cp.toText()) && back.warnings.isEmpty() && back.find(fresh.id).name.equals("Two"));

@@ -67,7 +67,12 @@ public interface Platform {
     /** Image dimensions without decoding pixels: dims receives {w, h}. Returns false if unreadable. */
     boolean imageSize(String path, int[] dims);
 
-    /** Fill vcodec, width, height, bitrate, durationMs. Return false if unreadable. */
+    /**
+     * Frames of a video at these times (microseconds), ARGB with long edge ~longEdge px, upright, all the same size:
+     * dims receives {w, h}. A frame that cannot be decoded is null; returns null when the video cannot be opened.
+     */
+    int[][] videoFrames(String path, long[] timesUs, int longEdge, int[] dims);
+    /** Fill vcodec, width, height (as shown, rotation applied), fps, bitrate, durationMs. Return false if unreadable. */
     boolean video(FileItem f);
 
     /** Audio bitrate in bits/s, or 0. */

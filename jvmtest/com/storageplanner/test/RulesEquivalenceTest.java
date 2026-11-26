@@ -127,6 +127,18 @@ public final class RulesEquivalenceTest {
                 f.mirageReference = f.miragePeople == 0 && rnd.nextInt(3) == 0;
                 f.mirageObjects = f.mirageReference ? "sign, price tag" : ""; f.mirageScene = ""; f.v3Category = f.category;
             }
+            // what the frames of a video showed (1.12, VideoCheck), on some videos; lengths and fingerprints from small sets so
+            // WhatsApp copies of camera videos turn up, and values on each threshold
+            if (Tags.VIDEO.equals(Tags.kind(f)) && rnd.nextInt(3) > 0) {
+                f.durationMs = new long[] {0, 1000, 2499, 2500, 2501, 30000, 180000, 180001, 600000}[rnd.nextInt(9)];
+                if (rnd.nextInt(3) > 0) {
+                    f.videoVersion = VideoCheck.VERSION; f.vFrames = rnd.nextInt(6); f.vDark = f.vFrames == 0 ? 0 : rnd.nextInt(f.vFrames + 1);
+                    f.vMotion = new double[] {-1, 0, 2.99, 3, 20}[rnd.nextInt(5)]; f.vSharpMax = new double[] {-1, 0.5, 5, 60}[rnd.nextInt(4)];
+                    f.vPeople = new int[] {-1, 0, 0, 1, 2}[rnd.nextInt(5)]; f.vWords = new int[] {-1, 0, 3, 4, 9}[rnd.nextInt(5)];
+                    f.vHash = new long[] {0L, 0xFFFL, 0xFFFFFFL}[rnd.nextInt(3)];
+                }
+                if (rnd.nextInt(3) == 0) { int w = f.width; f.width = f.height; f.height = w; }      // upright ones
+            }
             // size to land bits per pixel on a threshold
             if (f.width > 0 && rnd.nextInt(2) == 0) {
                 double bpp = new double[] {0.1, 0.4999, 0.5, 0.5001, 1.0, 0.9999, 1.0001, 3}[rnd.nextInt(8)];
@@ -136,10 +148,27 @@ public final class RulesEquivalenceTest {
                 g.vcodec = f.vcodec; g.bitrate = f.bitrate;
                 g.mirageVersion = f.mirageVersion; g.mirageSees = f.mirageSees; g.mirageReference = f.mirageReference; g.miragePeople = f.miragePeople;
                 g.mirageStyle = f.mirageStyle; g.mirageObjects = f.mirageObjects; g.mirageScene = f.mirageScene; g.v3Category = f.v3Category;
+                g.durationMs = f.durationMs; g.videoVersion = f.videoVersion; g.vFrames = f.vFrames; g.vDark = f.vDark; g.vMotion = f.vMotion;
+                g.vSharpMax = f.vSharpMax; g.vPeople = f.vPeople; g.vWords = f.vWords; g.vHash = f.vHash;
                 f = g;
             }
             r.files.add(f);
             if (area.equals("camera") && rnd.nextInt(2) == 0) { cam.add(f); }
+        }
+        // camera videos and the WhatsApp copies of some of them (1.12): length, orientation, time and fingerprint on each side of the limits
+        for (int k = 0; k < 1 + rnd.nextInt(3); k++) {
+            long dur = 5000 + rnd.nextInt(60000), t = NOW - (long) (rnd.nextDouble() * 300 * DAY);
+            FileItem c = new FileItem("DCIM/Camera/VID_" + k + ".mp4", "/sdcard/VID_" + k + ".mp4", 20000000 + rnd.nextInt(9000000), t);
+            c.area = "camera"; c.type = "mp4"; c.vcodec = "video/avc"; c.width = 1920; c.height = 1080; c.bitrate = 17000000; c.durationMs = dur;
+            c.videoVersion = VideoCheck.VERSION; c.vFrames = 5; c.vPeople = rnd.nextInt(2); c.vWords = 0; c.vMotion = 20; c.vSharpMax = 60; c.vHash = rnd.nextLong();
+            r.files.add(c);
+            FileItem s = new FileItem("WhatsApp/Media/WhatsApp Video/Sent/VID-" + k + ".mp4", "/sdcard/s" + k + ".mp4", 3000000 + rnd.nextInt(900000),
+                    t + (rnd.nextInt(4) == 0 ? -61000 : (long) (rnd.nextDouble() * 5 * DAY)));
+            s.area = "wa_sent_video"; s.type = "mp4"; s.vcodec = "video/avc"; s.width = rnd.nextInt(4) == 0 ? 720 : 848; s.height = s.width == 720 ? 1280 : 480;
+            s.bitrate = 1500000; s.durationMs = dur + new long[] {0, 400, 1500, 1501, -1500}[rnd.nextInt(5)];
+            s.videoVersion = VideoCheck.VERSION; s.vFrames = 5; s.vPeople = c.vPeople; s.vWords = 0; s.vMotion = 20; s.vSharpMax = 30;
+            s.vHash = c.vHash ^ new long[] {0L, 0xFFFL, 0x1FFFL, -1L}[rnd.nextInt(4)];                 // 0, 12, 13 or 64 bits apart
+            r.files.add(s);
         }
         // camera photos with features: bursts, blur, sent copies of them
         long base = NOW - 100 * DAY;

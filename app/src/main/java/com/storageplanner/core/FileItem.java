@@ -19,6 +19,16 @@ public final class FileItem {
     public String vcodec;         // video codec mime (video/avc, video/hevc, ...)
     public long bitrate;          // bits per second (video or audio)
     public long durationMs;
+    public float fps;             // frames per second from the video track; 0 = unknown
+    // ---- what the frames of a video showed (VideoCheck); only when videoVersion > 0
+    public int videoVersion;      // VideoCheck.VERSION when its frames were looked at; 0 = not looked at
+    public int vFrames;           // frames decoded
+    public int vDark;             // of those, dark or flat (covered lens, pocket)
+    public double vMotion = -1;   // mean fingerprint bits changing between neighbouring frames; -1 = unknown
+    public double vSharpMax = -1; // sharpness of its sharpest frame (ImageFeatures scale); -1 = unknown
+    public int vPeople = -1;      // most faces in one frame; -1 = could not be checked
+    public int vWords = -1;       // words read in the middle frame; -1 = not read
+    public long vHash;            // fingerprint of the middle frame
 
     public PhotoQuality.Q quality;  // measured for near-duplicate shots only (eyes, faces, light); else null
 

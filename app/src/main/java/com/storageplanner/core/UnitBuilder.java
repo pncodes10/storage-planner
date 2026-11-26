@@ -109,6 +109,8 @@ public final class UnitBuilder {
                 }
             }
         }
+        // ---------------- and of camera videos (same length, same middle frame; VideoCheck)
+        VideoCheck.sentCopies(r.files, det.sentCopyOf);
 
         // ---------------- per-file units: the file's tags, then the rules (BuiltInRules plus the user's own, see RuleSet)
         // Apps and app caches above stay hard-coded; rules are for files only.

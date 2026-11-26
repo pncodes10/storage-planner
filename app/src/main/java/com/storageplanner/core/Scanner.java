@@ -66,6 +66,8 @@ public final class Scanner {
         public int workers = 1;
         /** Analyse at most this many pictures, the newest (Settings, to try the flow quickly); 0 = all. Other files stay. */
         public int maxPictures;
+        /** Time allowed for looking inside videos (VideoCheck) in this scan; the rest is done next time. 0 = off. */
+        public long videoBudgetMs = 10 * 60 * 1000L;
         /** Leave out pictures smaller than this many bytes (Settings: too small to be worth the time); 0 = none. */
         public long minPictureBytes;
     }
@@ -205,7 +207,7 @@ public final class Scanner {
             if (img && (f.area.equals("camera") || f.area.equals("wa_sent") || f.area.equals("screenshot")
                     || f.area.equals("wa_image") || f.area.equals("pictures"))) imgs.add(f);
             else if ((f.type.equals("mp4") || f.type.equals("mkv")) && (f.area.equals("camera") || f.area.equals("movies")
-                    || f.area.equals("download") || f.area.equals("wa_video"))) vids.add(f);
+                    || f.area.equals("download") || f.area.equals("wa_video") || f.area.equals("wa_sent_video"))) vids.add(f);
             else if ((f.type.equals("mp3") || f.type.equals("flac") || f.type.equals("m4a")) && f.area.equals("music")) auds.add(f);
             else if (f.rel.toLowerCase().endsWith(".apk") && f.type.equals("zip")) {
                 String[] info = pf.apkInfo(f.abs);
@@ -288,6 +290,7 @@ public final class Scanner {
             try { auds.get(k).bitrate = pf.audioBitrate(auds.get(k).abs); } catch (Throwable ignored) {}
         }
         if (opt.sortPictures) Sorter.sort(pf, pr, r, opt, measured);
+        if (opt.sortPictures && !pr.cancelled()) VideoCheck.run(pf, pr, vids, opt, opt.previous);
         return r;
     }
 
@@ -304,7 +307,7 @@ public final class Scanner {
         return Sorter.current(p);
     }
 
-    static FileItem same(FileItem f, Map<String, FileItem> prev) {
+    public static FileItem same(FileItem f, Map<String, FileItem> prev) {
         if (prev == null) return null;
         FileItem p = prev.get(f.rel);
         return p != null && p.size == f.size && p.mtime == f.mtime && f.type != null && f.type.equals(p.type) ? p : null;

@@ -112,6 +112,12 @@ public final class LegacyUnitBuilder {
                 }
             }
         }
+        VideoCheck.sentCopies(r.files, det.sentCopyOf);              // 1.12: and of camera videos
+        int ncs = 0;                                                 // 1.12: sharpness of camera photos, for blurred videos
+        for (FileItem f : r.files) if ("camera".equals(f.area) && f.sharp >= 0) ncs++;
+        double[] camSharp = new double[ncs]; ncs = 0;
+        for (FileItem f : r.files) if ("camera".equals(f.area) && f.sharp >= 0) camSharp[ncs++] = f.sharp;
+        Arrays.sort(camSharp);
 
         // ---------------- per-file units
         java.util.Set<String> keepers = new java.util.HashSet<String>();
@@ -162,6 +168,12 @@ public final class LegacyUnitBuilder {
             if (image && f.mirageVersion > 0 && f.mirageReference && age > 60)                                 // 1.11: Mirage reference photos
                 u.add(new Option("delete", Techniques.REFERENCE, s, Option.R4, true,
                         "Photo of something to remember (a sign, label, screen...), " + Math.round(age) + " days old"));
+            boolean video = Tags.VIDEO.equals(Tags.kind(f));                                                     // 1.12: videos
+            if (video && a.equals("camera") && Boolean.TRUE.equals(VideoCheck.accidental(f, camSharp)))
+                u.add(new Option("delete", Techniques.ACCIDENTAL_CLIPS, s, Option.R4, true, "Very short, dark, blurred or still clip with nobody in it"));
+            if (video && Boolean.TRUE.equals(VideoCheck.forwardLike(f)) && (a.equals("wa_video") || a.equals("download")) && age > 30
+                    && VideoCheck.looked(f) && f.vPeople >= 0 && f.vPeople < 1)
+                u.add(new Option("delete", Techniques.FORWARD_VIDEOS, s, Option.R4, true, "Forwarded-looking video received " + Math.round(age) + " days ago, nobody in it"));
             if (a.equals("download") && age > OLD_DOWNLOAD_DAYS && s >= OLD_DOWNLOAD_MIN && u.options.isEmpty())
                 u.add(new Option("delete", Techniques.OLD_DOWNLOADS, s, Option.R4, true, "Download untouched for " + Math.round(age) + " days"));
 

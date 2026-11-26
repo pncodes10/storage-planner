@@ -37,7 +37,11 @@ public final class Tags {
             APK_PACKAGE = "apk_package",
             // what Mirage (v3, AlgorithmV3) saw; known only after it looked, except the two yes/no tags marked "always known"
             MIRAGE_LOOKED = "mirage_looked", MIRAGE_SEES = "mirage_sees", MIRAGE_STYLE = "mirage_style", MIRAGE_PEOPLE = "mirage_people",
-            MIRAGE_OBJECTS = "mirage_objects", MIRAGE_SCENE = "mirage_scene", REFERENCE_PHOTO = "reference_photo", V3_CATEGORY = "mirage_category";
+            MIRAGE_OBJECTS = "mirage_objects", MIRAGE_SCENE = "mirage_scene", REFERENCE_PHOTO = "reference_photo", V3_CATEGORY = "mirage_category",
+            // videos: length and frame rate from the file; the rest from a few frames (VideoCheck), known once they were looked at
+            VIDEO_SECONDS = "video_seconds", VIDEO_FPS = "video_fps", VIDEO_VERTICAL = "vertical_video", VIDEO_LOOKED = "video_looked",
+            VIDEO_DARK = "dark_video", VIDEO_BLURRY = "blurry_video", VIDEO_STILL = "still_video", VIDEO_PEOPLE = "video_people",
+            VIDEO_WORDS = "video_text_words", ACCIDENTAL_CLIP = "accidental_clip", FORWARD_VIDEO = "forward_like_video";
 
     public static final int UNKNOWN = -1;
 
@@ -147,6 +151,15 @@ public final class Tags {
         public String screenshotApp;                    // the app a screenshot shows, from its file name; null when the name does not say
         public Boolean motionPhoto;                     // has a short video inside; null = not checked (only camera JPEG/HEIC are)
         public double motionVideoMb = UNKNOWN;          // that video's size in MB (0 when not a Motion Photo)
+        public double videoSeconds = UNKNOWN;           // a video's length; UNKNOWN for other files or when not read
+        public double videoFps = UNKNOWN;               // its frame rate; UNKNOWN when the video does not say
+        public Boolean videoVertical;                   // taller than wide as shown; null for other files or an unknown size
+        public Boolean videoLooked;                     // its frames were looked at (VideoCheck); null for files that are not videos
+        public Boolean videoDark, videoBlurry, videoStill; // dark or covered / blurred all through / nothing moving; null until looked at
+        public double videoPeople = UNKNOWN;            // most faces in one of its frames; UNKNOWN until looked at
+        public double videoWords = UNKNOWN;             // words read in its middle frame; UNKNOWN until looked at
+        public Boolean accidentalClip;                  // a clip taken by mistake (VideoCheck.accidental); null until looked at
+        public Boolean forwardVideo;                    // looks like a clip passed around in chats (VideoCheck.forwardLike); null until looked at
         public String codeType;                         // kind of QR code or barcode (PhotoMeta.CODE_*); null = not sorted
         public String scene;                            // what the photo shows (Scene.*); null = not looked at yet
         public double aesthetic = UNKNOWN;              // learned aesthetic score 1..10; UNKNOWN = not looked at yet
@@ -212,6 +225,17 @@ public final class Tags {
             l.add(text(SCREENSHOT_APP, "Screenshot of app", screenshotApp));
             l.add(flag(MOTION_PHOTO, "Motion photo (has a short video)", motionPhoto, motionPhoto != null && motionPhoto ? String.format(Locale.US, "%.1f MB video", motionVideoMb) : null));
             l.add(num(MOTION_VIDEO_MB, "Motion photo video size", motionVideoMb, String.format(Locale.US, "%.1f MB", motionVideoMb)));
+            l.add(num(VIDEO_SECONDS, "Video length", videoSeconds, String.format(Locale.US, "%.1f s", videoSeconds)));
+            l.add(num(VIDEO_FPS, "Video frame rate", videoFps, String.format(Locale.US, "%.0f fps", videoFps)));
+            l.add(flag(VIDEO_VERTICAL, "Upright video (taller than wide)", videoVertical, null));
+            l.add(flag(VIDEO_LOOKED, "Video frames looked at", videoLooked, null));
+            l.add(flag(VIDEO_DARK, "Video dark or covered", videoDark, null));
+            l.add(flag(VIDEO_BLURRY, "Video blurred all through", videoBlurry, null));
+            l.add(flag(VIDEO_STILL, "Nothing moves in the video", videoStill, null));
+            l.add(num(VIDEO_PEOPLE, "Faces in the video", videoPeople, String.format(Locale.US, "%.0f", videoPeople)));
+            l.add(num(VIDEO_WORDS, "Words in the video", videoWords, String.format(Locale.US, "%.0f", videoWords)));
+            l.add(flag(ACCIDENTAL_CLIP, "Video clip taken by mistake", accidentalClip, null));
+            l.add(flag(FORWARD_VIDEO, "Looks like a forwarded video", forwardVideo, null));
             l.add(text(CODE_TYPE, "Code type", codeType));
             l.add(text(SCENE, "Scene (what the photo shows)", scene));
             l.add(num(AESTHETIC, "Aesthetic score", aesthetic, String.format(Locale.US, "%.1f of 10", aesthetic)));
@@ -256,6 +280,10 @@ public final class Tags {
                 case SMILING: return smiling;
                 case LOOKING: return looking;
                 case MIRAGE_PEOPLE: return miragePeople;
+                case VIDEO_SECONDS: return videoSeconds;
+                case VIDEO_FPS: return videoFps;
+                case VIDEO_PEOPLE: return videoPeople;
+                case VIDEO_WORDS: return videoWords;
                 default: return UNKNOWN;
             }
         }
@@ -306,6 +334,13 @@ public final class Tags {
                 case MIRAGE_LOOKED: return mirageLooked;
                 case MIRAGE_SEES: return mirageSees;
                 case REFERENCE_PHOTO: return referencePhoto;
+                case VIDEO_VERTICAL: return videoVertical;
+                case VIDEO_LOOKED: return videoLooked;
+                case VIDEO_DARK: return videoDark;
+                case VIDEO_BLURRY: return videoBlurry;
+                case VIDEO_STILL: return videoStill;
+                case ACCIDENTAL_CLIP: return accidentalClip;
+                case FORWARD_VIDEO: return forwardVideo;
                 default: return null;
             }
         }
@@ -345,12 +380,13 @@ public final class Tags {
     static {
         for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, GLARE_SHARE, COLOURFULNESS,
                 GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE, TAKEN_DAYS, MOTION_VIDEO_MB,
-                AESTHETIC, SMILING, LOOKING, MIRAGE_PEOPLE}) TYPES.put(id, Type.NUMBER);
+                AESTHETIC, SMILING, LOOKING, MIRAGE_PEOPLE, VIDEO_SECONDS, VIDEO_FPS, VIDEO_PEOPLE, VIDEO_WORDS}) TYPES.put(id, Type.NUMBER);
         for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE, SCENE,
                 MIRAGE_STYLE, MIRAGE_OBJECTS, MIRAGE_SCENE, V3_CATEGORY}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
                 ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE, FAVOURITE, MOTION_PHOTO,
-                MIRAGE_LOOKED, MIRAGE_SEES, REFERENCE_PHOTO}) TYPES.put(id, Type.FLAG);
+                MIRAGE_LOOKED, MIRAGE_SEES, REFERENCE_PHOTO, VIDEO_VERTICAL, VIDEO_LOOKED, VIDEO_DARK, VIDEO_BLURRY, VIDEO_STILL,
+                ACCIDENTAL_CLIP, FORWARD_VIDEO}) TYPES.put(id, Type.FLAG);
     }
 
     /** The type of the tag with this id; null if there is no such tag. */
@@ -386,7 +422,11 @@ public final class Tags {
         {MIRAGE_LOOKED, "", "has been looked at by Mirage"}, {MIRAGE_SEES, "", "has something Mirage clearly sees"},
         {MIRAGE_STYLE, "", "kind of picture (Mirage)"}, {MIRAGE_PEOPLE, "", "number of people seen by Mirage"},
         {MIRAGE_OBJECTS, "", "things seen by Mirage"}, {MIRAGE_SCENE, "", "scene seen by Mirage"},
-        {REFERENCE_PHOTO, "", "is a photo taken to remember something"}, {V3_CATEGORY, "", "picture category by v3"}};
+        {REFERENCE_PHOTO, "", "is a photo taken to remember something"}, {V3_CATEGORY, "", "picture category by v3"},
+        {VIDEO_SECONDS, "s", "video length"}, {VIDEO_FPS, "fps", "frame rate"}, {VIDEO_VERTICAL, "", "is an upright video"},
+        {VIDEO_LOOKED, "", "has had its frames looked at"}, {VIDEO_DARK, "", "is a dark or covered video"}, {VIDEO_BLURRY, "", "is blurred all through"},
+        {VIDEO_STILL, "", "has nothing moving in it"}, {VIDEO_PEOPLE, "", "number of faces in the video"}, {VIDEO_WORDS, "", "number of words in the video"},
+        {ACCIDENTAL_CLIP, "", "is a clip taken by mistake"}, {FORWARD_VIDEO, "", "is a forwarded-looking video"}};
 
     private static List<Info> LIST;
 
@@ -554,6 +594,17 @@ public final class Tags {
         if (f.taken > 0) t.takenDays = Math.max(0, (now - f.taken) / 86400000.0);
         if (t.screenshot) t.screenshotApp = PhotoMeta.screenshotApp(f.name(), ctx.apps);
         if (f.motionBytes >= 0) { t.motionPhoto = f.motionBytes > 0; t.motionVideoMb = f.motionBytes / 1e6; }
+        if (VIDEO.equals(t.kind)) {
+            t.videoSeconds = VideoCheck.seconds(f);
+            if (f.fps > 0) t.videoFps = f.fps;
+            t.videoVertical = VideoCheck.vertical(f);
+            t.videoLooked = VideoCheck.looked(f);
+            t.videoDark = VideoCheck.dark(f); t.videoBlurry = VideoCheck.blurry(f, ctx.cameraSharp); t.videoStill = VideoCheck.still(f);
+            if (VideoCheck.looked(f) && f.vPeople >= 0) t.videoPeople = f.vPeople;
+            if (VideoCheck.looked(f) && f.vWords >= 0) t.videoWords = f.vWords;
+            t.accidentalClip = VideoCheck.accidental(f, ctx.cameraSharp);
+            t.forwardVideo = VideoCheck.forwardLike(f);
+        }
         if (f.category != null) t.codeType = PhotoMeta.codeType(f.code);
         if (f.category != null) t.scene = Scene.of(f);
         if (f.aesthetic >= 0) t.aesthetic = Math.round(f.aesthetic * 10) / 10.0;
