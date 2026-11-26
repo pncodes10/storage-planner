@@ -12,10 +12,16 @@ being asked:
    and push again; do not hand over a broken build.
 2. **Publish a release so the installed app can update itself.** Installed copies read the latest GitHub release
    (`Updater.java`) and update from its signed APK, so create a new tag:
-   - bump the version with `tools/release.sh X.Y.Z` (patch bump for fixes, minor for new features; it must be newer
-     than the version in `app/build.gradle`; run on the branch being tested with a clean tree). It commits
-     "Release X.Y.Z", tags `vX.Y.Z` and pushes branch and tag, which starts the Release workflow
-     (`.github/workflows/release.yml`).
+   - bump the version with `tools/release.sh X.Y.Z` every time you fix a bug or add functionality; do not ask the owner
+     which number. You decide the bump yourself, from the change:
+     - **patch** (1.11.0 -> 1.11.1): bug fixes, small tweaks, wording, performance with no new behaviour;
+     - **minor** (1.11.0 -> 1.12.0): new functionality or a visible change to how something works (a new screen,
+       rule, lab tool, setting, or a change in how files are sorted or suggested);
+     - **major** (1.11.0 -> 2.0.0): a breaking or sweeping change: stored data or settings that no longer carry over,
+       a redesign of the main flow, or removing a feature people rely on.
+     When a change is mixed, take the highest level it contains. The version must be newer than the one in
+     `app/build.gradle`. Run it on the branch being tested with a clean tree. It commits "Release X.Y.Z", tags
+     `vX.Y.Z` and pushes branch and tag, which starts the Release workflow (`.github/workflows/release.yml`).
    - wait for the Release run to finish and confirm the release `vX.Y.Z` exists with its `.apk` and `.apk.sha256`.
      Give the owner the release link.
    - skip the release (APK link only) when the change is not something to test on the phone, and say so.
