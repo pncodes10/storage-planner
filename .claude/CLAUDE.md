@@ -3,8 +3,10 @@
 ## After pushing code that changes app behaviour: deliver it for testing, then test it yourself
 
 The owner tests every change by installing the APK on their phone. Whenever you push new functionality or a bug fix
-(anything under `app/` that changes what the app does; not docs, comments or CI-only changes), do all of this without
-being asked:
+(anything under `app/` that changes what the app does; not docs, comments or CI-only changes), do all of this
+**automatically, on your own, as part of finishing the task**. The owner should never have to ask for the APK link, the
+version bump, the release or the phone test; a task is not done until they are finished (or you have said what blocked
+them). This also applies to work that was pushed earlier but never released:
 
 1. **Give the APK link.** Watch the push's "Build APK" run (`.github/workflows/build-apk.yml`; use the GitHub MCP
    `actions_*` tools), and when it succeeds give the owner a link to that run's page with its downloadable artifact
