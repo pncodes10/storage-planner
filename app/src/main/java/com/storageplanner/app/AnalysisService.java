@@ -44,7 +44,7 @@ public final class AnalysisService extends Service {
         if (ACTION_CANCEL.equals(action)) {
             AnalysisState.cancelled = true;
             if (!workerActive) stopSelf(startId);
-            else notifyProgress("Cancelling", 0, 0, true);
+            else notifyProgress("Pausing", 0, 0, true);
             return START_NOT_STICKY;
         }
         // started with startForegroundService: must go foreground right away, even if already running
@@ -100,13 +100,17 @@ public final class AnalysisService extends Service {
                         .setAutoCancel(true)
                         .setOnlyAlertOnce(true)
                         .setContentIntent(openApp());
-                if (o != null && o.ok) {
+                if (o != null && o.ok && o.paused) {
+                    b.setSmallIcon(android.R.drawable.stat_notify_sdcard)
+                     .setContentTitle("Analysis paused: frees " + Report.gb(o.saved) + " so far")
+                     .setContentText("Tap to review what is ready, or carry on.");
+                } else if (o != null && o.ok) {
                     b.setSmallIcon(android.R.drawable.stat_notify_sdcard)
                      .setContentTitle("Your storage plan is ready: frees " + Report.gb(o.saved))
                      .setContentText("Tap to review it. Nothing has been deleted or changed.");
                 } else if (o != null && o.cancelled) {
                     b.setSmallIcon(android.R.drawable.stat_notify_sdcard)
-                     .setContentTitle("Analysis cancelled")
+                     .setContentTitle("Analysis stopped")
                      .setContentText("Tap to open Storage Planner.");
                 } else {
                     b.setSmallIcon(android.R.drawable.stat_notify_error)
@@ -142,11 +146,11 @@ public final class AnalysisService extends Service {
     }
 
     private Notification progressNotification(String stage, int done, int total, boolean cancelling) {
-        String text = cancelling ? "Cancelling…"
+        String text = cancelling ? "Pausing…"
                 : total > 0 ? stage + "  " + done + " of " + total : (done > 0 ? stage + "  " + done : (stage == null || stage.isEmpty() ? "Starting" : stage) + "…");
         Notification.Builder b = builder(CH_PROGRESS)
                 .setSmallIcon(android.R.drawable.stat_notify_sync)
-                .setContentTitle("Analysing your storage")
+                .setContentTitle(AnalysisState.freed > 0 ? "Analysing · frees " + Report.size(AnalysisState.freed) + " so far" : "Analysing your storage")
                 .setContentText(text)
                 .setOngoing(true)
                 .setShowWhen(false)
@@ -156,8 +160,8 @@ public final class AnalysisService extends Service {
         if (!cancelling) {
             Intent ci = new Intent(this, AnalysisService.class).setAction(ACTION_CANCEL);
             PendingIntent cp = PendingIntent.getService(this, 1, ci, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-            b.addAction(new Notification.Action.Builder(Icon.createWithResource(this, android.R.drawable.ic_menu_close_clear_cancel),
-                    "Cancel", cp).build());
+            b.addAction(new Notification.Action.Builder(Icon.createWithResource(this, android.R.drawable.ic_media_pause),
+                    "Pause", cp).build());
         }
         if (Build.VERSION.SDK_INT >= 31) b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE);
         return b.build();

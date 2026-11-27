@@ -29,7 +29,7 @@ import java.util.List;
  */
 public final class CleanupScreen extends Screen {
     private LinearLayout content;
-    private Button go;
+    private Button go, play;
 
     public CleanupScreen(MainActivity a) { super(a); }
 
@@ -53,8 +53,16 @@ public final class CleanupScreen extends Screen {
         go = Ui.button(a, "", true);
         go.setTextSize(17);
         go.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.push(new ConfirmScreen(a)); } });
-        LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(-1, dp(56)); gl.topMargin = dp(10);
-        bar.addView(go, gl);
+        play = Ui.button(a, "▶  Carry on", false);
+        play.setTextSize(16);
+        play.setContentDescription("Carry on analysing the files not done yet");
+        play.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.carryOn(); } });
+        LinearLayout buttons = Ui.row(a);
+        LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(-2, dp(56)); pl.rightMargin = dp(10);
+        buttons.addView(play, pl);
+        buttons.addView(go, new LinearLayout.LayoutParams(0, dp(56), 1));
+        LinearLayout.LayoutParams gl = new LinearLayout.LayoutParams(-1, -2); gl.topMargin = dp(10);
+        bar.addView(buttons, gl);
         root.addView(bar, new LinearLayout.LayoutParams(-1, -2));
         refresh();
         return root;
@@ -66,6 +74,7 @@ public final class CleanupScreen extends Screen {
         if (!Session.hasResults()) {
             Ui.add(content, Ui.text(a, "No analysis yet. Go back and tap Analyse my storage.", 15, Ui.text2, false), 8);
             go.setVisibility(View.GONE);
+            play.setVisibility(View.GONE);
             return;
         }
         List<FinalPlan.Entry> all = PlanStore.entries(a);
@@ -74,6 +83,20 @@ public final class CleanupScreen extends Screen {
         long fin = PlanStore.finalized(a);
         long removed = t.saved(FinalPlan.DELETE), smaller = t.saved(FinalPlan.COMPRESS);
         hero(t.freed(), removed, smaller, Session.used(), fin);
+        String paused = AnalysisScreen.pausedLine(a);
+        if (paused != null) {
+            int waiting = Session.ub == null ? 0 : Session.ub.det.waiting.size();
+            LinearLayout band = new LinearLayout(a);
+            band.setOrientation(LinearLayout.VERTICAL);
+            band.setBackground(Ui.round(Ui.removeTint, dp(14)));
+            band.setPadding(dp(14), dp(12), dp(14), dp(12));
+            band.addView(Ui.text(a, (AnalysisState.running ? "Analysing · " : "") + paused, 15, Ui.removeInk, true));
+            band.addView(Ui.text(a, "This plan covers only those. The rest are left alone until you carry on."
+                    + (waiting > 0 ? " " + Piles.count(waiting, "group") + " of similar shots wait for photos not looked at yet." : ""), 13, Ui.removeInk, false));
+            band.setContentDescription(paused + ". This plan covers only those.");
+            LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-1, -2); bl.topMargin = dp(10);
+            content.addView(band, bl);
+        }
         String part = AnalysisRunner.lastSample(a);
         if (part != null) {
             TextView n = Ui.text(a, "This plan covers only part of your pictures (" + part + "). Change it in Settings › Analysis.", 13, Ui.keepInk, false);
@@ -119,7 +142,8 @@ public final class CleanupScreen extends Screen {
             }
         });
 
-        go.setVisibility(t.freed() > 0 ? View.VISIBLE : View.GONE);
+        go.setVisibility(t.freed() > 0 ? View.VISIBLE : View.INVISIBLE);
+        play.setVisibility(paused != null && !AnalysisState.running ? View.VISIBLE : View.GONE);
         go.setText(fin == 0 ? "Clean up " + Report.size(t.freed()) : "Continue clean-up · " + Report.size(t.freed()));
     }
 

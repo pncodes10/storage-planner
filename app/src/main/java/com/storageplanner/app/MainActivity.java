@@ -47,11 +47,17 @@ public final class MainActivity extends Activity {
     private boolean awaitingLoad;
 
     private final AnalysisState.Listener listener = new AnalysisState.Listener() {
-        public void onProgress(String stage, int done, int total) { setup.progress(stage, done, total); }
+        public void onProgress(String stage, int done, int total) {
+            setup.progress(stage, done, total);
+            if (!stack.isEmpty() && top() instanceof AnalysisScreen) top().refresh();
+        }
         public void onFinished(String msg, boolean ok) {
             setup.finished(msg);
             if (ok && Session.hasResults()) showFreshOverview();
-            else if (!stack.isEmpty()) top().refresh();
+            else {
+                closeProgress();
+                if (!stack.isEmpty()) top().refresh();
+            }
         }
     };
 
@@ -76,6 +82,7 @@ public final class MainActivity extends Activity {
             pendingStack = saved; awaitingLoad = true;
             loadSavedResults();
         }
+        if (AnalysisState.running) push(new AnalysisScreen(this));     // reopened while it runs: show the progress
         setup.refresh();
         Updater.cleanUp(this);
         if (b == null && Updater.autoCheck(this)) checkForUpdates(false);       // on every start (not on a rotation or restore)
@@ -89,7 +96,10 @@ public final class MainActivity extends Activity {
             AnalysisState.pendingOverview = false;       // finished while we were away
             setup.refresh();
             showFreshOverview();
-        } else if (!stack.isEmpty()) top().refresh();
+        } else {
+            if (!AnalysisState.running) closeProgress();     // it stopped while we were away, with nothing new to show
+            if (!stack.isEmpty()) top().refresh();
+        }
         if (!AnalysisState.running) AnalysisService.clearResultNotification(this);
     }
 
@@ -247,6 +257,25 @@ public final class MainActivity extends Activity {
     }
 
     private Screen top() { return stack.get(stack.size() - 1); }
+
+    /** Takes the progress screen off the stack (the analysis stopped without a plan to show). */
+    private void closeProgress() {
+        boolean onTop = !stack.isEmpty() && top() instanceof AnalysisScreen;
+        for (int i = stack.size() - 1; i >= 1; i--) if (stack.get(i) instanceof AnalysisScreen) stack.remove(i);
+        if (onTop) show(top());
+    }
+
+    /** The analysis screen: opens the running analysis's progress. */
+    void showProgress() {
+        if (!stack.isEmpty() && top() instanceof AnalysisScreen) { top().refresh(); return; }
+        push(new AnalysisScreen(this));
+    }
+
+    /** Play: carries on a paused analysis (unchanged files done before are taken over in seconds). */
+    void carryOn() {
+        if (!AndroidPlatform.hasFilesAccess(this)) { toast("Allow access to files first."); return; }
+        startAnalysis(PlanStore.targetGb(this), PlanStore.measure(this));
+    }
 
     /** The plan was rebuilt (rules changed): the screen on top shows it. */
     static void planChanged() {
@@ -421,7 +450,8 @@ public final class MainActivity extends Activity {
 
     /** sample: only the pictures picked on Try on my pictures; the start screen shows the progress, the overview the plan. */
     void startAnalysis(final double targetGb, final boolean measure, final boolean sample) {
-        if (!AnalysisState.begin()) return;
+        if (!AnalysisState.begin()) { showProgress(); return; }
+        if (!sample) showProgress();
         // the scan runs whether or not this is granted; it only decides whether the notification shows
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
             requestPermissions(new String[]{android.Manifest.permission.POST_NOTIFICATIONS}, 2);

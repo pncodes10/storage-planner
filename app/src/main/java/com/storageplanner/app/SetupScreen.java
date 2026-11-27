@@ -75,12 +75,14 @@ public final class SetupScreen extends Screen {
         // analyse
         LinearLayout row = Ui.row(a);
         analyzeBtn = Ui.button(a, "Analyse my storage", true);
-        analyzeBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { startAnalysis(); } });
-        cancelBtn = Ui.button(a, "Cancel", false);
+        analyzeBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) {
+            if (AnalysisState.running) a.showProgress(); else startAnalysis();
+        } });
+        cancelBtn = Ui.button(a, "Pause", false);
         cancelBtn.setOnClickListener(new View.OnClickListener() { public void onClick(View v) {
             AnalysisState.cancelled = true;
             refresh();
-            v.announceForAccessibility("Cancelling");
+            v.announceForAccessibility("Pausing");
         } });
         LinearLayout.LayoutParams al = new LinearLayout.LayoutParams(0, dp(54), 1);
         row.addView(analyzeBtn, al);
@@ -164,7 +166,9 @@ public final class SetupScreen extends Screen {
         planCard.setVisibility(results ? View.VISIBLE : View.GONE);
         if (results) {
             long fin = PlanStore.finalized(a);
-            TextView head = Ui.text(a, fin == 0 ? "YOUR PLAN · DRAFT" : "YOUR PLAN · ✓ FINALIZED", 12, fin == 0 ? Ui.text2 : PlanScreen.KEEP_COLOR, true);
+            String pz = AnalysisScreen.pausedLine(a);
+            TextView head = Ui.text(a, pz != null ? "YOUR PLAN · " + pz.toUpperCase(java.util.Locale.ROOT)
+                    : fin == 0 ? "YOUR PLAN · DRAFT" : "YOUR PLAN · ✓ FINALIZED", 12, fin == 0 ? Ui.text2 : PlanScreen.KEEP_COLOR, true);
             head.setLetterSpacing(0.08f);
             planCard.addView(head);
             Ui.add(planCard, Ui.text(a, "Free up " + Report.size(t.freed()), 26, Ui.accent, true), 6);
@@ -177,12 +181,13 @@ public final class SetupScreen extends Screen {
             planCard.setContentDescription("Your plan: free up " + Report.size(t.freed()));
         }
 
-        analyzeBtn.setText(Session.hasResults() ? "Analyse again" : "Analyse my storage");
-        analyzeBtn.setEnabled(!running && !loading);
+        int[] paused = AnalysisRunner.paused(a);
+        analyzeBtn.setText(running ? "See the progress" : paused != null ? "Carry on analysing" : Session.hasResults() ? "Analyse again" : "Analyse my storage");
+        analyzeBtn.setEnabled(!loading);
         cancelBtn.setVisibility(running ? View.VISIBLE : View.GONE);
         cancelBtn.setEnabled(running && !AnalysisState.cancelled);
         if (running) {
-            if (AnalysisState.cancelled) { progressBar.setVisibility(View.VISIBLE); progressBar.setIndeterminate(true); progressText.setText("Cancelling…"); }
+            if (AnalysisState.cancelled) { progressBar.setVisibility(View.VISIBLE); progressBar.setIndeterminate(true); progressText.setText("Pausing…"); }
             else progress(AnalysisState.stage, AnalysisState.done, AnalysisState.total);
         } else if (loading) {
             progressBar.setVisibility(View.VISIBLE);
@@ -217,7 +222,8 @@ public final class SetupScreen extends Screen {
     public void progress(String stage, int done, int total) {
         if (progressText == null || AnalysisState.cancelled) return;
         progressBar.setVisibility(View.VISIBLE);
-        progressText.setText(total > 0 ? stage + "  " + done + " of " + total : (done > 0 ? stage + "  " + done : stage + "…"));
+        String freed = AnalysisState.freed > 0 ? " · frees " + Report.size(AnalysisState.freed) + " so far" : "";
+        progressText.setText((total > 0 ? stage + "  " + done + " of " + total : (done > 0 ? stage + "  " + done : stage + "…")) + freed);
         if (total > 0) { progressBar.setIndeterminate(false); progressBar.setMax(total); progressBar.setProgress(done); }
         else progressBar.setIndeterminate(true);
     }

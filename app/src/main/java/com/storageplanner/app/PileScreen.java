@@ -61,6 +61,7 @@ public final class PileScreen extends Screen {
         banner.setBackground(Ui.round(Piles.SMALLER.equals(pile) ? Ui.smallerTint : Ui.removeTint, dp(14)));
         banner.setPadding(dp(14), dp(12), dp(14), dp(12));
         Ui.add(top, banner, 10);
+        if (Piles.COPIES.equals(pile)) waiting(top);
         root.addView(top);
 
         list = new ListView(a);
@@ -95,6 +96,51 @@ public final class PileScreen extends Screen {
         root.addView(bar);
         refresh();
         return root;
+    }
+
+    /**
+     * A paused analysis: groups of similar shots with photos of the same moment not looked at yet. The best one could be
+     * among those, so nothing in the group is removed until they are. Shows the first group's photos done, then an empty
+     * tile for each one still to come.
+     */
+    private void waiting(LinearLayout top) {
+        if (Session.ub == null || Session.ub.det.waiting.isEmpty()) return;
+        List<List<String>> groups = Session.ub.det.waiting;
+        LinearLayout c = new LinearLayout(a);
+        c.setOrientation(LinearLayout.VERTICAL);
+        c.setBackground(Ui.outlineDrawable(a, Ui.text2, 1.5f));
+        c.setPadding(dp(14), dp(12), dp(14), dp(12));
+        c.addView(Ui.text(a, "◷  Waiting: not decided yet", 15, Ui.text, true));
+        LinearLayout strip = Ui.row(a);
+        int cell = dp(64), shown = 0;
+        for (String rel : groups.get(0)) {
+            FileItem f = Session.fileByRel.get(rel);
+            if (f == null || shown == 3) continue;
+            ImageView iv = new ImageView(a);
+            iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            iv.setBackground(Ui.round(Ui.surface2, dp(8)));
+            iv.setClipToOutline(true);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cell, cell); lp.rightMargin = dp(6);
+            strip.addView(iv, lp);
+            Thumbs.load(iv, f, cell);
+            shown++;
+        }
+        int missing = Session.ub.det.waitingMissing.get(0);
+        for (int i = 0; i < Math.min(missing, 4 - shown); i++) {
+            TextView t = Ui.text(a, "not looked at", 11, Ui.text2, false);
+            t.setGravity(Gravity.CENTER);
+            t.setBackground(Ui.round(Ui.surface2, dp(8)));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(cell, cell); lp.rightMargin = dp(6);
+            strip.addView(t, lp);
+        }
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(-1, -2); sl.topMargin = dp(10);
+        c.addView(strip, sl);
+        String more = groups.size() > 1 ? " " + Piles.count(groups.size() - 1, "more group") + " of similar shots wait" + (groups.size() == 2 ? "s" : "") + " the same way." : "";
+        Ui.add(c, Ui.text(a, Piles.count(missing, "more shot") + " of this moment " + (missing == 1 ? "isn't" : "aren't")
+                + " analysed yet. The best one could be among them, so nothing here is removed until carrying on finishes them." + more, 13, Ui.text2, false), 10);
+        c.setContentDescription("Waiting: " + groups.size() + " groups of similar shots are not decided yet, because photos of the same moment are not analysed yet.");
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(-1, -2); cl.topMargin = dp(10);
+        top.addView(c, cl);
     }
 
     /**

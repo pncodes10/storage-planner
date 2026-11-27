@@ -60,6 +60,13 @@ public final class Session {
         return tagContext;
     }
 
+    /** No results any more (an analysis was thrown away). Main thread. */
+    public static void clear() {
+        result = null; ub = null; est = null; plan = null; safe = null; tagContext = null;
+        unitById.clear(); fileByRel.clear(); copiesOf.clear(); pictures.clear();
+        candidates = new HashMap<String, List<Unit>>(); breakdown = new HashMap<String, Long>();
+    }
+
     public static boolean hasResults() { return result != null && ub != null && plan != null; }
     public static long used() { return result.total - result.free; }
 

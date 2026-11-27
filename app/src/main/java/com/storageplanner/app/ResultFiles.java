@@ -76,6 +76,14 @@ final class ResultFiles {
         }
     }
 
+    /** Removes the saved results (an analysis thrown away: the next one starts from the beginning). */
+    static void delete(Context c) {
+        synchronized (LOCK) {
+            current = null;
+            file(c).delete();
+        }
+    }
+
     /** Main thread: snapshot Session and write it in the background (e.g. after the plan mode changed). */
     static void saveSessionAsync(Context c) {
         if (!Session.hasResults()) return;

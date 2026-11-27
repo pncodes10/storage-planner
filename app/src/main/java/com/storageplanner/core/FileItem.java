@@ -77,6 +77,12 @@ public final class FileItem {
     public String v3Category;     // the category v3 gives (AlgorithmV3); the scan's own category stays v2's
     public long v3Date;           // a date v3 read in the picture, 0 if none
 
+    /**
+     * Not analysed yet: the analysis was paused before it reached this file (it goes on from there next time). A pending
+     * file gets no suggestion, and nothing that compares files counts it (similar shots, blur, sent copies) until it is done.
+     */
+    public boolean pending;
+
     public String apkPackage;     // for .apk files: the package inside
     public long apkVersion;
 

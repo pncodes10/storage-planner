@@ -81,12 +81,12 @@ public final class Tags {
         Context(Scanner.Result r, UnitBuilder.Detections det) {
             this.det = det;
             int n = 0;
-            for (FileItem f : r.files) if ("camera".equals(f.area) && f.sharp >= 0) n++;
+            for (FileItem f : r.files) if ("camera".equals(f.area) && f.sharp >= 0 && !f.pending) n++;
             cameraSharp = new double[n];
             n = 0;
             for (FileItem f : r.files) {
                 byRel.put(f.rel, f);
-                if ("camera".equals(f.area) && f.sharp >= 0) cameraSharp[n++] = f.sharp;
+                if ("camera".equals(f.area) && f.sharp >= 0 && !f.pending) cameraSharp[n++] = f.sharp;
             }
             Arrays.sort(cameraSharp);
             blurry.addAll(det.blurry);

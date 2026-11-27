@@ -241,7 +241,7 @@ public final class VideoCheck {
     public static void sentCopies(List<FileItem> files, Map<String, String> out) {
         List<FileItem> cam = new ArrayList<FileItem>(), sent = new ArrayList<FileItem>();
         for (FileItem f : files) {
-            if (f.videoVersion <= 0 || !f.vHashed || f.durationMs <= 0 || !Tags.VIDEO.equals(Tags.kind(f))) continue;
+            if (f.pending || f.videoVersion <= 0 || !f.vHashed || f.durationMs <= 0 || !Tags.VIDEO.equals(Tags.kind(f))) continue;
             if ("camera".equals(f.area)) cam.add(f);
             else if ("wa_sent_video".equals(f.area)) sent.add(f);
         }

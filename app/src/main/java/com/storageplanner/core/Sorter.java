@@ -82,6 +82,14 @@ final class Sorter {
     static void sort(Platform pf, Scanner.Progress pr, Scanner.Result r, Scanner.Options opt, Map<FileItem, Prep> measured) {
         List<FileItem> pics = new ArrayList<FileItem>();
         for (FileItem f : r.files) if (PhotoCategory.sortable(f)) pics.add(f);
+        r.mirageNote = sort(pf, pr, pics, r.now, opt, measured);
+    }
+
+    /**
+     * Sorts these pictures (all of them, or one batch of the analysis): measures, reads text, looks at what photos show,
+     * then Mirage. Returns why Mirage could not look at them (see mirage), or null.
+     */
+    static String sort(final Platform pf, Scanner.Progress pr, List<FileItem> pics, long now, final Scanner.Options opt, Map<FileItem, Prep> measured) {
         final Map<FileItem, ImageSignals.S> sig = java.util.Collections.synchronizedMap(new HashMap<FileItem, ImageSignals.S>());
         final Map<FileItem, double[]> aspect = java.util.Collections.synchronizedMap(new HashMap<FileItem, double[]>());
         final List<FileItem> toRead = java.util.Collections.synchronizedList(new ArrayList<FileItem>());
@@ -123,7 +131,7 @@ final class Sorter {
             f.category = c.category; f.catDate = again && !read ? p.catDate : 0; f.text = again && !read ? p.text : null;
             f.textPending = read; f.sortVersion = VERSION;
             if (read) { toRead.add(f); sig.put(f, s); aspect.put(f, new double[]{m.aspect}); }
-        } })) return;
+        } })) return null;
         int[] dims = new int[4];
         // ---- pass 2: read text, screenshots first, then newest first, within the time limit
         Collections.sort(toRead, new Comparator<FileItem>() {
@@ -141,8 +149,9 @@ final class Sorter {
         final List<java.util.concurrent.Future<TextRules.Words>> ahead = new ArrayList<java.util.concurrent.Future<TextRules.Words>>();
         try {
         for (int k = 0; k < toRead.size(); k++) {
-            if (pr.cancelled()) return;
+            if (pr.cancelled()) return null;
             if (System.currentTimeMillis() - t0 > opt.textBudgetMs) break;     // the rest stays "not read yet"
+            if (!opt.readerWorked && opt.readerFails >= 3) break;              // no reader on this phone (earlier batches): next scan
             pr.update("Reading text in pictures", k + 1, toRead.size());
             FileItem f = toRead.get(k);
             TextRules.Words words = null;
@@ -153,20 +162,21 @@ final class Sorter {
                         public TextRules.Words call() { return readFirst(pf, g); }
                     }));
                 }
-                try { words = ahead.get(k).get(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; }
+                try { words = ahead.get(k).get(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return null; }
                 catch (Exception e) { words = null; }
             } else {
                 words = readFirst(pf, f);
             }
             if (words == null) {
-                if (++fails >= 3 && k + 1 == fails) break;             // no reader on this phone: try again next scan
-                if (k + 1 > fails) words = new TextRules.Words();       // the reader works, this picture just gave nothing
+                opt.readerFails++;
+                if (++fails >= 3 && k + 1 == fails && !opt.readerWorked) break;    // no reader on this phone: try again next scan
+                if (k + 1 > fails || opt.readerWorked) words = new TextRules.Words();   // the reader works, this picture just gave nothing
                 else continue;
-            }
+            } else { opt.readerWorked = true; opt.readerFails = 0; }
             fails = 0;
             ImageSignals.S s = sig.get(f);
             TextRules.Verdict v = TextRules.classify(words, aspect.get(f)[0], s.colorful >= 15 && s.flat < 0.5, PhotoCategory.isScreenshot(f),
-                    f.area.startsWith("wa_") || "telegram_media".equals(f.area), r.now);
+                    f.area.startsWith("wa_") || "telegram_media".equals(f.area), now);
             boolean chat = f.area.startsWith("wa_") || "telegram_media".equals(f.area);
             boolean photoLike = s.colorful >= 15 && s.flat < 0.5;
             if (v.kind == null && chat && photoLike) {
@@ -175,7 +185,7 @@ final class Sorter {
                     int[] small = pf.argb(f.abs, GREETING_EDGE, dims);
                     TextRules.Words w2 = small == null ? null : pf.readText(f.abs, small, dims[2], dims[3]);
                     if (w2 != null) {
-                        TextRules.Verdict v2 = TextRules.classify(w2, aspect.get(f)[0], true, false, true, r.now);
+                        TextRules.Verdict v2 = TextRules.classify(w2, aspect.get(f)[0], true, false, true, now);
                         if (PhotoCategory.GREETING.equals(v2.kind)) { v = v2; words = w2; }
                     }
                 } catch (Throwable ignored) {}
@@ -187,7 +197,7 @@ final class Sorter {
         }
         } finally { if (ex != null) ex.shutdownNow(); }
         scenes(pf, pr, pics, opt);
-        r.mirageNote = mirage(pf, pr, pics, opt, r.now);
+        return mirage(pf, pr, pics, opt, now);
     }
 
     /** Decodes one picture and reads its text; null when it cannot be decoded or there is no reader. */

@@ -27,7 +27,7 @@ public final class ResultStore {
     private ResultStore() {}
 
     public static final int MAGIC = 0x53504C52;     // "SPLR"
-    public static final int VERSION = 13;            // 13: what the video index said (detail, stillness, sound) and whether the fingerprint was measured; 12: frame rate and what the frames of each video showed (VideoCheck); 11: what Mirage saw (style, people, objects, scene, reference photo, v3 category); 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts; 9: favourite, date taken, Motion Photo video; 10: scene, aesthetic score, smiles, faces looking at the camera, face size (and smiles in the near-identical shots' measurements)
+    public static final int VERSION = 14;            // 14: files not analysed yet (a paused analysis); 13: what the video index said (detail, stillness, sound) and whether the fingerprint was measured; 12: frame rate and what the frames of each video showed (VideoCheck); 11: what Mirage saw (style, people, objects, scene, reference photo, v3 category); 2 (app 1.5): photo quality of near-identical shots; 3 (1.6): picture categories; 4: picture measurements (signals) on every sorted picture; 5: page-of-paper measurements and the sorting version of each picture; 6: eyes open on every sorted photo with a face; 7: glare share; 8: focus of the sharpest parts; 9: favourite, date taken, Motion Photo video; 10: scene, aesthetic score, smiles, faces looking at the camera, face size (and smiles in the near-identical shots' measurements)
     static final int OLDEST_READABLE = 1;
     private static final int MAX_ITEMS = 5000000, MAX_STRING = 1 << 20;
 
@@ -141,6 +141,7 @@ public final class ResultStore {
                 out.writeBoolean(f.vHashed); out.writeBoolean(f.vIndexed); out.writeInt(f.vKeyframes);
                 out.writeDouble(f.vLowDetail); out.writeDouble(f.vStill); out.writeInt(f.vAudio); out.writeDouble(f.vQuiet);
             }
+            if (version >= 14) out.writeBoolean(f.pending);
         }
 
         out.writeInt(r.apps.size());
@@ -282,6 +283,7 @@ public final class ResultStore {
                 if (f.vKeyframes < 0 || !(f.vLowDetail >= -1 && f.vLowDetail <= 1) || !(f.vStill >= -1 && f.vStill <= 1) || f.vAudio < -1 || f.vAudio > 1
                         || !(f.vQuiet >= -1 && f.vQuiet <= 1)) throw new IOException("results file damaged (video index)");
             } else if (v < 13 && f.videoVersion > 0) f.vHashed = f.vFrames > 0;
+            if (v >= 14) f.pending = in.readBoolean();
             r.files.add(f);
         }
 

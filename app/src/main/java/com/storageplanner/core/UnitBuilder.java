@@ -26,6 +26,12 @@ public final class UnitBuilder {
         public final List<String> blurry = new ArrayList<String>();
         public final Map<String, String> sentCopyOf = new LinkedHashMap<String, String>();
         public int duplicateGroups, burstGroups;
+        /**
+         * Similar shots not decided yet (a paused analysis): photos of the same moment are still to be analysed, and the
+         * best one may be among them. The analysed shots of each group (paths), and how many shots near it are not analysed.
+         */
+        public final List<List<String>> waiting = new ArrayList<List<String>>();
+        public final List<Integer> waitingMissing = new ArrayList<Integer>();
     }
 
     public final List<Unit> units = new ArrayList<Unit>();
@@ -84,7 +90,15 @@ public final class UnitBuilder {
 
         // ---------------- bursts (near-duplicates taken within minutes) and blur, camera photos only
         List<FileItem> cam = cameraPhotos(r.files);
+        long[] pendingCam = pendingCameraTimes(r.files);
         for (List<FileItem> c : burstClusters(r.files)) {
+            int missing = pendingNear(c, pendingCam);
+            if (missing > 0) {                                  // a better shot may still come: decide nothing yet
+                List<String> rels = new ArrayList<String>();
+                for (FileItem f : c) rels.add(f.rel);
+                det.waiting.add(rels); det.waitingMissing.add(missing);
+                continue;
+            }
             det.burstGroups++;
             FileItem keeper = bestShot(c);
             for (FileItem f : c) if (f != keeper) det.burstExtraOf.put(f.rel, keeper.rel);
@@ -95,12 +109,13 @@ public final class UnitBuilder {
             Arrays.sort(s);
             double med = s[s.length / 2];
             for (FileItem f : cam)
-                if (f.sharp < BLUR_REL * med && !det.burstExtraOf.containsKey(f.rel)) det.blurry.add(f.rel);
+                if (f.sharp < BLUR_REL * med && !det.burstExtraOf.containsKey(f.rel) && pendingNear(f.mtime, f.mtime, pendingCam) == 0)
+                    det.blurry.add(f.rel);
         }
 
         // ---------------- WhatsApp "Sent" copies of photos still in the camera roll
         for (FileItem s : r.files) {
-            if (!s.area.equals("wa_sent") || !s.hasPhash || s.height == 0) continue;
+            if (!s.area.equals("wa_sent") || s.pending || !s.hasPhash || s.height == 0) continue;
             double ar = (double) s.width / s.height;
             for (FileItem c : cam) {
                 if (c.height == 0 || det.burstExtraOf.containsKey(c.rel) || det.blurry.contains(c.rel)) continue;
@@ -119,6 +134,7 @@ public final class UnitBuilder {
         Tags.Context tctx = Tags.context(r, det);
         RuleSet.Compiled compiled = rules.compile();
         for (FileItem f : r.files) {
+            if (f.pending) continue;                          // not analysed yet: no suggestion until it is
             Unit u = Unit.forFile(f);
             compiled.apply(u, f, Tags.of(f, tctx, now), tctx, est, now);
             if (!u.options.isEmpty()) units.add(u);
@@ -129,11 +145,39 @@ public final class UnitBuilder {
     /** Camera photos with features, oldest first (the burst search input). */
     static List<FileItem> cameraPhotos(List<FileItem> files) {
         List<FileItem> cam = new ArrayList<FileItem>();
-        for (FileItem f : files) if ("camera".equals(f.area) && f.hasPhash && f.sharp >= 0) cam.add(f);
+        for (FileItem f : files) if ("camera".equals(f.area) && !f.pending && f.hasPhash && f.sharp >= 0) cam.add(f);
         Collections.sort(cam, new Comparator<FileItem>() {
             public int compare(FileItem a, FileItem b) { return a.mtime < b.mtime ? -1 : a.mtime > b.mtime ? 1 : a.rel.compareTo(b.rel); }
         });
         return cam;
+    }
+
+    /** When the camera photos not analysed yet were taken (mtime), sorted; empty after a full analysis. */
+    public static long[] pendingCameraTimes(List<FileItem> files) {
+        int n = 0;
+        for (FileItem f : files) if (f.pending && "camera".equals(f.area) && Tags.IMAGE.equals(Tags.kind(f))) n++;
+        long[] t = new long[n];
+        n = 0;
+        for (FileItem f : files) if (f.pending && "camera".equals(f.area) && Tags.IMAGE.equals(Tags.kind(f))) t[n++] = f.mtime;
+        Arrays.sort(t);
+        return t;
+    }
+
+    /** How many camera photos not analysed yet were taken within BURST_WINDOW_MS of this group of shots. */
+    public static int pendingNear(List<FileItem> c, long[] pendingCam) {
+        long lo = Long.MAX_VALUE, hi = Long.MIN_VALUE;
+        for (FileItem f : c) { lo = Math.min(lo, f.mtime); hi = Math.max(hi, f.mtime); }
+        return pendingNear(lo, hi, pendingCam);
+    }
+
+    static int pendingNear(long lo, long hi, long[] pendingCam) {
+        if (pendingCam.length == 0) return 0;
+        int i = Arrays.binarySearch(pendingCam, lo - BURST_WINDOW_MS);
+        if (i < 0) i = -i - 1;
+        while (i > 0 && pendingCam[i - 1] >= lo - BURST_WINDOW_MS) i--;
+        int n = 0;
+        for (; i < pendingCam.length && pendingCam[i] <= hi + BURST_WINDOW_MS; i++) n++;
+        return n;
     }
 
     /** Groups of near-identical camera shots taken within minutes of each other (2+ photos each). */
