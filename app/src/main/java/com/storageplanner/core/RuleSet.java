@@ -448,7 +448,8 @@ public final class RuleSet {
             if (d == null) { out.warnings.add("rule " + r.id + ": no such built-in rule in this version; skipped"); return; }
             if (!seen.add(r.id)) return;
             d.enabled = r.enabled;
-            if (hasWhen) { d.when.clear(); d.when.addAll(r.when); }
+            // conditions an earlier version shipped (never edited): take today's instead
+            if (hasWhen && !BuiltInRules.previousWhen(r.id).contains(BuiltInRules.whenText(r))) { d.when.clear(); d.when.addAll(r.when); }
             String p = d.problem();
             if (p != null) { d.enabled = false; out.warnings.add("rule " + d.id + ": " + p + "; switched off"); }
             return;

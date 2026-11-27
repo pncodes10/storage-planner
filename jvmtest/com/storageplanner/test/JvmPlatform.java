@@ -199,6 +199,9 @@ public final class JvmPlatform implements Platform {
 
     public String mirageNote() { return System.getProperty("mirage") == null ? "Mirage runs only on the phone" : null; }
 
+    /** Nothing to download here: ready only when a test hands in a saved answer. */
+    public String prepareMirage(com.storageplanner.core.Scanner.Progress pr) { return mirageNote(); }
+
     public boolean imageSize(String path, int[] dims) {
         try (javax.imageio.stream.ImageInputStream in = ImageIO.createImageInputStream(new File(path))) {
             java.util.Iterator<javax.imageio.ImageReader> it = ImageIO.getImageReaders(in);

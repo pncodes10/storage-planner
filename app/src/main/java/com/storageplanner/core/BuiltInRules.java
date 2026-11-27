@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.storageplanner.core.Rule.Action;
+import com.storageplanner.core.Rule.Condition;
 import com.storageplanner.core.Rule.Op;
 import com.storageplanner.core.Rule.Saving;
 
@@ -17,6 +18,26 @@ import com.storageplanner.core.Rule.Saving;
  */
 public final class BuiltInRules {
     private BuiltInRules() {}
+
+    /**
+     * The conditions built-in rules shipped with in earlier versions, by rule id (each as the conditions' text joined by
+     * "; "). A saved rule whose conditions are exactly one of these was never edited by the user, so RuleSet.fromText
+     * gives it today's conditions; a rule the user changed keeps theirs.
+     */
+    static List<String> previousWhen(String id) {
+        List<String> out = new ArrayList<String>();
+        if ("accidental_shot".equals(id)) {
+            out.add(whenText(new Rule().when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL)));                                       // up to 1.10
+            out.add(whenText(new Rule().when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL).when(Tags.MIRAGE_SEES, Op.IS_NO, "")));  // 1.11-1.12
+        }
+        return out;
+    }
+
+    static String whenText(Rule r) {
+        StringBuilder b = new StringBuilder();
+        for (Condition c : r.when) b.append(b.length() == 0 ? "" : "; ").append(c.toText());
+        return b.toString();
+    }
 
     public static List<Rule> all() {
         List<Rule> l = new ArrayList<Rule>();
@@ -76,9 +97,10 @@ public final class BuiltInRules {
         // received or saved, never your own camera photos, screenshots or what you sent
         l.add(del("old_forward", "Old meme or forward", Techniques.FORWARDS, Option.R4, "Meme or forwarded image, {age} days old")
                 .when(Tags.CATEGORY, Op.EQ, PhotoCategory.GRAPHIC).when(Tags.AGE_DAYS, Op.GT, "7").when(Tags.AREA, Op.IN, "wa_image,telegram_media,download,pictures"));
-        // not when Mirage clearly sees people, things or text in it (mirage_sees is "no" where Mirage has not looked)
+        // only once Mirage has looked and sees no people, things or text in it: the pixel checks alone also flag dark or
+        // plain photos that matter, so without Mirage (model not downloaded yet, or a phone it can't run on) it holds back
         l.add(del("accidental_shot", "Accidental shot", Techniques.ACCIDENTAL, Option.R4, "Almost nothing visible in this shot")
-                .when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL).when(Tags.MIRAGE_SEES, Op.IS_NO, ""));
+                .when(Tags.CATEGORY, Op.EQ, PhotoCategory.ACCIDENTAL).when(Tags.MIRAGE_LOOKED, Op.IS_YES, "").when(Tags.MIRAGE_SEES, Op.IS_NO, ""));
         // a photo of a sign, price tag, screen, label... with no people, kept 2 months (Mirage)
         l.add(del("old_reference_photo", "Old photo taken to remember something", Techniques.REFERENCE, Option.R4,
                 "Photo of something to remember (a sign, label, screen...), {age} days old")

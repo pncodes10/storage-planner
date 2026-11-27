@@ -87,6 +87,9 @@ final class AnalysisRunner {
             o.saved = saved[0];
             o.message = r.sample != null ? "Done: " + r.files.size() + " pictures analysed (" + r.sample + ")."
                     : "Done: " + r.files.size() + " files and " + r.apps.size() + " apps analysed.";
+            if (r.mirageNote != null && !"cancelled".equals(r.mirageNote))      // the plan is less precise without Mirage: say so
+                o.message += "\nMirage could not look at your pictures this time (" + r.mirageNote + "), so a few suggestions that need it "
+                        + "(accidental shots, photos taken to remember something) were held back. The next analysis tries again.";
             String timing = timer.finish(opt.highPriority);
             o.message += "\n" + timing;
             app.getSharedPreferences("perf", Context.MODE_PRIVATE).edit().putString("last_timing", timing).apply();

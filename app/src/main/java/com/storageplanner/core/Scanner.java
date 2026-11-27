@@ -29,6 +29,8 @@ public final class Scanner {
         public long scannedBytes;
         /** Set when only some pictures were analysed (Try on my pictures): what was picked, in words. Not saved with the results. */
         public String sample;
+        /** Set when Mirage could not look at pictures in this scan: why, in words for the user. Not saved with the results. */
+        public String mirageNote;
     }
 
     private static final Set<String> MEDIA_AREAS = new HashSet<String>();

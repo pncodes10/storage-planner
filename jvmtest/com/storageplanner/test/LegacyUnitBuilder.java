@@ -161,7 +161,7 @@ public final class LegacyUnitBuilder {
                     u.add(new Option("delete", Techniques.GREETINGS, s, Option.R4, true, "Greeting image received " + Math.round(age) + " days ago"));
                 else if (c.equals(PhotoCategory.GRAPHIC) && age > 7 && (a.equals("wa_image") || a.equals("telegram_media") || a.equals("download") || a.equals("pictures")))
                     u.add(new Option("delete", Techniques.FORWARDS, s, Option.R4, true, "Meme or forwarded image, " + Math.round(age) + " days old"));   // 1.11
-                else if (c.equals(PhotoCategory.ACCIDENTAL) && !(f.mirageVersion > 0 && f.mirageSees))     // 1.11: not when Mirage sees something
+                else if (c.equals(PhotoCategory.ACCIDENTAL) && f.mirageVersion > 0 && !f.mirageSees)       // 1.13: only once Mirage looked and sees nothing
                     u.add(new Option("delete", Techniques.ACCIDENTAL, s, Option.R4, true, "Almost nothing visible in this shot"));
             }
             boolean image = Tags.IMAGE.equals(Tags.kind(f));

@@ -17,7 +17,7 @@ import javax.imageio.ImageIO;
 /**
  * Mirage in the decision engine (1.11): the mirage_* tags (unknown until Mirage looked; mirage_looked and mirage_sees
  * always known), the "contains" operator, the "never delete" (protect) action, the three built-in rules that use
- * Mirage (accidental shot only when Mirage sees nothing, old reference photo, people seen by Mirage never deleted),
+ * Mirage (accidental shot only when Mirage has looked and sees nothing, old reference photo, people seen by Mirage never deleted),
  * saving with the results, and the Mirage pass of a scan (with a saved answer: the model runs only on the phone).
  * Invented data only.
  */
@@ -47,6 +47,14 @@ public final class MirageTagsTest {
     }
 
     static boolean has(List<Option> l, String technique) { for (Option o : l) if (o.technique.equals(technique)) return true; return false; }
+
+    static Rule ruleOf(RuleSet rs, String id) { for (Rule r : rs.rules) if (r.id.equals(id)) return r; return null; }
+
+    static String whenOf(RuleSet rs, String id) {
+        StringBuilder b = new StringBuilder();
+        for (Rule.Condition c : ruleOf(rs, id).when) b.append(b.length() == 0 ? "" : "; ").append(c.toText());
+        return b.toString();
+    }
 
     static boolean deletes(List<Option> l) { for (Option o : l) if (o.action.equals("delete")) return true; return false; }
 
@@ -108,7 +116,7 @@ public final class MirageTagsTest {
         r.now = NOW;
         for (FileItem f : new FileItem[] {acc, accSeen, accNothing, ref, refNew, crowd, comic, dupA, dupB}) r.files.add(f);
         UnitBuilder ub = new UnitBuilder(r, new Estimates(), 34, RuleSet.defaults());
-        check("accidental shot, Mirage did not look: still suggested", has(options(ub, acc), Techniques.ACCIDENTAL));
+        check("accidental shot, Mirage did not look (no model yet): held back", !has(options(ub, acc), Techniques.ACCIDENTAL));
         check("accidental shot, but Mirage sees a dog: not suggested", !has(options(ub, accSeen), Techniques.ACCIDENTAL));
         check("accidental shot, Mirage looked and sees nothing: suggested", has(options(ub, accNothing), Techniques.ACCIDENTAL));
         check("a photo of a sign, 90 days old: deleted as a reference photo", has(options(ub, ref), Techniques.REFERENCE));
@@ -171,6 +179,7 @@ public final class MirageTagsTest {
         Scanner.Result s0 = Scanner.scan(pf, quiet);
         FileItem w0 = s0.files.get(0);
         check("scan without Mirage: nothing recorded, tags unknown", w0.mirageVersion == 0 && w0.category != null);
+        check("scan without Mirage: the result says why, for the user", "Mirage runs only on the phone".equals(s0.mirageNote));
         System.setProperty("mirage", answer.getPath());
         Scanner.Result s1 = Scanner.scan(pf, quiet);
         FileItem w1 = s1.files.get(0);
@@ -188,7 +197,19 @@ public final class MirageTagsTest {
         offMirage.mirageBudgetMs = 0;
         Files.write(answer.toPath(), "{\"scene\":{},\"objects\":[],\"text\":[]}".getBytes(StandardCharsets.UTF_8));
         check("Mirage time limit 0: the pass is off", Scanner.scan(pf, quiet, offMirage).files.get(0).mirageVersion == 0);
+        check("scan with Mirage: no note", s1.mirageNote == null);
         System.clearProperty("mirage");
+
+        // ---- saved rules (1.13): a built-in rule saved with conditions an earlier version shipped gets today's; edited ones are kept
+        String acc111 = "storage-planner-rules 1\n\nrule accidental_shot\nbuiltin yes\nenabled yes\nwhen category = accidental\nwhen mirage_sees is no\nend\n";
+        String acc110 = "storage-planner-rules 1\n\nrule accidental_shot\nbuiltin yes\nenabled no\nwhen category = accidental\nend\n";
+        String accMine = "storage-planner-rules 1\n\nrule accidental_shot\nbuiltin yes\nenabled yes\nwhen category = accidental\nwhen age_days > 30\nend\n";
+        check("saved 1.11-1.12 accidental shot rule: upgraded to wait for Mirage", whenOf(RuleSet.fromText(acc111), "accidental_shot").contains("mirage_looked is yes"));
+        Rule up110 = ruleOf(RuleSet.fromText(acc110), "accidental_shot");
+        check("saved 1.10 accidental shot rule: upgraded, and stays switched off", whenOf(RuleSet.fromText(acc110), "accidental_shot").contains("mirage_looked is yes") && !up110.enabled);
+        check("an accidental shot rule the user edited keeps their conditions", whenOf(RuleSet.fromText(accMine), "accidental_shot").equals("category = accidental; age_days > 30"));
+        check("the rules text round-trips with the new conditions", whenOf(RuleSet.fromText(RuleSet.fromText(acc111).toText()), "accidental_shot")
+                .equals(whenOf(RuleSet.defaults(), "accidental_shot")));
 
         System.out.println("MirageTagsTest: " + (checks - fails) + "/" + checks + " checks passed");
         if (fails > 0) System.exit(1);
