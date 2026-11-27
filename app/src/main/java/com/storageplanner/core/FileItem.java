@@ -28,7 +28,15 @@ public final class FileItem {
     public double vSharpMax = -1; // sharpness of its sharpest frame (ImageFeatures scale); -1 = unknown
     public int vPeople = -1;      // most faces in one frame; -1 = could not be checked
     public int vWords = -1;       // words read in the middle frame; -1 = not read
-    public long vHash;            // fingerprint of the middle frame
+    public long vHash;            // fingerprint of the middle frame (when vHashed)
+    public boolean vHashed;       // vHash was measured
+    // ---- what the video's index said (VideoIndex), no decoding
+    public boolean vIndexed;      // the index could be read
+    public int vKeyframes;        // keyframes in it
+    public double vLowDetail = -1;// share of keyframes that show next to nothing
+    public double vStill = -1;    // share of the other frames that change next to nothing; -1 = unknown
+    public int vAudio = -1;       // 1 = has a sound track, 0 = none, -1 = unknown
+    public double vQuiet = -1;    // share of quiet seconds; -1 = unknown or no sound
 
     public PhotoQuality.Q quality;  // measured for near-duplicate shots only (eyes, faces, light); else null
 

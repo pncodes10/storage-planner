@@ -41,7 +41,8 @@ public final class Tags {
             // videos: length and frame rate from the file; the rest from a few frames (VideoCheck), known once they were looked at
             VIDEO_SECONDS = "video_seconds", VIDEO_FPS = "video_fps", VIDEO_VERTICAL = "vertical_video", VIDEO_LOOKED = "video_looked",
             VIDEO_DARK = "dark_video", VIDEO_BLURRY = "blurry_video", VIDEO_STILL = "still_video", VIDEO_PEOPLE = "video_people",
-            VIDEO_WORDS = "video_text_words", ACCIDENTAL_CLIP = "accidental_clip", FORWARD_VIDEO = "forward_like_video";
+            VIDEO_WORDS = "video_text_words", ACCIDENTAL_CLIP = "accidental_clip", FORWARD_VIDEO = "forward_like_video",
+            VIDEO_SILENT = "silent_video", VIDEO_JUNK = "video_junk_score";
 
     public static final int UNKNOWN = -1;
 
@@ -160,6 +161,8 @@ public final class Tags {
         public double videoWords = UNKNOWN;             // words read in its middle frame; UNKNOWN until looked at
         public Boolean accidentalClip;                  // a clip taken by mistake (VideoCheck.accidental); null until looked at
         public Boolean forwardVideo;                    // looks like a clip passed around in chats (VideoCheck.forwardLike); null until looked at
+        public Boolean videoSilent;                     // no sound track, or quiet nearly all through; null when unknown
+        public double videoJunk = UNKNOWN;              // junk score 0..100 (VideoCheck.junk); UNKNOWN until checked
         public String codeType;                         // kind of QR code or barcode (PhotoMeta.CODE_*); null = not sorted
         public String scene;                            // what the photo shows (Scene.*); null = not looked at yet
         public double aesthetic = UNKNOWN;              // learned aesthetic score 1..10; UNKNOWN = not looked at yet
@@ -236,6 +239,8 @@ public final class Tags {
             l.add(num(VIDEO_WORDS, "Words in the video", videoWords, String.format(Locale.US, "%.0f", videoWords)));
             l.add(flag(ACCIDENTAL_CLIP, "Video clip taken by mistake", accidentalClip, null));
             l.add(flag(FORWARD_VIDEO, "Looks like a forwarded video", forwardVideo, null));
+            l.add(flag(VIDEO_SILENT, "Video silent or without sound", videoSilent, null));
+            l.add(num(VIDEO_JUNK, "Video junk score", videoJunk, String.format(Locale.US, "%.0f of 100", videoJunk)));
             l.add(text(CODE_TYPE, "Code type", codeType));
             l.add(text(SCENE, "Scene (what the photo shows)", scene));
             l.add(num(AESTHETIC, "Aesthetic score", aesthetic, String.format(Locale.US, "%.1f of 10", aesthetic)));
@@ -284,6 +289,7 @@ public final class Tags {
                 case VIDEO_FPS: return videoFps;
                 case VIDEO_PEOPLE: return videoPeople;
                 case VIDEO_WORDS: return videoWords;
+                case VIDEO_JUNK: return videoJunk;
                 default: return UNKNOWN;
             }
         }
@@ -341,6 +347,7 @@ public final class Tags {
                 case VIDEO_STILL: return videoStill;
                 case ACCIDENTAL_CLIP: return accidentalClip;
                 case FORWARD_VIDEO: return forwardVideo;
+                case VIDEO_SILENT: return videoSilent;
                 default: return null;
             }
         }
@@ -380,13 +387,13 @@ public final class Tags {
     static {
         for (String id : new String[] {SIZE_BYTES, AGE_DAYS, WIDTH, HEIGHT, MEGAPIXELS, FACES, EYES_OPEN, BLUR, BRIGHTNESS, DARK_SHARE, GLARE_SHARE, COLOURFULNESS,
                 GRAPHIC_SHARE, PAPER_SHARE, INK_SHARE, SIZE_MB, BITS_PER_PIXEL, BITRATE_KBPS, DAYS_SINCE_DATE, TAKEN_DAYS, MOTION_VIDEO_MB,
-                AESTHETIC, SMILING, LOOKING, MIRAGE_PEOPLE, VIDEO_SECONDS, VIDEO_FPS, VIDEO_PEOPLE, VIDEO_WORDS}) TYPES.put(id, Type.NUMBER);
+                AESTHETIC, SMILING, LOOKING, MIRAGE_PEOPLE, VIDEO_SECONDS, VIDEO_FPS, VIDEO_PEOPLE, VIDEO_WORDS, VIDEO_JUNK}) TYPES.put(id, Type.NUMBER);
         for (String id : new String[] {SOURCE, AREA, KIND, CATEGORY, TEXT_READ, TEXT_AMOUNT, FILE_TYPE, VIDEO_CODEC, APK_PACKAGE, SCREENSHOT_APP, CODE_TYPE, SCENE,
                 MIRAGE_STYLE, MIRAGE_OBJECTS, MIRAGE_SCENE, V3_CATEGORY}) TYPES.put(id, Type.TEXT);
         for (String id : new String[] {HAS_CODE, DUPLICATE, BURST_EXTRA, BURST_KEEPER, SENT_COPY, BLURRY, INSTALLER_INSTALLED, INSTALLER_NOT_INSTALLED,
                 ID_DOCUMENT, EYES_CLOSED, SCREENSHOT, CHAT_MEDIA, CAMERA_PHOTO, DATE_IN_PICTURE, LOOKS_LIKE_PAGE, FAVOURITE, MOTION_PHOTO,
                 MIRAGE_LOOKED, MIRAGE_SEES, REFERENCE_PHOTO, VIDEO_VERTICAL, VIDEO_LOOKED, VIDEO_DARK, VIDEO_BLURRY, VIDEO_STILL,
-                ACCIDENTAL_CLIP, FORWARD_VIDEO}) TYPES.put(id, Type.FLAG);
+                ACCIDENTAL_CLIP, FORWARD_VIDEO, VIDEO_SILENT}) TYPES.put(id, Type.FLAG);
     }
 
     /** The type of the tag with this id; null if there is no such tag. */
@@ -426,7 +433,8 @@ public final class Tags {
         {VIDEO_SECONDS, "s", "video length"}, {VIDEO_FPS, "fps", "frame rate"}, {VIDEO_VERTICAL, "", "is an upright video"},
         {VIDEO_LOOKED, "", "has had its frames looked at"}, {VIDEO_DARK, "", "is a dark or covered video"}, {VIDEO_BLURRY, "", "is blurred all through"},
         {VIDEO_STILL, "", "has nothing moving in it"}, {VIDEO_PEOPLE, "", "number of faces in the video"}, {VIDEO_WORDS, "", "number of words in the video"},
-        {ACCIDENTAL_CLIP, "", "is a clip taken by mistake"}, {FORWARD_VIDEO, "", "is a forwarded-looking video"}};
+        {ACCIDENTAL_CLIP, "", "is a clip taken by mistake"}, {FORWARD_VIDEO, "", "is a forwarded-looking video"},
+        {VIDEO_SILENT, "", "is silent or has no sound"}, {VIDEO_JUNK, "of 100", "video junk score"}};
 
     private static List<Info> LIST;
 
@@ -600,8 +608,11 @@ public final class Tags {
             t.videoVertical = VideoCheck.vertical(f);
             t.videoLooked = VideoCheck.looked(f);
             t.videoDark = VideoCheck.dark(f); t.videoBlurry = VideoCheck.blurry(f, ctx.cameraSharp); t.videoStill = VideoCheck.still(f);
-            if (VideoCheck.looked(f) && f.vPeople >= 0) t.videoPeople = f.vPeople;
-            if (VideoCheck.looked(f) && f.vWords >= 0) t.videoWords = f.vWords;
+            if (VideoCheck.decoded(f) && f.vPeople >= 0) t.videoPeople = f.vPeople;
+            if (VideoCheck.decoded(f) && f.vWords >= 0) t.videoWords = f.vWords;
+            t.videoSilent = VideoCheck.silent(f);
+            int js = VideoCheck.junkScore(f, ctx.cameraSharp);
+            if (js >= 0) t.videoJunk = js;
             t.accidentalClip = VideoCheck.accidental(f, ctx.cameraSharp);
             t.forwardVideo = VideoCheck.forwardLike(f);
         }

@@ -135,7 +135,12 @@ public final class RulesEquivalenceTest {
                     f.videoVersion = VideoCheck.VERSION; f.vFrames = rnd.nextInt(6); f.vDark = f.vFrames == 0 ? 0 : rnd.nextInt(f.vFrames + 1);
                     f.vMotion = new double[] {-1, 0, 2.99, 3, 20}[rnd.nextInt(5)]; f.vSharpMax = new double[] {-1, 0.5, 5, 60}[rnd.nextInt(4)];
                     f.vPeople = new int[] {-1, 0, 0, 1, 2}[rnd.nextInt(5)]; f.vWords = new int[] {-1, 0, 3, 4, 9}[rnd.nextInt(5)];
-                    f.vHash = new long[] {0L, 0xFFFL, 0xFFFFFFL}[rnd.nextInt(3)];
+                    f.vHash = new long[] {0L, 0xFFFL, 0xFFFFFFL}[rnd.nextInt(3)]; f.vHashed = rnd.nextInt(4) > 0;
+                    if (rnd.nextBoolean()) {                                   // what the index said (1.15)
+                        f.vIndexed = true; f.vKeyframes = 1 + rnd.nextInt(30); f.vStill = new double[] {-1, 0, 0.79, 0.8, 1}[rnd.nextInt(5)];
+                        f.vAudio = rnd.nextInt(3) - 1; f.vQuiet = f.vAudio == 1 ? new double[] {0, 0.89, 0.9, 1}[rnd.nextInt(4)] : -1;
+                        if (rnd.nextInt(3) == 0) { f.vFrames = 0; f.vDark = 0; }            // the index was enough
+                    }
                 }
                 if (rnd.nextInt(3) == 0) { int w = f.width; f.width = f.height; f.height = w; }      // upright ones
             }
@@ -149,7 +154,8 @@ public final class RulesEquivalenceTest {
                 g.mirageVersion = f.mirageVersion; g.mirageSees = f.mirageSees; g.mirageReference = f.mirageReference; g.miragePeople = f.miragePeople;
                 g.mirageStyle = f.mirageStyle; g.mirageObjects = f.mirageObjects; g.mirageScene = f.mirageScene; g.v3Category = f.v3Category;
                 g.durationMs = f.durationMs; g.videoVersion = f.videoVersion; g.vFrames = f.vFrames; g.vDark = f.vDark; g.vMotion = f.vMotion;
-                g.vSharpMax = f.vSharpMax; g.vPeople = f.vPeople; g.vWords = f.vWords; g.vHash = f.vHash;
+                g.vSharpMax = f.vSharpMax; g.vPeople = f.vPeople; g.vWords = f.vWords; g.vHash = f.vHash; g.vHashed = f.vHashed;
+                g.vIndexed = f.vIndexed; g.vKeyframes = f.vKeyframes; g.vStill = f.vStill; g.vAudio = f.vAudio; g.vQuiet = f.vQuiet;
                 f = g;
             }
             r.files.add(f);
@@ -160,14 +166,14 @@ public final class RulesEquivalenceTest {
             long dur = 5000 + rnd.nextInt(60000), t = NOW - (long) (rnd.nextDouble() * 300 * DAY);
             FileItem c = new FileItem("DCIM/Camera/VID_" + k + ".mp4", "/sdcard/VID_" + k + ".mp4", 20000000 + rnd.nextInt(9000000), t);
             c.area = "camera"; c.type = "mp4"; c.vcodec = "video/avc"; c.width = 1920; c.height = 1080; c.bitrate = 17000000; c.durationMs = dur;
-            c.videoVersion = VideoCheck.VERSION; c.vFrames = 5; c.vPeople = rnd.nextInt(2); c.vWords = 0; c.vMotion = 20; c.vSharpMax = 60; c.vHash = rnd.nextLong();
+            c.videoVersion = VideoCheck.VERSION; c.vFrames = 5; c.vPeople = rnd.nextInt(2); c.vWords = 0; c.vMotion = 20; c.vSharpMax = 60; c.vHash = rnd.nextLong(); c.vHashed = true;
             r.files.add(c);
             FileItem s = new FileItem("WhatsApp/Media/WhatsApp Video/Sent/VID-" + k + ".mp4", "/sdcard/s" + k + ".mp4", 3000000 + rnd.nextInt(900000),
                     t + (rnd.nextInt(4) == 0 ? -61000 : (long) (rnd.nextDouble() * 5 * DAY)));
             s.area = "wa_sent_video"; s.type = "mp4"; s.vcodec = "video/avc"; s.width = rnd.nextInt(4) == 0 ? 720 : 848; s.height = s.width == 720 ? 1280 : 480;
             s.bitrate = 1500000; s.durationMs = dur + new long[] {0, 400, 1500, 1501, -1500}[rnd.nextInt(5)];
             s.videoVersion = VideoCheck.VERSION; s.vFrames = 5; s.vPeople = c.vPeople; s.vWords = 0; s.vMotion = 20; s.vSharpMax = 30;
-            s.vHash = c.vHash ^ new long[] {0L, 0xFFFL, 0x1FFFL, -1L}[rnd.nextInt(4)];                 // 0, 12, 13 or 64 bits apart
+            s.vHashed = true; s.vHash = c.vHash ^ new long[] {0L, 0xFFFL, 0x1FFFL, -1L}[rnd.nextInt(4)];                 // 0, 12, 13 or 64 bits apart
             r.files.add(s);
         }
         // camera photos with features: bursts, blur, sent copies of them

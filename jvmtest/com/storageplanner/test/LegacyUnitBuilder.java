@@ -169,11 +169,9 @@ public final class LegacyUnitBuilder {
                 u.add(new Option("delete", Techniques.REFERENCE, s, Option.R4, true,
                         "Photo of something to remember (a sign, label, screen...), " + Math.round(age) + " days old"));
             boolean video = Tags.VIDEO.equals(Tags.kind(f));                                                     // 1.12: videos
-            if (video && a.equals("camera") && Boolean.TRUE.equals(VideoCheck.accidental(f, camSharp)))
-                u.add(new Option("delete", Techniques.ACCIDENTAL_CLIPS, s, Option.R4, true, "Very short, dark, blurred or still clip with nobody in it"));
-            if (video && Boolean.TRUE.equals(VideoCheck.forwardLike(f)) && (a.equals("wa_video") || a.equals("download")) && age > 30
-                    && VideoCheck.looked(f) && f.vPeople >= 0 && f.vPeople < 1)
-                u.add(new Option("delete", Techniques.FORWARD_VIDEOS, s, Option.R4, true, "Forwarded-looking video received " + Math.round(age) + " days ago, nobody in it"));
+            if (video && a.equals("camera") && Boolean.TRUE.equals(VideoCheck.accidental(f, camSharp)))       // 1.15: by the junk score
+                u.add(new Option("delete", Techniques.ACCIDENTAL_CLIPS, s, Option.R4, true, "Junk score " + VideoCheck.junkScore(f, camSharp)
+                        + " of 100: very short, dark or covered, blurred, still or silent, and nobody in it"));
             if (a.equals("download") && age > OLD_DOWNLOAD_DAYS && s >= OLD_DOWNLOAD_MIN && u.options.isEmpty())
                 u.add(new Option("delete", Techniques.OLD_DOWNLOADS, s, Option.R4, true, "Download untouched for " + Math.round(age) + " days"));
 

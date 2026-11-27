@@ -170,6 +170,7 @@ public final class RuleSet {
             }
             case "date": return f.catDate > 0 ? Report.day(f.catDate) : "";
             case "kbps": return String.valueOf(f.bitrate / 1000);
+            case "junk": return t.videoJunk >= 0 ? String.valueOf((int) t.videoJunk) : "?";
             case "mbps": return String.format("%.1f", f.bitrate / 1e6);
             case "photo_source": return est.photoSource;
             case "chat_source": return est.chatSource;

@@ -887,15 +887,15 @@ public final class Lab {
      * files of the last analysis, or null; they give the camera photos that blur is judged against and the camera
      * videos a sent copy is matched with.
      */
-    public static FileItem videoVerdict(Platform pf, FileItem f, List<FileItem> phone, RuleSet rules, long now, Out o) {
+    public static long[] videoVerdict(Platform pf, FileItem f, List<FileItem> phone, RuleSet rules, long now, Out o) {
         o.line("VIDEO VERDICT — " + f.name() + " (treated as " + f.area + ", " + dur(Math.max(0, now - f.mtime)) + " old)");
         boolean read;
         try { read = pf.video(f); } catch (Throwable t) { read = false; }
-        if (!read && f.durationMs <= 0) { o.line("  ! Android could not read this video"); return f; }
+        if (!read && f.durationMs <= 0) { o.line("  ! Android could not read this video"); return null; }
         o.line(f("  file: %s, %d x %d as shown, %s fps, %.1f s, %.1f Mbps, %s",
                 f.vcodec == null ? "codec unknown" : f.vcodec, f.width, f.height, f.fps > 0 ? String.format(Locale.US, "%.1f", f.fps) : "?",
                 f.durationMs / 1000.0, f.bitrate / 1e6, Report.size(f.size)));
-        VideoCheck.look(pf, f, o);
+        long[] used = VideoCheck.look(pf, f, o);
 
         Scanner.Result one = new Scanner.Result();
         one.now = now;
@@ -905,16 +905,19 @@ public final class Lab {
             for (FileItem p : phone) {
                 if (!"camera".equals(p.area) || p.rel.equals(f.rel)) continue;
                 if (p.sharp >= 0) { one.files.add(p); cams++; }
-                else if (VideoCheck.looked(p) && Tags.VIDEO.equals(Tags.kind(p))) { one.files.add(p); vids++; }
+                else if (p.vHashed && Tags.VIDEO.equals(Tags.kind(p))) { one.files.add(p); vids++; }
             }
         o.line(phone == null ? "  (no analysis yet: blur cannot be judged against your photos, and sent copies cannot be matched)"
-                : f("  compared with %d camera photos (for blur) and %d looked-at camera videos (for sent copies)", cams, vids));
+                : f("  compared with %d camera photos (for blur) and %d fingerprinted camera videos (for sent copies)", cams, vids));
         UnitBuilder.Detections det = new UnitBuilder.Detections();
         VideoCheck.sentCopies(one.files, det.sentCopyOf);
         Tags.Context ctx = Tags.context(one, det);
         Tags.T t = Tags.of(f, ctx, now);
+        StringBuilder jw = new StringBuilder();
+        int js = VideoCheck.junk(f, ctx.cameraSharp, jw);
+        o.line("  junk score: " + (js < 0 ? "not checked" : js + " of 100 (" + jw + "); " + VideoCheck.JUNK + " or more counts as taken by mistake"));
         o.line("  means: " + yes("dark or covered", t.videoDark) + ", " + yes("blurred all through", t.videoBlurry) + ", " + yes("nothing moves", t.videoStill)
-                + ", " + yes("upright", t.videoVertical) + ", " + yes("taken by mistake", t.accidentalClip) + ", " + yes("looks forwarded", t.forwardVideo)
+                + ", " + yes("silent", t.videoSilent) + ", " + yes("taken by mistake", t.accidentalClip)
                 + (det.sentCopyOf.containsKey(f.rel) ? ", WhatsApp copy of " + det.sentCopyOf.get(f.rel) : ""));
         StringBuilder b = new StringBuilder();
         for (Tags.Entry e : t.shown()) if (e.id.startsWith("video") || e.id.endsWith("_video") || e.id.equals(Tags.ACCIDENTAL_CLIP) || e.id.equals(Tags.SENT_COPY)
@@ -930,7 +933,7 @@ public final class Lab {
         o.line("  rules: " + (hit.length() == 0 ? "none match" : hit + " match"));
         o.line("  plan: " + (ops.length() == 0 ? "no option" : ops));
         o.line("  VERDICT: " + verdict(u.options, new PhotoCategory.Result()));
-        return f;
+        return used;
     }
 
     private static String yes(String what, Boolean b) { return what + (b == null ? " ?" : b ? " YES" : " no"); }

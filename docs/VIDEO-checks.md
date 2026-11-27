@@ -1,78 +1,104 @@
-# Looking inside videos
+# Checking videos
 
-Before this change the app judged a video only from its file: where it is, whether it's a byte-for-byte duplicate, and
-whether re-encoding it would save space. Nothing looked at what's in the video. `core/VideoCheck` now decodes five
-frames of each video and runs the checks pictures already have on them.
+The app only asks whether a video is **junk**: taken by mistake, black or covered, blurred, still or silent, or a
+copy. It does not try to understand what a video shows. To stay fast, it reads the video's index first and decodes
+pictures only when the index finds something suspicious (`core/VideoIndex`, `core/VideoCheck`).
 
-## What is measured
+## Step 1: the index, every video, about 10–50 ms
 
-The five frames are taken at 8%, 30%, 50%, 70% and 92% of the clip, with a long edge of 1024 px. For each video:
+An MP4 file lists how big every compressed frame is, which frames are keyframes, and how big each chunk of sound is.
+The app reads that list without decoding anything:
 
-| Measurement | How |
+| From the index | What it shows |
 |---|---|
-| Dark or covered frames | Dark (mean brightness under 35) and almost featureless (spread under 20), or flat (spread under 10: a covered lens, a wall). Night scenes with lights in them are dark on average but have a wide spread, so they do not count |
-| Movement | The average number of fingerprint bits that change between neighbouring frames; under 3 means nothing happens |
-| Sharpness | The sharpest frame, on the same scale as photos, compared with your camera photos: under 25% of their median means blurred all through |
-| Faces | The most faces in any one frame (the photo face detector) |
-| Words | The text read in the middle frame (captions, memes) |
-| Fingerprint | The middle frame's fingerprint, used to find WhatsApp copies |
-| Frame rate | Read from the video track. It is now used in the compression estimate instead of always assuming 30 |
+| Keyframe size, in bits per pixel | Detail. A black, covered or badly blurred keyframe compresses to almost nothing: under 0.04 bits per pixel counts as "next to nothing". |
+| Size of the frames between keyframes | Movement. Under 0.002 bits per pixel, nothing changes, like a phone lying still. |
+| Bytes of sound per second | Quiet. A second counts as quiet when it is under 1,500 bytes, or under a quarter of the video's loud seconds. |
+| Keyframes all the same size | The encoder pads them, so their sizes tell nothing. The video is then checked by decoding frames. |
 
-It runs at the end of a scan, chat videos first, newest first, within 10 minutes. Unchanged videos keep their
-measurements from the last scan. It also runs for videos you sent on WhatsApp, so their copies can be matched.
+A video gets a closer look only when it is under 2.5 s long, at least half its keyframes show next to nothing,
+nothing moves in at least 80% of it, or its keyframe sizes tell nothing. Everything else is done here, with no frame
+decoded.
+
+## Step 2: the richest frames, suspicious videos only, about 0.5–1 s
+
+The app decodes the **3 keyframes with the most detail** (at least 1 s apart), plus the middle frame for its
+fingerprint. These are the frames most likely to prove the video is worth keeping:
+- **If even the richest frames are dark, covered or blurred**, the rest of the video holds even less, so it is junk.
+- **If any of them shows a face or real content**, the video is kept.
+
+A frame is dark only when it is also almost featureless: average brightness under 35 and spread under 20, or a spread
+under 10 (flat). Night scenes with lights in them have a wide spread, so they are not dark.
+
+Videos without a usable index (not MP4, or damaged) get 5 frames spread over the clip instead, as before.
+
+## The junk score: 0 to 100
+
+| Sign | Points |
+|---|---|
+| Under 2.5 s long | +60 |
+| 2.5–5 s long | +15 |
+| Dark or covered decoded frames | +60 × their share |
+| Blurred all through: the sharpest frame is under 25% of your camera photos' median sharpness (not counted when every frame is dark) | +30 |
+| Nothing moves | +20 |
+| No sound track, or quiet in at least 90% of seconds | +10 |
+| A face in any decoded frame | score becomes 0 |
+
+**60 or more** means taken by mistake. The rule `accidental_clip` (camera videos) suggests removing it, in the
+"Blurry and accidental shots" pile, and the reason shows the score.
+
+Examples:
+- **A pocket recording:** dark 3 of 3 (+60), still (+20), quiet (+10) = **90**, so it is removed.
+- **A 1.2 s tap:** +60, so it is removed.
+- **A deliberate night clip:** the index looks fine, so nothing is decoded, and the score is **0**: kept.
+
+## Copies
+
+- **Exact duplicates:** byte for byte, as for every file.
+- **The WhatsApp copy of a camera video:** same length within 1.5 s, same orientation, sent after it was filmed, and
+  middle-frame fingerprints at most 12 bits apart. Only the middle frames of sent videos, and of camera videos of the
+  same length, are decoded for this.
+
+The old "forwarded video" rule is gone: it guessed from how a clip looks. The tag `forward_like_video` is still there
+for your own rules.
 
 ## Tags
 
-| Tag | Meaning |
-|---|---|
-| `video_seconds` | Length |
-| `video_fps` | Frame rate |
-| `vertical_video` | Upright |
-| `video_looked` | Its frames were looked at |
-| `dark_video` | At least 4 of 5 frames are dark or covered |
-| `blurry_video` | Blurred all through |
-| `still_video` | Nothing moves |
-| `video_people` | Faces in it |
-| `video_text_words` | Words in the middle frame |
-| `accidental_clip` | Nobody in it, and short (under 2.5 s), dark, blurred or still |
-| `forward_like_video` | Up to 3 minutes, and upright or with at least 4 words of caption |
-
-The tags you can't know without looking are unknown until the frames have been looked at, and an unknown tag never
-matches a rule. A clip with a face in any frame is never called accidental and never counts as a forward.
-
-## Rules
-
-| Rule | Removes | When | Pile |
-|---|---|---|---|
-| `video_sent_copy` | The WhatsApp copy of a camera video (the original stays) | Same length within 1.5 s, same orientation, sent after it was filmed, middle frames at most 12 bits apart | Copies of the same thing |
-| `accidental_clip` | Camera clips taken by mistake | `accidental_clip` is yes | Blurry and accidental shots |
-| `old_forward_video` | Old forwarded videos | Received in a chat or downloaded, over 30 days old, `forward_like_video` is yes, no faces | Memes and forwards |
-
-The rules can be switched off or edited in Settings › Cleaning rules, like the other rules.
+The video tags are:
+- `video_seconds`, `video_fps` and `vertical_video`;
+- `video_looked`;
+- `dark_video`, `blurry_video`, `still_video` and `silent_video`;
+- `video_people` and `video_text_words`;
+- `video_junk_score` and `accidental_clip`;
+- `forward_like_video`.
 
 ## Trying one video in the Algorithm Lab
 
-Open Algorithm Lab › Videos, pick a video, choose **Treat as** (camera, WhatsApp received, WhatsApp sent, download,
-Movies) and tap **Video verdict: would the plan delete it?** The log shows:
-- what the file says: codec, size as shown, frame rate, length and bitrate;
-- each of the five frames: brightness, spread (DARK or FLAT marked), sharpness, faces and how much changed since the
-  previous frame;
-- the text read in the middle frame;
-- what that means: dark, blurred, still, upright, taken by mistake, looks forwarded, WhatsApp copy of a camera video;
-- the video tags, the rules that match, the plan's options and the verdict.
+Open Algorithm Lab › Videos, pick a video, set **Treat as**, then tap **Video verdict**. The log shows:
+- the index: frames, keyframes, keyframe detail, the share of low-detail keyframes, stillness and quiet seconds;
+- whether the index was enough, or why it took a closer look;
+- each decoded frame;
+- the junk score with each sign that added to it;
+- the tags, the matching rules and the verdict.
 
-Blur is judged against the camera photos of your last analysis, and a sent copy is matched against its looked-at
-camera videos. Without an analysis the log says those two can't be judged.
+The frames shown under the verdict are the ones the check decoded. When the index was enough, frames spread over the
+video are shown just for you to look at.
 
 ## Tests
 
-- `VideoCheckTest` (30 checks, in CI, including the Lab video verdict on a stand-in platform) uses frames drawn in the test, not real videos. It covers:
-  - measuring the frames;
-  - what the measurements mean;
-  - matching sent copies;
-  - the three rules in the plan;
-  - the piles and their plain reasons;
-  - the real frame rate in the compression estimate;
-  - saving and reading back.
-- The test copy of the old engine (`LegacyUnitBuilder`) and the random phones in `RulesEquivalenceTest` have the video
-  rules too. The rules and the old engine give the same options on all of them.
+`VideoCheckTest` (37 checks, in CI) writes small MP4 indexes:
+- a pocket recording;
+- a normal clip;
+- an encoder that pads keyframes.
+
+It then checks:
+- what the index reader finds in them;
+- that a normal clip needs no decoding;
+- that a pocket recording decodes 3 frames and scores 90;
+- that rich frames keep a video the index found suspicious;
+- the score's signs and the sent-copy match;
+- the rule and the pile;
+- that the results survive a save, and the Lab verdict.
+
+`LegacyUnitBuilder` and the random phones in `RulesEquivalenceTest` follow the same rules, and the results are
+identical.

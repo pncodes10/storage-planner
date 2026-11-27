@@ -216,10 +216,10 @@ final class VideoLabScreen extends Screen {
     private LinearLayout frames;
 
     /** Shows the frames the check looked at (same times as VideoCheck.AT), two per row, each with its time. */
-    private void showFrames(final java.util.List<Bitmap> bm, final long durMs) {
+    private void showFrames(final java.util.List<Bitmap> bm, final long[] atUs, boolean checked) {
         frames.removeAllViews();
         if (bm.isEmpty()) return;
-        Ui.add(frames, Ui.text(a, "The frames the check looked at", 14, Ui.text, true), 0);
+        Ui.add(frames, Ui.text(a, checked ? "The frames the check looked at" : "Frames from the video (the index was enough: the check decoded none)", 14, Ui.text, true), 0);
         int w = (a.getResources().getDisplayMetrics().widthPixels - dp(28) - dp(8)) / 2;
         LinearLayout row = null;
         for (int i = 0; i < bm.size(); i++) {
@@ -231,7 +231,7 @@ final class VideoLabScreen extends Screen {
             iv.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
             iv.setBackgroundColor(0xFF000000);
             if (bm.get(i) != null) iv.setImageBitmap(bm.get(i));
-            String label = String.format(Locale.US, "Frame %d at %.1f s", i + 1, durMs * com.storageplanner.core.VideoCheck.AT[i] / 1000.0);
+            String label = String.format(Locale.US, "Frame %d at %.1f s", i + 1, atUs[i] / 1e6);
             iv.setContentDescription(label + (bm.get(i) == null ? ", could not be decoded" : ""));
             col.addView(iv, new LinearLayout.LayoutParams(w, -2));
             col.addView(Ui.text(a, label + (bm.get(i) == null ? " (not decoded)" : ""), 12, Ui.text2, false));
@@ -241,16 +241,22 @@ final class VideoLabScreen extends Screen {
         }
     }
 
-    /** The frames at VideoCheck.AT, small, for showing (null where one cannot be decoded). */
-    private static java.util.List<Bitmap> grab(String path, long durMs) {
+    private static long[] spread(long durMs) {
+        long[] at = new long[com.storageplanner.core.VideoCheck.AT.length];
+        for (int i = 0; i < at.length; i++) at[i] = (long) (durMs * 1000L * com.storageplanner.core.VideoCheck.AT[i]);
+        return at;
+    }
+
+    /** The frames at these times (microseconds), small, for showing (null where one cannot be decoded). */
+    private static java.util.List<Bitmap> grab(String path, long[] times) {
         java.util.List<Bitmap> l = new ArrayList<Bitmap>();
-        if (durMs <= 0) return l;
+        if (times.length == 0 || times[times.length - 1] <= 0 && times.length > 1) return l;
         MediaMetadataRetriever m = new MediaMetadataRetriever();
         try {
             m.setDataSource(path);
-            for (double at : com.storageplanner.core.VideoCheck.AT) {
+            for (long at : times) {
                 Bitmap b = null;
-                try { b = m.getFrameAtTime((long) (durMs * 1000L * at), MediaMetadataRetriever.OPTION_CLOSEST_SYNC); } catch (Throwable ignored) {}
+                try { b = m.getFrameAtTime(at, MediaMetadataRetriever.OPTION_CLOSEST_SYNC); } catch (Throwable ignored) {}
                 if (b != null && Math.max(b.getWidth(), b.getHeight()) > 640) {
                     double s = 640.0 / Math.max(b.getWidth(), b.getHeight());
                     Bitmap sc = Bitmap.createScaledBitmap(b, (int) Math.round(b.getWidth() * s), (int) Math.round(b.getHeight() * s), true);
@@ -283,12 +289,14 @@ final class VideoLabScreen extends Screen {
                 AndroidPlatform pf = new AndroidPlatform(a.getApplicationContext());
                 try {
                     FileItem f = com.storageplanner.core.Lab.videoItem(src.getPath(), srcName, src.length(), src.lastModified(), ar);
-                    com.storageplanner.core.Lab.videoVerdict(pf, f, phone, rules, System.currentTimeMillis(), new com.storageplanner.core.Lab.Out() {
+                    long[] used = com.storageplanner.core.Lab.videoVerdict(pf, f, phone, rules, System.currentTimeMillis(), new com.storageplanner.core.Lab.Out() {
                         public void line(String s) { VideoLabScreen.this.line(s); }
                     });
-                    final java.util.List<Bitmap> bm = grab(src.getPath(), f.durationMs);
-                    final long dur = f.durationMs;
-                    ui.post(new Runnable() { public void run() { showFrames(bm, dur); } });
+                    final boolean checked = used != null && used.length > 0;
+                    long[] at = checked ? used : spread(f.durationMs);
+                    final java.util.List<Bitmap> bm = grab(src.getPath(), at);
+                    final long[] fat = at;
+                    ui.post(new Runnable() { public void run() { showFrames(bm, fat, checked); } });
                 } catch (Throwable t) {
                     line("  failed: " + t);
                     LabLog.error(a, "video verdict", t);
