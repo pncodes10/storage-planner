@@ -97,6 +97,9 @@ final class VideoLabScreen extends Screen {
         verdict.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { verdict(); } });
         add(root, verdict, 6);
         runButtons.add(verdict);
+        frames = new LinearLayout(a);                       // the five frames the verdict looked at, filled after a run
+        frames.setOrientation(LinearLayout.VERTICAL);
+        add(root, frames, 8);
 
         Ui.add(root, Ui.heading(a, "Compress (test copies)", 17), 14);
         addRun(root, "All five levels", true, null);
@@ -210,6 +213,56 @@ final class VideoLabScreen extends Screen {
     private static final String[] AREAS = {"camera", "wa_video", "wa_sent_video", "download", "movies"};
     private static final String[] AREA_LABEL = {"camera video", "WhatsApp video (received)", "WhatsApp video (sent)", "download", "Movies folder"};
     private int area;
+    private LinearLayout frames;
+
+    /** Shows the frames the check looked at (same times as VideoCheck.AT), two per row, each with its time. */
+    private void showFrames(final java.util.List<Bitmap> bm, final long durMs) {
+        frames.removeAllViews();
+        if (bm.isEmpty()) return;
+        Ui.add(frames, Ui.text(a, "The frames the check looked at", 14, Ui.text, true), 0);
+        int w = (a.getResources().getDisplayMetrics().widthPixels - dp(28) - dp(8)) / 2;
+        LinearLayout row = null;
+        for (int i = 0; i < bm.size(); i++) {
+            if (i % 2 == 0) { row = Ui.row(a); row.setGravity(android.view.Gravity.TOP); add(frames, row, 6); }
+            LinearLayout col = new LinearLayout(a);
+            col.setOrientation(LinearLayout.VERTICAL);
+            android.widget.ImageView iv = new android.widget.ImageView(a);
+            iv.setAdjustViewBounds(true);
+            iv.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+            iv.setBackgroundColor(0xFF000000);
+            if (bm.get(i) != null) iv.setImageBitmap(bm.get(i));
+            String label = String.format(Locale.US, "Frame %d at %.1f s", i + 1, durMs * com.storageplanner.core.VideoCheck.AT[i] / 1000.0);
+            iv.setContentDescription(label + (bm.get(i) == null ? ", could not be decoded" : ""));
+            col.addView(iv, new LinearLayout.LayoutParams(w, -2));
+            col.addView(Ui.text(a, label + (bm.get(i) == null ? " (not decoded)" : ""), 12, Ui.text2, false));
+            LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(w, -2);
+            if (i % 2 == 0) cl.rightMargin = dp(8);
+            row.addView(col, cl);
+        }
+    }
+
+    /** The frames at VideoCheck.AT, small, for showing (null where one cannot be decoded). */
+    private static java.util.List<Bitmap> grab(String path, long durMs) {
+        java.util.List<Bitmap> l = new ArrayList<Bitmap>();
+        if (durMs <= 0) return l;
+        MediaMetadataRetriever m = new MediaMetadataRetriever();
+        try {
+            m.setDataSource(path);
+            for (double at : com.storageplanner.core.VideoCheck.AT) {
+                Bitmap b = null;
+                try { b = m.getFrameAtTime((long) (durMs * 1000L * at), MediaMetadataRetriever.OPTION_CLOSEST_SYNC); } catch (Throwable ignored) {}
+                if (b != null && Math.max(b.getWidth(), b.getHeight()) > 640) {
+                    double s = 640.0 / Math.max(b.getWidth(), b.getHeight());
+                    Bitmap sc = Bitmap.createScaledBitmap(b, (int) Math.round(b.getWidth() * s), (int) Math.round(b.getHeight() * s), true);
+                    if (sc != b) b.recycle();
+                    b = sc;
+                }
+                l.add(b);
+            }
+        } catch (Throwable ignored) {
+        } finally { try { m.release(); } catch (Throwable ignored) {} }
+        return l;
+    }
 
     private void verdict() {
         if (busy) return;
@@ -219,6 +272,7 @@ final class VideoLabScreen extends Screen {
         spinner.setVisibility(View.VISIBLE);
         shown.setLength(0);
         out.setText("Looking at the video…");
+        frames.removeAllViews();
         final File src = video; final String srcName = name; final String ar = AREAS[area];
         final java.util.List<FileItem> phone = Session.hasResults() ? new ArrayList<FileItem>(Session.result.files) : null;
         final com.storageplanner.core.RuleSet rules = RulesStore.get(a).copy();
@@ -232,6 +286,9 @@ final class VideoLabScreen extends Screen {
                     com.storageplanner.core.Lab.videoVerdict(pf, f, phone, rules, System.currentTimeMillis(), new com.storageplanner.core.Lab.Out() {
                         public void line(String s) { VideoLabScreen.this.line(s); }
                     });
+                    final java.util.List<Bitmap> bm = grab(src.getPath(), f.durationMs);
+                    final long dur = f.durationMs;
+                    ui.post(new Runnable() { public void run() { showFrames(bm, dur); } });
                 } catch (Throwable t) {
                     line("  failed: " + t);
                     LabLog.error(a, "video verdict", t);
