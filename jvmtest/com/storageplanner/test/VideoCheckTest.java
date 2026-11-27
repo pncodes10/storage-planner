@@ -65,6 +65,15 @@ public final class VideoCheckTest {
         check("a black clip: every frame dark, nothing moves, no faces", rd.frames == 5 && rd.dark == 5 && rd.motion == 0 && rd.people == 0);
         List<int[]> grey = new ArrayList<int[]>();
         for (int i = 0; i < 5; i++) grey.add(flat(140));
+        List<int[]> night = new ArrayList<int[]>();                       // lights in the dark: low mean, wide spread
+        for (int i = 0; i < 5; i++) {
+            int[] p = flat(8);
+            Random rr = new Random(40 + i);
+            for (int k = 0; k < 600; k++) { int x = rr.nextInt(W - 20), y = rr.nextInt(H - 10); for (int dy = 0; dy < 6; dy++) for (int dx = 0; dx < 14; dx++) p[(y + dy) * W + x + dx] = 0xFFF0E080; }
+            night.add(p);
+        }
+        VideoCheck.Result rn = VideoCheck.measure(night, W, H, new int[5]);
+        check("a night clip with lights in it is not dark (only a pocket or a covered lens is)", rn.dark == 0);
         check("a covered lens (bright but flat) counts as dark", VideoCheck.measure(grey, W, H, new int[5]).dark == 5);
         List<int[]> moving = new ArrayList<int[]>();
         for (int i = 0; i < 5; i++) moving.add(busy(i));
@@ -187,7 +196,7 @@ public final class VideoCheckTest {
         FileItem lv = Lab.videoItem("/sd/x.mp4", "VID_20261101.mp4", 25000000, NOW - 3 * DAY, "camera");
         Lab.videoVerdict(fake, lv, r.files, RuleSet.defaults(), NOW, new Lab.Out() { public void line(String x) { log.append(x).append('\n'); } });
         if (a.length > 0) System.out.println(log);
-        check("Lab video verdict: frames, tags, the matching rule and the verdict", log.indexOf("frame 5 at") > 0 && log.indexOf("DARK") > 0
+        check("Lab video verdict: frames, tags, the matching rule and the verdict", log.indexOf("frame 5 at") > 0 && (log.indexOf("DARK") > 0 || log.indexOf("FLAT") > 0)
                 && log.indexOf("taken by mistake YES") > 0 && log.indexOf("rules: \"Video clip taken by mistake\"") > 0 && log.indexOf("VERDICT: SUGGEST DELETING") > 0
                 && lv.type.equals("mp4") && lv.rel.startsWith("DCIM/Camera/"));
 

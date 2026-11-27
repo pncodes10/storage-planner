@@ -18,13 +18,18 @@ public final class VideoCheck {
     private VideoCheck() {}
 
     /** Bump when what is measured changes: older measurements are then redone. */
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;            // 2: a dark frame must also be nearly featureless (night videos are not dark)
     /** Frames looked at, at these points of the clip (a little in from both ends: the first frames are often black). */
     public static final double[] AT = {0.08, 0.3, 0.5, 0.7, 0.92};
     /** Long edge of a decoded frame: the same as pictures get for their sharpness (ImageFeatures). */
     public static final int EDGE = 1024;
-    /** A frame is dark below this mean brightness (0..255). */
+    /** A frame is dark below this mean brightness (0..255) when it also shows almost nothing (spread under DARK_SPREAD). */
     public static final double DARK_MEAN = 35;
+    /**
+     * Brightness spread under which a dark frame shows nothing: a pocket or a covered lens. Night scenes with lights in
+     * them (a lit dashboard, a street at night, a concert) are dark on average but spread 40 and more, and are kept.
+     */
+    public static final double DARK_SPREAD = 20;
     /** A frame is flat (lens covered, a wall, the inside of a pocket) below this brightness spread. */
     public static final double FLAT_SPREAD = 10;
     /** Mean bits that change between the fingerprints of neighbouring frames, below which nothing happens in the clip. */
@@ -84,7 +89,7 @@ public final class VideoCheck {
             r.frames++;
             int[] l = luma(px);
             double[] ms = meanSpread(l);
-            if (ms[0] < DARK_MEAN || ms[1] < FLAT_SPREAD) r.dark++;
+            if (darkFrame(ms)) r.dark++;
             double sh = ImageFeatures.sharpness(l, w, h);
             if (sh > r.sharpMax) r.sharpMax = sh;
             long hs = ImageFeatures.phash(l, w, h);
@@ -101,6 +106,9 @@ public final class VideoCheck {
         r.people = r.frames > 0 && facesKnown ? people : -1;
         return r;
     }
+
+    /** {mean, spread} of a frame that shows nothing: dark and almost featureless, or flat (a covered lens, a wall). */
+    static boolean darkFrame(double[] ms) { return ms[0] < DARK_MEAN && ms[1] < DARK_SPREAD || ms[1] < FLAT_SPREAD; }
 
     /** Writes the result onto the file. */
     public static void record(FileItem f, Result r) {
@@ -248,7 +256,7 @@ public final class VideoCheck {
                 double[] ms = meanSpread(l);
                 long hs = ImageFeatures.phash(l, dims[0], dims[1]);
                 o.line(String.format(java.util.Locale.US, "  frame %d at %4.1f s: brightness %3.0f, spread %4.1f%s, sharpness %6.1f, faces %s%s",
-                        i + 1, at[i] / 1e6, ms[0], ms[1], ms[0] < DARK_MEAN ? " DARK" : ms[1] < FLAT_SPREAD ? " FLAT" : "",
+                        i + 1, at[i] / 1e6, ms[0], ms[1], ms[1] < FLAT_SPREAD ? " FLAT" : darkFrame(ms) ? " DARK" : ms[0] < DARK_MEAN ? " (night: dark but shows things)" : "",
                         ImageFeatures.sharpness(l, dims[0], dims[1]), faces[i] < 0 ? "?" : String.valueOf(faces[i]),
                         havePrev ? ", changed " + ImageFeatures.hamming(prevHash, hs) + " of 64 bits" : ""));
                 prevHash = hs; havePrev = true;

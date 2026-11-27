@@ -10,7 +10,7 @@ The five frames are taken at 8%, 30%, 50%, 70% and 92% of the clip, with a long 
 
 | Measurement | How |
 |---|---|
-| Dark or covered frames | The mean brightness is under 35, or the spread is under 10 (a covered lens, a pocket, a wall) |
+| Dark or covered frames | Dark (mean brightness under 35) and almost featureless (spread under 20), or flat (spread under 10: a covered lens, a wall). Night scenes with lights in them are dark on average but have a wide spread, so they do not count |
 | Movement | The average number of fingerprint bits that change between neighbouring frames; under 3 means nothing happens |
 | Sharpness | The sharpest frame, on the same scale as photos, compared with your camera photos: under 25% of their median means blurred all through |
 | Faces | The most faces in any one frame (the photo face detector) |
