@@ -64,6 +64,13 @@ public interface Platform {
     /** Why mirage() gave null, for the Lab; null when it worked. */
     String mirageNote();
 
+    /**
+     * Gets Mirage ready for a scan: on the phone, downloads its model first when it is not there yet (one time, about
+     * 22 MB, on Wi-Fi or mobile data), reporting progress through pr. Returns null when Mirage can run, else why not, in
+     * words for the user (no model and no connection, not a 64-bit ARM phone, cancelled...).
+     */
+    String prepareMirage(Scanner.Progress pr);
+
     /** Image dimensions without decoding pixels: dims receives {w, h}. Returns false if unreadable. */
     boolean imageSize(String path, int[] dims);
 

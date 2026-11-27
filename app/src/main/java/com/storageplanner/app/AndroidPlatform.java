@@ -33,6 +33,7 @@ import com.storageplanner.core.SceneNet;
 import com.storageplanner.core.Faces;
 import com.storageplanner.core.FileItem;
 import com.storageplanner.core.Platform;
+import com.storageplanner.core.Scanner;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -471,6 +472,24 @@ public final class AndroidPlatform implements Platform {
     }
 
     public String mirageNote() { return MirageEngine.why(); }
+
+    /** Before the analysis's Mirage pass: downloads the model the first time (progress in the analysis's own bar). */
+    public String prepareMirage(final Scanner.Progress pr) {
+        if (MirageModel.installed(ctx)) return null;
+        if (!MirageEngine.supported()) return "Mirage does not run on this phone (only 64-bit ARM phones)";
+        String err = MirageModel.downloadNow(ctx, new MirageModel.Sink() {
+            int lastMb = -1;
+            public void progress(long done, long total) {
+                int mb = (int) (done / 1000000);
+                if (mb == lastMb) return;
+                lastMb = mb;
+                pr.update("Downloading the Mirage model, MB (one time)", mb, (int) Math.max(1, (total + 999999) / 1000000));
+            }
+            public boolean cancelled() { return pr.cancelled(); }
+        });
+        if (err == null) return null;
+        return pr.cancelled() ? "cancelled" : "the Mirage model could not be downloaded: " + err;
+    }
 
     /** Stops the text reader, if it was started. */
     public void close() { if (ocr != null) { ocr.close(); ocr = null; } }

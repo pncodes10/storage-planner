@@ -16,7 +16,7 @@ import java.nio.charset.Charset;
  * One picture at a time: the engine is not shared between threads.
  */
 final class MirageEngine {
-    static final String NOT_DOWNLOADED = "the Mirage model is not downloaded yet (22 MB, one time): download it at the top of the Algorithm Lab";
+    static final String NOT_DOWNLOADED = "the Mirage model is not downloaded yet (22 MB, one time): the next analysis downloads it, or use the button at the top of the Algorithm Lab";
 
     private static boolean tried, loaded;
     private static String note;
@@ -52,6 +52,12 @@ final class MirageEngine {
         if (r != 0) { note = r == -2 ? "the bundled file is not a Mirage vision model" : "the engine could not load the model: " + lastError(); return false; }
         loaded = true;
         return true;
+    }
+
+    /** Whether this phone can run the engine at all (it is built for 64-bit ARM only), so a download is worth it. */
+    static boolean supported() {
+        for (String abi : android.os.Build.SUPPORTED_64_BIT_ABIS) if ("arm64-v8a".equals(abi)) return true;
+        return false;
     }
 
     /** Forgets an earlier failure, so a model that has just been downloaded (or removed) is picked up. */

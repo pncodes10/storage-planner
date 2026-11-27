@@ -17,11 +17,12 @@ import java.util.Locale;
  * pinned SHA-256 (tools/mirage/files.sha256) and kept in the app's private files folder (getFilesDir()/mirage).
  * That folder survives app updates, so a new version finds the model already there; only a release that pins a
  * different model (MODEL_SHA256 changes) downloads it again, and the old copy is then removed.
+ * The first analysis downloads it by itself (Wi-Fi or mobile data), and the Lab has a button for it.
  * Nothing about the phone or its files is sent; the request is one plain GET for a fixed address.
  */
 final class MirageModel {
     static final String FILE = "mirage.cact";
-    static final long SIZE = 22L << 20;       // about; only used for the progress bar and the free-space check
+    static final long SIZE = 21_600_000L;     // about (decimal MB, as the app shows it); only for progress and the free-space check
     private static final String MODEL_REV = "76c1e9e53381aca8fc3843c636216c96ff220122";
     static final String MODEL_SHA256 = "4249a0f7515272ff76b9414bec17d7e7daf84b15b66c7fb4f17fce1e66f9f237";
     static final String URL_MODEL = "https://huggingface.co/Cactus-Compute/mirage/resolve/" + MODEL_REV + "/" + FILE;
@@ -64,22 +65,48 @@ final class MirageModel {
         if (fs != null) for (File f : fs) f.delete();
     }
 
-    static void download(final Context ctx, final Listener l) {
-        if (busy) return;
-        busy = true;
+    /** Progress of a download, called on the downloading thread. */
+    interface Sink { void progress(long done, long total); boolean cancelled(); }
+
+    private static final Object LOCK = new Object();
+
+    /** The Lab's Download button: in the background, progress and the result on the UI thread. */
+    static void download(final Context ctx, final Listener l) {     // while the analysis is downloading, this waits for it
         final Context app = ctx.getApplicationContext();
         new Thread(new Runnable() {
             public void run() {
-                String err = null;
-                try { fetch(app, l); }
-                catch (Throwable t) { err = "Download failed (" + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName()) + ")."; }
-                final String fe = err;
-                AnalysisState.UI.post(new Runnable() { public void run() { busy = false; if (fe == null) MirageEngine.reset(); l.done(fe); } });
+                final long[] last = {0};
+                final String err = downloadNow(app, new Sink() {
+                    public void progress(final long done, final long total) {
+                        long now = System.currentTimeMillis();
+                        if (now - last[0] < 300) return;
+                        last[0] = now;
+                        AnalysisState.UI.post(new Runnable() { public void run() { l.progress(done, total); } });
+                    }
+                    public boolean cancelled() { return false; }
+                });
+                AnalysisState.UI.post(new Runnable() { public void run() { l.done(err); } });
             }
         }, "mirage-download").start();
     }
 
-    private static void fetch(Context app, final Listener l) throws Exception {
+    /**
+     * Downloads the model on this thread unless it is already saved (the analysis calls this before its Mirage pass, so
+     * the first analysis fetches it; on Wi-Fi or mobile data). One download at a time: a second caller waits for the
+     * first and then finds the model there. Returns null when the model is saved, else why not, in words.
+     */
+    static String downloadNow(Context ctx, Sink s) {
+        Context app = ctx.getApplicationContext();
+        synchronized (LOCK) {
+            if (installed(app)) return null;
+            busy = true;
+            try { fetch(app, s); MirageEngine.reset(); return null; }
+            catch (Throwable t) { return "download failed (" + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName()) + ")"; }
+            finally { busy = false; }
+        }
+    }
+
+    private static void fetch(Context app, Sink l) throws Exception {
         File d = dir(app); d.mkdirs();
         if (d.getUsableSpace() < SIZE + (8L << 20)) throw new Exception("not enough free space for the 22 MB model");
         File part = new File(d, FILE + ".part"), out = file(app);
@@ -97,15 +124,12 @@ final class MirageModel {
             InputStream in = c.getInputStream();
             FileOutputStream fo = new FileOutputStream(part);
             try {
-                byte[] buf = new byte[1 << 16]; int n; long done = 0, lastPost = 0;
+                byte[] buf = new byte[1 << 16]; int n; long done = 0;
                 while ((n = in.read(buf)) > 0) {
+                    if (l.cancelled()) throw new Exception("cancelled");
                     fo.write(buf, 0, n); md.update(buf, 0, n); done += n;
                     if (done > MAX) throw new Exception("file too large");
-                    long now = System.currentTimeMillis();
-                    if (now - lastPost > 300) {
-                        lastPost = now; final long dn = done;
-                        AnalysisState.UI.post(new Runnable() { public void run() { l.progress(dn, total); } });
-                    }
+                    l.progress(done, total);
                 }
             } finally { fo.close(); }
             if (!hex(md.digest()).equals(MODEL_SHA256)) { part.delete(); throw new Exception("checksum does not match, the file was not kept"); }

@@ -24,11 +24,14 @@ them). This also applies to work that was pushed earlier but never released:
      When a change is mixed, take the highest level it contains. The version must be newer than the one in
      `app/build.gradle`. Run it on the branch being tested with a clean tree. It commits "Release X.Y.Z", tags
      `vX.Y.Z` and pushes branch and tag, which starts the Release workflow (`.github/workflows/release.yml`).
+     Cloud sessions can't push tags (the push gets HTTP 403): there, run `tools/release.sh X.Y.Z --no-push`, push the
+     branch, delete the local tag, and start the Release workflow by hand on that branch (GitHub MCP `actions_run_trigger`,
+     workflow `release.yml`); it creates the tag `vX.Y.Z` itself.
    - wait for the Release run to finish and confirm the release `vX.Y.Z` exists with its `.apk` and `.apk.sha256`.
      Give the owner the release link.
    - skip the release (APK link only) when the change is not something to test on the phone, and say so.
 3. **Test it yourself on the phone with Phone Pilot** once the release is published. Use the
-   `phone-pilot-test` skill (Phone Pilot app on the owner's Android phone: Wi-Fi bridge and Cloudflare tunnel):
+   `phone-pilot-test` skill (Phone Pilot app on the owner's Android phone, in relay mode: ask for its pairing code):
    open Storage Planner, use its update check (Settings > Check for updates) and install the new version, confirm the
    installed version is `X.Y.Z`, then exercise the new or fixed functionality, read the app's logs, and fix anything
    that fails (then repeat from step 1 with a new patch version).

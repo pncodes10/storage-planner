@@ -187,7 +187,7 @@ final class Sorter {
         }
         } finally { if (ex != null) ex.shutdownNow(); }
         scenes(pf, pr, pics, opt);
-        mirage(pf, pr, pics, opt, r.now);
+        r.mirageNote = mirage(pf, pr, pics, opt, r.now);
     }
 
     /** Decodes one picture and reads its text; null when it cannot be decoded or there is no reader. */
@@ -216,14 +216,19 @@ final class Sorter {
     /**
      * Pass 4: Mirage (AlgorithmV3) on each sorted picture, for the mirage_* tags and v3's category: screenshots, chat
      * images, downloads and other pictures first, then camera photos, newest first within each, within opt.mirageBudgetMs;
-     * the rest is looked at in the next scan. One picture at a time (the engine is not shared between threads). Stops at
-     * once on a phone where Mirage cannot run (not 64-bit ARM, or not in this build): those tags then stay unknown.
+     * the rest is looked at in the next scan. One picture at a time (the engine is not shared between threads). First
+     * gets Mirage ready (Platform.prepareMirage: the phone downloads the model the first time). Stops at once when Mirage
+     * cannot run (no model and no connection, not 64-bit ARM): those tags then stay unknown, and the rules that need
+     * Mirage hold back. Returns why Mirage did not look at the pictures, for the user; null when it ran or had nothing to do.
      */
-    static void mirage(final Platform pf, Scanner.Progress pr, List<FileItem> pics, final Scanner.Options opt, long now) {
-        if (opt.mirageBudgetMs <= 0) return;
+    static String mirage(final Platform pf, Scanner.Progress pr, List<FileItem> pics, final Scanner.Options opt, long now) {
+        if (opt.mirageBudgetMs <= 0) return null;
         List<FileItem> todo = new ArrayList<FileItem>();
         for (FileItem f : pics) if (mirageWorthy(f)) todo.add(f);
-        if (todo.isEmpty()) return;
+        if (todo.isEmpty()) return null;
+        String notReady;
+        try { notReady = pf.prepareMirage(pr); } catch (Throwable t) { notReady = "Mirage could not start: " + t; }
+        if (notReady != null) return notReady;
         Collections.sort(todo, new Comparator<FileItem>() {
             public int compare(FileItem a, FileItem b) {
                 boolean ca = PhotoCategory.isCamera(a), cb = PhotoCategory.isCamera(b);
@@ -241,7 +246,7 @@ final class Sorter {
         final List<java.util.concurrent.Future<int[][]>> ahead = new ArrayList<java.util.concurrent.Future<int[][]>>();
         try {
         for (int k = 0; k < todo.size(); k++) {
-            if (pr.cancelled() || System.currentTimeMillis() > end) return;
+            if (pr.cancelled() || System.currentTimeMillis() > end) return null;
             pr.update("Looking at pictures with Mirage", k + 1, todo.size());
             FileItem f = todo.get(k);
             int[] dims = new int[4];
@@ -257,7 +262,7 @@ final class Sorter {
                     }));
                 }
                 int[][] got;
-                try { got = ahead.get(k).get(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return; } catch (Exception e) { got = null; }
+                try { got = ahead.get(k).get(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); return null; } catch (Exception e) { got = null; }
                 if (got == null) continue;
                 px = got[0]; dims = got[1];
                 ahead.set(k, null);
@@ -267,7 +272,10 @@ final class Sorter {
             if (px == null) continue;
             String json;
             try { json = pf.mirage(px, dims[2], dims[3], Mirage.OPTIONS); } catch (Throwable t) { json = null; }
-            if (json == null) { if (!worked) return; continue; }     // not on this phone: stop; one picture failing: go on
+            if (json == null) {                                       // not on this phone: stop; one picture failing: go on
+                if (!worked) { String why = pf.mirageNote(); return why != null ? why : "Mirage could not run"; }
+                continue;
+            }
             worked = true;
             try {
                 Mirage.Answer a = Mirage.read(json);
@@ -278,6 +286,7 @@ final class Sorter {
             } catch (RuntimeException ignored) {}
         }
         } finally { if (ex != null) ex.shutdownNow(); }
+        return null;
     }
 
     private static void copyMirage(FileItem p, FileItem f) {

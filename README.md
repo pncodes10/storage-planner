@@ -237,7 +237,7 @@ The overview has a **Your pictures** section. It shows every category with its c
 | Tickets & passes | Text: PNR, train no., boarding pass, gate, seat, booking ID; for shows and events also M-Ticket, ticket(s), venue, date & time, "booking is confirmed" (any 3 of these words); the travel or show date is read | Yes, once the date has passed by a week (or 6 months after saving if no date is found) |
 | Chat screenshots | Screenshot with chat layout and many timestamps | No |
 | Greetings & forwards | A greeting ("Good morning", "Happy Diwali" …) read on an image received in a chat | Yes, if older than a week |
-| Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp (a small sharp subject on a blurred background does not count as shaken) | Yes |
+| Accidental shots | Almost completely dark, featureless, or shaken so badly that nothing is sharp (a small sharp subject on a blurred background does not count as shaken) | Yes, once Mirage has looked and sees nothing in it |
 | ID documents (sensitive) | Text: Government of India (also "Government of" with the country cut off), Aadhaar, PAN, passport, licence, VID; Aadhaar and PAN number patterns; the gender written after its Indian-language word ("पुरुष / MALE"). A card held up in a photo is read when it has a face on it (see below) | **Never.** Other suggestions are removed too; only an identical extra copy may go |
 | Graphics & images | Flat, drawn or designed images (memes, posters, cartoons) that are not screenshots or camera photos; with Mirage also comics and captioned collages | Yes (new), if received in a chat or saved in Download or Pictures more than a week ago: "Old meme or forward". Never camera photos, screenshots or what you sent |
 | Other screenshots | Everything else from screenshots | No |
@@ -587,10 +587,13 @@ it also checks that Java gives Python's smile probabilities and aesthetic scores
 2.0). In one pass it names the kind of scene, the objects in a picture and reads its text (Latin script only). It runs on
 the phone through the Cactus engine, linked into a small native library (`lib/arm64-v8a/libmirage.so`), so it works on
 64-bit ARM phones only; on others the Lab says it is not available. Nothing leaves the phone. The 22 MB model is **not
-packed in the APK** (an update is a few MB): the Lab and v2 vs v3 show a box with a *Download Mirage model* button. It
-fetches the one pinned file from Hugging Face (fixed revision, SHA-256 checked, only that request) into the app's private
-files folder, which an app update keeps, so a new version reuses it. Until it is downloaded, the Mirage buttons say so, and
-a scan simply skips Mirage.
+packed in the APK** (an update is a few MB). **The first analysis downloads it by itself** (one time, on Wi-Fi or mobile
+data), shown in the analysis's own progress ("Downloading the Mirage model, MB (one time) 12 of 22"), then carries on.
+It fetches the one pinned file from Hugging Face (fixed revision, SHA-256 checked, only that request) into the app's
+private files folder, which an app update keeps, so a new version reuses it. The Lab and v2 vs v3 also show a box to
+download it now or remove it (frees 22 MB; the next analysis downloads it again). If the download fails (no connection),
+the analysis carries on without Mirage and its "Done" message says so; the rules that need Mirage (accidental shots,
+photos taken to remember something) then hold back rather than suggest more deletions, and the next analysis tries again.
 
 In the Lab you can try it on any picture (below). Since 1.11 the analysis also runs it and turns what it sees into tags
 for the rules ("Mirage in the decision engine", below); the picture category the plan uses stays the app's own (v2).
@@ -707,8 +710,10 @@ except an identical copy, a sent copy (the original is kept) or a worse shot of 
 (A keep rule takes away every suggestion, compressing included.)
 
 **Built-in rules that use Mirage:**
-- **Accidental shot** now also needs `mirage_sees is no`: a picture the pixel checks call an accidental shot is not
-  suggested when Mirage clearly sees people, things or text in it. Where Mirage has not looked, the rule works as before.
+- **Accidental shot** needs `mirage_looked is yes` AND `mirage_sees is no` (1.13): a picture the pixel checks call an
+  accidental shot is suggested only once Mirage has looked and sees no people, things or text in it. Where Mirage has not
+  looked yet (model not downloaded, the scan's Mirage time ran out, or a phone it can't run on) the rule holds back.
+  Rules saved by an earlier version with this rule unchanged get the new conditions; a rule you edited keeps yours.
 - **Old photo taken to remember something** (new, delete, your call): `reference_photo is yes` AND `age_days > 60`.
 - **People seen by Mirage: never delete** (new, protect): `mirage_people >= 1` AND NOT `mirage_style in drawn, collage`
   (drawn people in comics and memes are not protected).
