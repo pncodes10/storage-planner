@@ -72,10 +72,11 @@ final class AnalysisRunner {
                 public void looking(FileItem f) { AnalysisState.looking = describe(f); }
                 public void checkpoint(Scanner.Result r, int fd, int ft, long bd, long bt) {
                     AnalysisState.filesDone = fd; AnalysisState.filesTotal = ft; AnalysisState.bytesDone = bd; AnalysisState.bytesTotal = bt;
+                    // the first checkpoint comes before any file is looked at: fd is then the files decided from the list alone
                     if (r.resumed > 0 && AnalysisState.resumeNote == null)
-                        AnalysisState.resumeNote = "Carrying on where you paused: " + Piles.count(r.resumed, "file") + " already done "
-                                + (r.resumed == 1 ? "is" : "are") + " taken over" + (r.gone > 0 ? ", and " + Piles.count(r.gone, "file")
-                                + " you removed " + (r.gone == 1 ? "is" : "are") + " gone from the list." : ".");
+                        AnalysisState.resumeNote = String.format(java.util.Locale.US, "Carrying on where you paused: %,d of %,d files were already done",
+                                fd + r.resumed, ft) + (r.gone > 0 ? ", and " + Piles.count(r.gone, "file") + " no longer on the phone "
+                                + (r.gone == 1 ? "is" : "are") + " gone from the list." : ".");
                     try { snapshot(app, r, sdk); } catch (Throwable ignored) {}
                     AnalysisState.live();
                     // what is done is saved now and then, so a crash or a killed app loses little: it opens as a paused plan

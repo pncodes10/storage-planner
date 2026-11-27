@@ -35,7 +35,7 @@ A file not looked at yet is **pending**: it gets no suggestion at all, and none 
 - **Pause** (on the progress screen, or in the notification) stops after the files being looked at. It saves what is
   done and opens the plan made from it. A file cut short is done again next time.
 - **Carry on** (on Clean up, or on the start screen) lists the files again. The files done are taken over and the
-  files you removed are gone from the list, so it goes on with the next biggest file.
+  files no longer on the phone are gone from the list, so it goes on with the next biggest file.
 - **✕** asks what to do:
   - **Stop and keep the plan**: the same as pause.
   - **Throw it away**: the saved results are deleted, and the next analysis starts from the beginning.

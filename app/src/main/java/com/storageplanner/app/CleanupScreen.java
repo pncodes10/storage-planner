@@ -56,7 +56,9 @@ public final class CleanupScreen extends Screen {
         play = Ui.button(a, "▶  Carry on", false);
         play.setTextSize(16);
         play.setContentDescription("Carry on analysing the files not done yet");
-        play.setOnClickListener(new View.OnClickListener() { public void onClick(View v) { a.carryOn(); } });
+        play.setOnClickListener(new View.OnClickListener() { public void onClick(View v) {
+            if (AnalysisState.running) a.showProgress(); else a.carryOn();
+        } });
         LinearLayout buttons = Ui.row(a);
         LinearLayout.LayoutParams pl = new LinearLayout.LayoutParams(-2, dp(56)); pl.rightMargin = dp(10);
         buttons.addView(play, pl);
@@ -84,16 +86,17 @@ public final class CleanupScreen extends Screen {
         long removed = t.saved(FinalPlan.DELETE), smaller = t.saved(FinalPlan.COMPRESS);
         hero(t.freed(), removed, smaller, Session.used(), fin);
         String paused = AnalysisScreen.pausedLine(a);
-        if (paused != null) {
+        if (paused != null || AnalysisState.running) {
             int waiting = Session.ub == null ? 0 : Session.ub.det.waiting.size();
             LinearLayout band = new LinearLayout(a);
             band.setOrientation(LinearLayout.VERTICAL);
             band.setBackground(Ui.round(Ui.removeTint, dp(14)));
             band.setPadding(dp(14), dp(12), dp(14), dp(12));
-            band.addView(Ui.text(a, (AnalysisState.running ? "Analysing · " : "") + paused, 15, Ui.removeInk, true));
-            band.addView(Ui.text(a, "This plan covers only those. The rest are left alone until you carry on."
+            band.addView(Ui.text(a, AnalysisState.running ? "Analysing in the background" : paused, 15, Ui.removeInk, true));
+            band.addView(Ui.text(a, AnalysisState.running ? (paused != null ? "This is the plan from when you paused (" + paused.substring(paused.indexOf('·') + 2)
+                    + ")." : "This is the plan from your last analysis.") + " It is brought up to date when the analysis pauses or finishes." : "This plan covers only those. The rest are left alone until you carry on."
                     + (waiting > 0 ? " " + Piles.count(waiting, "group") + " of similar shots wait for photos not looked at yet." : ""), 13, Ui.removeInk, false));
-            band.setContentDescription(paused + ". This plan covers only those.");
+            band.setContentDescription(AnalysisState.running ? "Analysing in the background." : paused + ". This plan covers only those.");
             LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-1, -2); bl.topMargin = dp(10);
             content.addView(band, bl);
         }
@@ -143,7 +146,9 @@ public final class CleanupScreen extends Screen {
         });
 
         go.setVisibility(t.freed() > 0 ? View.VISIBLE : View.INVISIBLE);
-        play.setVisibility(paused != null && !AnalysisState.running ? View.VISIBLE : View.GONE);
+        play.setText(AnalysisState.running ? "See progress" : "▶  Carry on");
+        play.setContentDescription(AnalysisState.running ? "See the analysis progress" : "Carry on analysing the files not done yet");
+        play.setVisibility(paused != null || AnalysisState.running ? View.VISIBLE : View.GONE);
         go.setText(fin == 0 ? "Clean up " + Report.size(t.freed()) : "Continue clean-up · " + Report.size(t.freed()));
     }
 
