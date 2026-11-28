@@ -47,3 +47,21 @@ similar copies of a photo, without the rules, tags or risk tiers getting in the 
 - that reasons are plain sentences.
 
 It runs in CI alongside `FinalPlanTest`.
+
+## Reviewing a pile (2.1)
+
+- **Order:** a pile's page shows the biggest saving first. Sets of copies are ordered by what the whole set frees, and
+  files inside each block are ordered biggest first. A kept file counts by what it would free.
+- **Reviewed:**
+  - A file is **reviewed** once its row has been on screen on its pile's page, or once you tapped it. "Keep all" counts
+    as reviewing the whole pile.
+  - A bar at the top shows how much of the pile is reviewed.
+  - The marks are kept by pile and path (`Piles.reviewKey`). A file that moves to another pile in a new analysis needs a
+    new look.
+- **Scroll position:** each pile's page remembers where you were. You land there again after other pages or a restart
+  (`ReviewStore`).
+- **Only reviewed files are cleaned up:**
+  - Clean up shows "Reviewed N%: X of Y ready to clean up", and each pile row shows its percentage.
+  - The Clean up button frees only the reviewed amount.
+  - The confirm step removes reviewed files only, and lists the rest as "not reviewed yet: left as they are".
+  - The Move to bin button on the file-type page follows the same rule.

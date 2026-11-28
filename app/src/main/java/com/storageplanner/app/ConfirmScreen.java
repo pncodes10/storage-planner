@@ -40,9 +40,13 @@ public final class ConfirmScreen extends Screen {
     @Override public void refresh() {
         if (content == null) return;
         content.removeAllViews();
+        // only the files you have reviewed (scrolled past on their pile's page) are cleaned up
         List<FinalPlan.Entry> all = PlanStore.entries(a);
-        FinalPlan.Totals t = FinalPlan.totals(all, null);
-        final List<FileItem> remove = PlanStore.files(a, FinalPlan.DELETE);
+        List<FinalPlan.Entry> ready = ReviewStore.ready(a);
+        FinalPlan.Totals t = FinalPlan.totals(ready, null), whole = FinalPlan.totals(all, null);
+        final List<FileItem> remove = new java.util.ArrayList<FileItem>();
+        for (FinalPlan.Entry e : ready) if (FinalPlan.DELETE.equals(e.action)) remove.add(e.file);
+        int unreviewed = whole.count(FinalPlan.DELETE) + whole.count(FinalPlan.COMPRESS) - t.count(FinalPlan.DELETE) - t.count(FinalPlan.COMPRESS);
         long[] apps = CleanupScreen.unusedApps();
         long total = t.freed() + apps[1];
         Ui.add(content, Ui.heading(a, "Ready to free up " + Report.size(total), 26), 4);
@@ -62,6 +66,9 @@ public final class ConfirmScreen extends Screen {
         if (t.count(FinalPlan.COMPRESS) > 0)
             line(box, "↘", Ui.SMALLER, Piles.count(t.count(FinalPlan.COMPRESS), "file") + " to make smaller",
                     "not available yet: they stay as they are for now", "about " + Report.size(t.saved(FinalPlan.COMPRESS)), lines++ > 0);
+        if (unreviewed > 0)
+            line(box, "◷", Ui.text2, Piles.count(unreviewed, "file") + " not reviewed yet",
+                    "left as they are: scroll through their pile first", Report.size(whole.freed() - t.freed()), lines++ > 0);
         if (lines == 0) Ui.add(box, Ui.text(a, "Nothing is set to be removed.", 15, Ui.text, false), 0);
         LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-1, -2); bl.topMargin = dp(18);
         content.addView(box, bl);

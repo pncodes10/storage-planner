@@ -1,10 +1,13 @@
 package com.storageplanner.core;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The plan in plain words for the "Clean up" screens: each file goes into one pile (copies, memes and forwards, blurry
@@ -135,6 +138,12 @@ public final class Piles {
         public long freed() { long b = 0; for (FinalPlan.Entry e : files) b += e.saved(); return b; }
         public String title() { return Piles.title(id); }
 
+        /** How many of its files you have looked at (scrolled past or tapped) on its page. */
+        public int reviewed(Set<String> keys) { int n = 0; for (FinalPlan.Entry e : files) if (Piles.reviewed(e, keys)) n++; return n; }
+
+        /** What its reviewed files free: the part of the pile a clean-up acts on. */
+        public long readyFreed(Set<String> keys) { long b = 0; for (FinalPlan.Entry e : files) if (Piles.reviewed(e, keys)) b += e.saved(); return b; }
+
         /** "412 photos · the best copy is kept". */
         public String subtitle() {
             int n = acting();
@@ -156,6 +165,48 @@ public final class Piles {
         for (Pile p : m.values()) if (!p.files.isEmpty()) out.add(p);
         return out;
     }
+
+    // ------------------------------------------------------------------ review: only files you have looked at are acted on
+
+    /**
+     * The key a file is marked reviewed under: its pile and its path. A file that moves to another pile (a new analysis
+     * suggests something else for it) needs a new look. Null for a file in no pile (nothing happens to it).
+     */
+    public static String reviewKey(FinalPlan.Entry e) {
+        String p = of(e);
+        return p == null ? null : p + "\t" + e.file.rel;
+    }
+
+    public static boolean reviewed(FinalPlan.Entry e, Set<String> keys) {
+        String k = reviewKey(e);
+        return k != null && keys.contains(k);
+    }
+
+    /** The files a clean-up acts on: removed or made smaller, and reviewed on their pile's page. */
+    public static List<FinalPlan.Entry> ready(List<FinalPlan.Entry> all, Set<String> keys) {
+        List<FinalPlan.Entry> out = new ArrayList<FinalPlan.Entry>();
+        for (FinalPlan.Entry e : all) if (!FinalPlan.KEEP.equals(e.action) && reviewed(e, keys)) out.add(e);
+        return out;
+    }
+
+    /** Biggest saving first (what removing or shrinking it frees; its size when it is kept), then the bigger file. */
+    public static final Comparator<FinalPlan.Entry> BY_SAVING = new Comparator<FinalPlan.Entry>() {
+        public int compare(FinalPlan.Entry x, FinalPlan.Entry y) {
+            long a = worth(x), b = worth(y);
+            if (a != b) return a > b ? -1 : 1;
+            if (x.file.size != y.file.size) return x.file.size > y.file.size ? -1 : 1;
+            return x.file.rel.compareTo(y.file.rel);
+        }
+    };
+
+    /** What a file is worth to the clean-up: what it frees, or what it would free if you put it back (a kept file). */
+    public static long worth(FinalPlan.Entry e) {
+        if (!FinalPlan.KEEP.equals(e.action)) return e.saved();
+        return e.suggested != null ? e.suggested.saved : 0;
+    }
+
+    /** Sorts a pile's files, biggest saving first. */
+    public static void sortBySaving(List<FinalPlan.Entry> l) { Collections.sort(l, BY_SAVING); }
 
     /** "photo", "video" or "file", whichever fits every file. */
     static String noun(List<FinalPlan.Entry> l) {

@@ -8,7 +8,9 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.AbsListView;
 import android.widget.ListView;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import com.storageplanner.core.FileItem;
@@ -32,7 +34,9 @@ import java.util.Map;
 public final class PileScreen extends Screen {
     private final String pile;
     private ListView list;
-    private TextView sub;
+    private TextView sub, reviewText;
+    private ProgressBar reviewBar;
+    private boolean restored;
     private Button allBtn;
     private final List<Object[]> rows = new ArrayList<Object[]>();    // {"h", title, FileItem focus} {"t", List<Entry>, FileItem best} {"f", Entry}
     private List<FinalPlan.Entry> files = new ArrayList<FinalPlan.Entry>();
@@ -61,6 +65,14 @@ public final class PileScreen extends Screen {
         banner.setBackground(Ui.round(Piles.SMALLER.equals(pile) ? Ui.smallerTint : Ui.removeTint, dp(14)));
         banner.setPadding(dp(14), dp(12), dp(14), dp(12));
         Ui.add(top, banner, 10);
+        // how much of the pile you have looked at: only those files are cleaned up
+        reviewBar = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
+        reviewBar.setMax(1000);
+        reviewBar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams rb = new LinearLayout.LayoutParams(-1, -2); rb.topMargin = dp(10);
+        top.addView(reviewBar, rb);
+        reviewText = Ui.add(top, Ui.text(a, "", 13, Ui.text2, false), 2);
+        reviewText.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         if (Piles.COPIES.equals(pile)) waiting(top);
         root.addView(top);
 
@@ -70,6 +82,10 @@ public final class PileScreen extends Screen {
         list.setClipToPadding(false);
         adapter = new Adapter();
         list.setAdapter(adapter);
+        list.setOnScrollListener(new AbsListView.OnScrollListener() {
+            public void onScrollStateChanged(AbsListView v, int state) { if (state == SCROLL_STATE_IDLE) savePosition(); }
+            public void onScroll(AbsListView v, int first, int visible, int total) { seen(first, visible); }
+        });
         root.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
 
         LinearLayout bar = Ui.row(a);
@@ -79,7 +95,7 @@ public final class PileScreen extends Screen {
             public void onClick(View v) {
                 boolean anyActing = false;
                 for (FinalPlan.Entry e : files) if (!FinalPlan.KEEP.equals(e.action)) anyActing = true;
-                if (anyActing) choose(a, files, FinalPlan.KEEP);
+                if (anyActing) { choose(a, files, FinalPlan.KEEP); ReviewStore.mark(a, files); }   // a decision on every file
                 else {
                     List<FinalPlan.Entry> back = new ArrayList<FinalPlan.Entry>();
                     for (FinalPlan.Entry e : files) back.add(e);
@@ -159,6 +175,44 @@ public final class PileScreen extends Screen {
         layout();
         adapter.notifyDataSetChanged();
         updateSummary();
+        if (!restored) {                                  // back where you left this pile, even after other pages or a restart
+            restored = true;
+            int[] pos = ReviewStore.position(a, pile);
+            if (pos[0] > 0 && pos[0] < rows.size()) list.setSelectionFromTop(pos[0], pos[1]);
+        }
+    }
+
+    @Override public void onHide() { savePosition(); }
+
+    private void savePosition() {
+        if (list == null || list.getChildCount() == 0) return;
+        View c = list.getChildAt(0);
+        ReviewStore.setPosition(a, pile, list.getFirstVisiblePosition(), c.getTop() - list.getPaddingTop());
+    }
+
+    /** The rows on screen are reviewed: every file in them. */
+    @SuppressWarnings("unchecked")
+    private void seen(int first, int visible) {
+        if (rows.isEmpty()) return;
+        List<FinalPlan.Entry> l = new ArrayList<FinalPlan.Entry>();
+        for (int i = Math.max(0, first); i < Math.min(rows.size(), first + visible); i++) {
+            Object[] r = rows.get(i);
+            if ("t".equals(r[0])) l.addAll((List<FinalPlan.Entry>) r[1]);
+            else if ("f".equals(r[0])) l.add((FinalPlan.Entry) r[1]);
+        }
+        if (ReviewStore.mark(a, l)) updateReview();
+    }
+
+    private void updateReview() {
+        if (reviewBar == null) return;
+        int n = 0;
+        java.util.Set<String> keys = ReviewStore.keys(a);
+        for (FinalPlan.Entry e : files) if (Piles.reviewed(e, keys)) n++;
+        int t = files.size();
+        reviewBar.setProgress(t == 0 ? 1000 : (int) (1000L * n / t));
+        reviewText.setText(n >= t ? "✓ All " + Piles.count(t, "file") + " reviewed: they are cleaned up as shown."
+                : "Reviewed " + n + " of " + Piles.count(t, "file") + ". Only files you have scrolled past are cleaned up: keep scrolling to the end.");
+        reviewText.setTextColor(n >= t ? Ui.keepInk : Ui.text2);
     }
 
     private void updateSummary() {
@@ -169,11 +223,16 @@ public final class PileScreen extends Screen {
                 + (files.size() > n ? " · " + Piles.count(files.size() - n, "file") + " kept" : ""));
         allBtn.setText(n > 0 ? "Keep all" : smaller ? "Make all smaller" : "Remove all");
         allBtn.setVisibility(files.isEmpty() ? View.GONE : View.VISIBLE);
+        updateReview();
     }
 
-    /** Sets of copies first (the copy that stays leading), then single pictures, then other files. */
+    /**
+     * Biggest saving first: each set of copies (the copy that stays leading) by what the whole set frees, the single
+     * pictures and the other files each by their biggest, and the files inside each of these biggest first.
+     */
     private void layout() {
         rows.clear();
+        Collections.sort(files, Piles.BY_SAVING);
         Map<String, List<FinalPlan.Entry>> sets = new LinkedHashMap<String, List<FinalPlan.Entry>>();
         List<FinalPlan.Entry> single = new ArrayList<FinalPlan.Entry>(), other = new ArrayList<FinalPlan.Entry>();
         for (FinalPlan.Entry e : files) {
@@ -184,25 +243,43 @@ public final class PileScreen extends Screen {
             if (s == null) sets.put(k, s = new ArrayList<FinalPlan.Entry>());
             s.add(e);
         }
+        // blocks: {worth, kind, data}; shown biggest worth first
+        List<Object[]> blocks = new ArrayList<Object[]>();
         for (Map.Entry<String, List<FinalPlan.Entry>> s : sets.entrySet()) {
             List<FinalPlan.Entry> l = new ArrayList<FinalPlan.Entry>();
             FinalPlan.Entry keeper = PlanStore.entry(a, s.getKey());
             if (keeper != null && !s.getValue().contains(keeper)) l.add(keeper);
             l.addAll(s.getValue());
             if (l.size() < 2) { single.addAll(s.getValue()); continue; }
-            FileItem focus = s.getValue().get(0).file;
-            Group g = Group.of(focus);
-            String head = g != null ? g.relation() : Piles.count(l.size(), "copy").replace("copys", "copies");
-            rows.add(new Object[]{"h", head + " · " + Report.day(focus.mtime), g != null ? focus : null});
-            tiles(l, keeper != null ? keeper.file : null);
+            long w = 0;
+            for (FinalPlan.Entry e : s.getValue()) w += Piles.worth(e);
+            blocks.add(new Object[]{w, "set", l, keeper});
         }
-        if (!single.isEmpty()) {
-            if (!sets.isEmpty()) rows.add(new Object[]{"h", Piles.count(single.size(), "other photo"), null});
-            tiles(single, null);
-        }
-        if (!other.isEmpty()) {
-            if (!rows.isEmpty()) rows.add(new Object[]{"h", Piles.count(other.size(), "file"), null});
-            for (FinalPlan.Entry e : other) rows.add(new Object[]{"f", e});
+        Collections.sort(single, Piles.BY_SAVING);
+        if (!single.isEmpty()) blocks.add(new Object[]{Piles.worth(single.get(0)), "single", single, null});
+        if (!other.isEmpty()) blocks.add(new Object[]{Piles.worth(other.get(0)), "other", other, null});
+        Collections.sort(blocks, new java.util.Comparator<Object[]>() {
+            public int compare(Object[] x, Object[] y) { return Long.compare((Long) y[0], (Long) x[0]); }
+        });
+        boolean anySet = !sets.isEmpty();
+        for (Object[] b : blocks) {
+            @SuppressWarnings("unchecked") List<FinalPlan.Entry> l = (List<FinalPlan.Entry>) b[2];
+            if ("set".equals(b[1])) {
+                FinalPlan.Entry keeper = (FinalPlan.Entry) b[3];
+                FileItem focus = l.get(keeper != null && l.get(0) == keeper && l.size() > 1 ? 1 : 0).file;
+                Group g = Group.of(focus);
+                String head = g != null ? g.relation() : Piles.count(l.size(), "copy").replace("copys", "copies");
+                long frees = 0;
+                for (FinalPlan.Entry e : l) frees += e.saved();
+                rows.add(new Object[]{"h", head + " · " + Report.day(focus.mtime) + (frees > 0 ? " · frees " + Report.size(frees) : ""), g != null ? focus : null});
+                tiles(l, keeper != null ? keeper.file : null);
+            } else if ("single".equals(b[1])) {
+                if (anySet || !rows.isEmpty()) rows.add(new Object[]{"h", Piles.count(l.size(), "other photo"), null});
+                tiles(l, null);
+            } else {
+                if (!rows.isEmpty() || blocks.size() > 1) rows.add(new Object[]{"h", Piles.count(l.size(), "file"), null});
+                for (FinalPlan.Entry e : l) rows.add(new Object[]{"f", e});
+            }
         }
     }
 
@@ -212,6 +289,7 @@ public final class PileScreen extends Screen {
 
     private void flip(FinalPlan.Entry e) {
         choose(a, Collections.singletonList(e), FinalPlan.KEEP.equals(e.action) ? acting() : FinalPlan.KEEP);
+        ReviewStore.mark(a, Collections.singletonList(e));
         adapter.notifyDataSetChanged();
         updateSummary();
     }

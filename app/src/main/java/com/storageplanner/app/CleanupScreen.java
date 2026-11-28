@@ -84,7 +84,10 @@ public final class CleanupScreen extends Screen {
         FinalPlan.Totals t = FinalPlan.totals(all, null);
         long fin = PlanStore.finalized(a);
         long removed = t.saved(FinalPlan.DELETE), smaller = t.saved(FinalPlan.COMPRESS);
+        java.util.Set<String> keys = ReviewStore.keys(a);
+        final FinalPlan.Totals ready = FinalPlan.totals(Piles.ready(all, keys), null);
         hero(t.freed(), removed, smaller, Session.used(), fin);
+        reviewCard(ready.freed(), t.freed());
         String paused = AnalysisScreen.pausedLine(a);
         if (paused != null || AnalysisState.running) {
             int waiting = Session.ub == null ? 0 : Session.ub.det.waiting.size();
@@ -114,7 +117,7 @@ public final class CleanupScreen extends Screen {
         if (anyRemove || apps[0] > 0) section("Will be removed");
         for (final Piles.Pile p : piles) {
             if (Piles.SMALLER.equals(p.id)) continue;
-            pileRow(p.title(), p.subtitle(), p.freed(), p.files, null, new View.OnClickListener() {
+            pileRow(p.title(), p.subtitle() + reviewed(p, keys), p.freed(), p.files, null, new View.OnClickListener() {
                 public void onClick(View v) { a.push(new PileScreen(a, p.id)); }
             });
         }
@@ -125,7 +128,7 @@ public final class CleanupScreen extends Screen {
         for (final Piles.Pile p : piles) {
             if (!Piles.SMALLER.equals(p.id)) continue;
             section("Made smaller, look the same");
-            pileRow("Videos, photos and music", p.subtitle(), p.freed(), p.files, null, new View.OnClickListener() {
+            pileRow("Videos, photos and music", p.subtitle() + reviewed(p, keys), p.freed(), p.files, null, new View.OnClickListener() {
                 public void onClick(View v) { a.push(new PileScreen(a, p.id)); }
             });
         }
@@ -146,10 +149,13 @@ public final class CleanupScreen extends Screen {
         });
 
         go.setVisibility(t.freed() > 0 ? View.VISIBLE : View.INVISIBLE);
+        go.setEnabled(ready.freed() > 0);
+        go.setAlpha(ready.freed() > 0 ? 1f : 0.5f);
         play.setText(AnalysisState.running ? "See progress" : "▶  Carry on");
         play.setContentDescription(AnalysisState.running ? "See the analysis progress" : "Carry on analysing the files not done yet");
         play.setVisibility(paused != null || AnalysisState.running ? View.VISIBLE : View.GONE);
-        go.setText(fin == 0 ? "Clean up " + Report.size(t.freed()) : "Continue clean-up · " + Report.size(t.freed()));
+        go.setText(ready.freed() == 0 ? "Review a pile to clean up" : fin == 0 ? "Clean up " + Report.size(ready.freed()) + " reviewed"
+                : "Continue clean-up · " + Report.size(ready.freed()));
     }
 
     /** {count, bytes} of the installed apps the rules would uninstall or archive. */
@@ -202,6 +208,38 @@ public final class CleanupScreen extends Screen {
                 + (fin != 0 ? " The plan is finished." : ""));
         c.setFocusable(true);
         content.addView(c, new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    /** " · 40% reviewed" / " · ✓ reviewed" for a pile row. */
+    private static String reviewed(Piles.Pile p, java.util.Set<String> keys) {
+        int n = p.reviewed(keys), t = p.files.size();
+        return n >= t ? " · ✓ reviewed" : " · " + (t == 0 ? 0 : 100L * n / t) + "% reviewed";
+    }
+
+    /**
+     * How much of the plan you have reviewed: only files you have looked at on their pile's page are cleaned up, so the
+     * clean-up frees this much now, the rest once you have scrolled through the other piles.
+     */
+    private void reviewCard(long ready, long total) {
+        LinearLayout c = Ui.card(a);
+        c.setBackground(Ui.round(Ui.surface, dp(20)));
+        c.setPadding(dp(20), dp(14), dp(20), dp(14));
+        int pct = total <= 0 ? 100 : (int) Math.min(100, 100L * ready / total);
+        c.addView(Ui.text(a, pct >= 100 ? "✓ Everything reviewed" : "Reviewed " + pct + "%: " + Report.size(ready) + " of " + Report.size(total)
+                + " ready to clean up", 15, pct >= 100 ? Ui.keepInk : Ui.text, true));
+        android.widget.ProgressBar bar = new android.widget.ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
+        bar.setMax(100);
+        bar.setProgress(pct);
+        bar.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(-1, -2); bl.topMargin = dp(6);
+        c.addView(bar, bl);
+        if (pct < 100)
+            Ui.add(c, Ui.text(a, "Only the files you have scrolled past in a pile are cleaned up. Open each pile and scroll to its end to add the rest.",
+                    13, Ui.text2, false), 6);
+        c.setContentDescription("Reviewed " + pct + " percent: " + Report.size(ready) + " of " + Report.size(total) + " ready to clean up.");
+        c.setFocusable(true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.topMargin = dp(10);
+        content.addView(c, lp);
     }
 
     private void addSeg(LinearLayout bar, int color, long b, long whole) {

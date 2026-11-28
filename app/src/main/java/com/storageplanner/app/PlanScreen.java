@@ -239,14 +239,19 @@ public final class PlanScreen extends Screen {
     }
 
     private void confirmTrash() {
-        final List<FileItem> files = PlanStore.files(a, FinalPlan.DELETE);
-        if (files.isEmpty()) return;
+        // only reviewed files (scrolled past on their pile's page in Clean up) are moved to the bin
+        final List<FileItem> files = new java.util.ArrayList<FileItem>();
+        for (FinalPlan.Entry e : ReviewStore.ready(a)) if (FinalPlan.DELETE.equals(e.action)) files.add(e.file);
+        int waiting = PlanStore.files(a, FinalPlan.DELETE).size() - files.size();
+        if (files.isEmpty()) { a.toast("Review the piles in Clean up first: only files you have scrolled past are removed."); return; }
         if (!TrashAction.supported()) { a.toast(TrashAction.why()); return; }
         long b = 0; for (FileItem f : files) b += f.size;
         new AlertDialog.Builder(a).setTitle("Move to Recycle bin?")
                 .setMessage("Move " + count(files.size(), "file") + " (" + Report.size(b) + ") to your phone's Recycle bin?\n\n"
                         + "They stay in the bin for 30 days and can be restored from there (Files, Google Photos or your gallery's bin). "
-                        + "After 30 days Android removes them for good.\n\nAndroid will ask you to confirm next.")
+                        + "After 30 days Android removes them for good."
+                        + (waiting > 0 ? "\n\n" + count(waiting, "file") + " not reviewed yet stay: scroll through their pile in Clean up first." : "")
+                        + "\n\nAndroid will ask you to confirm next.")
                 .setPositiveButton("Move to bin", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface d, int w) { TrashAction.start(a, files); }
                 }).setNegativeButton("Cancel", null).show();

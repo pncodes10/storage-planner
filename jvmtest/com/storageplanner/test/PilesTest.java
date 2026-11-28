@@ -77,6 +77,26 @@ public final class PilesTest {
         check("every removal pile has a title and banner", Piles.title(Piles.JUNK).length() > 0 && Piles.banner(Piles.COPIES).contains("best"));
         check("counts", Piles.count(1, "photo").equals("1 photo") && Piles.count(1234, "file").equals("1,234 files"));
 
+        // ---- review: only files looked at on their pile's page are cleaned up
+        java.util.Set<String> seen = new HashSet<String>();
+        check("nothing reviewed: nothing ready to clean up", Piles.ready(l, seen).isEmpty());
+        check("a file in no pile has no review key", Piles.reviewKey(find(l, doc)) != null && Piles.reviewKey(eCam).startsWith(Piles.SMALLER + "\t"));
+        seen.add(Piles.reviewKey(eDup));
+        List<FinalPlan.Entry> ready = Piles.ready(l, seen);
+        check("a reviewed copy is ready, the unreviewed rest is not", ready.size() == 1 && ready.get(0) == eDup);
+        Piles.Pile copies = pile(Piles.build(l), Piles.COPIES);
+        check("the pile counts what is reviewed and what that frees", copies.reviewed(seen) == 1 && copies.readyFreed(seen) == eDup.saved());
+        seen.add(Piles.reviewKey(eMeme));
+        check("a reviewed file you keep is not cleaned up", !Piles.ready(l, seen).contains(eMeme));
+        check("the key is the pile and the path: a mark from another pile does not count",
+                !Piles.reviewed(eCam, new HashSet<String>(Arrays.asList(Piles.COPIES + "\t" + cam.rel))));
+        // biggest saving first: removed or smaller by what it frees, a kept one by what it would free
+        List<FinalPlan.Entry> order = new java.util.ArrayList<FinalPlan.Entry>(Arrays.asList(eMeme, eDup, eCam));
+        Piles.sortBySaving(order);
+        boolean sorted = true;
+        for (int i = 1; i < order.size(); i++) sorted &= Piles.worth(order.get(i - 1)) >= Piles.worth(order.get(i));
+        check("sorted by saving, biggest first (" + Piles.worth(order.get(0)) + " first)", sorted && Piles.worth(eMeme) == eMeme.suggested.saved);
+
         // ---- the Settings limits on pictures (Scanner.trimPictures)
         java.util.List<FileItem> fs = new java.util.ArrayList<FileItem>();
         for (int i = 0; i < 6; i++) fs.add(file("DCIM/Camera/IMG_" + i + ".jpg", "camera", "jpeg", (i + 1) * 50000, 10 - i));   // 50..300 KB, IMG_5 newest
